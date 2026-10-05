@@ -67,8 +67,8 @@ Requirements: Docker Engine and Docker Compose, or a single host with Python 3.1
 These components are tracked on the project's public forks and have independent provenance from the Omega PR #358 runtime image:
 
 - Omega adapter (read-only DAS retrieval skill) on `ktfh-claw/OmegaClaw-Core`, branch `omega-das-integration`, commit `fee679c3702e76c5c64f1a3113b3904346e1bb5c`.
-- Alternative baseline adapter commit `0ba45fd` plus an nginx startup fix (`bd6638a`, equivalent to [PR #365](https://github.com/singnet/Omega/issues/365) nginx discussion).
-- DAS deployment lane on `ktfh-claw/das-toolbox`, branches `omega-das-integration` (commit `d9e136d`) and `omega-das-write-integration` (commit `bc9bf10`).
+- Alternative baseline adapter commit `0ba45fd210c8e44699e56e4afe3832e424214226` plus an nginx startup fix (`bd6638a3fd492348da5d32291a163c6dad1a95f0`; documented in [issue #365](https://github.com/singnet/Omega/issues/365) context but not a fix PR).
+- DAS deployment lane on `ktfh-claw/das-toolbox`, branches `omega-das-integration` (commit `d9e136d0f2a9094e0243364db34cb31c8dc1ed25`) and `omega-das-write-integration` (commit `bc9bf1002e34a8f7dfbd82f69452dfe75d49c5ea`).
 
 See [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md) for the build/test steps, deployment checks, and limitations.
 
