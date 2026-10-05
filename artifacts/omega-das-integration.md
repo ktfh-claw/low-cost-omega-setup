@@ -42,7 +42,7 @@ DAS is a self-contained multi-service system. The deployment lane runs only the 
 
 Before considering the lane usable:
 
-1. `docker compose --profile operator off up -d` — operator profile must **not** start under normal `up`.
+1. `docker compose up -d` — the operator profile must **not** start; if it does, inspect `docker compose ps`.
 2. `docker compose` policy tests: every network `internal=true`; every container reports empty `PortBindings`.
 3. Preflight: rendered `config/config.json` matches the digest-only `.env` inputs; all image digests resolve at build time.
 4. Services: MongoDB/Redis report healthy; query engine and attention broker report their own peers; no listener binds to the host.
