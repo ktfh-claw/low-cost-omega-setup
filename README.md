@@ -1,127 +1,84 @@
-# Low-cost Omega setup
+# Low-cost Omega Setup
 
-An experiment in running [Omega](https://github.com/singnet/Omega) as a continuously operating agent on privately controlled infrastructure using a free or very low-cost LLM route.
+Documentation for running a continuously operating [Omega](https://github.com/singnet/Omega) agent on private infrastructure with a low-cost LLM route, and for attaching a bounded, read-only [Distributed AtomSpace (DAS)](https://github.com/singnet/das-toolbox) retrieval layer for RAG-style tool use.
 
-The concrete example campaign was an autonomous solver for the [ARC-AGI benchmark](https://github.com/fchollet/ARC-AGI). We built an [ARC-AGI REST API](https://github.com/ktfh-claw/ARC-AGI) so Omega could repeatedly:
+The canonical campaign label for the run documented here is **RKGI**; the evaluated task benchmark and artifacts themselves are ARC-AGI-labelled. A separate, self-contained status report is in [`artifacts/status-2026-10-05.md`](artifacts/status-2026-10-05.md).
 
-1. wake without a new human message;
-2. read an authorized ARC evaluation task;
-3. infer and validate the transformation from the training examples;
-4. submit a bounded answer through a capability-limited proxy; and
-5. continue with later tasks until the campaign was stopped.
+---
 
-This repository is a field report, not a working deployment guide. The low-cost campaign was not reliable enough to publish as a reproducible setup. The useful result is a documented set of integration blockers, partial successes, and upstream dependencies.
+## Document map
 
-## Intended architecture
+| Document | Purpose |
+|---|---|
+| `README.md` (this file) | High-level overview, provenance, and links. |
+| [`artifacts/experiment-report.md`](artifacts/experiment-report.md) | Full experiment report: test matrix, failures, safety controls, retest criteria. |
+| [`artifacts/status-2026-10-05.md`](artifacts/status-2026-10-05.md) | Separate status report for the RKGI-ARC campaign conclusion and the final resumed task. |
+| [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md) | Reproducible notes for the Omega agent + read-only DAS integration lane. |
 
-```text
-Omega on owned hardware
-  ├─ scheduled autonomous wake loop
-  ├─ OpenRouter provider
-  │    ├─ openrouter/free router, or
-  │    └─ an explicitly selected free model
-  ├─ arc-read / arc-submit Omega skills
-  └─ host-only capability proxy
-         ├─ task-scoped authorization and expiry
-         ├─ strict payload validation
-         ├─ duplicate prevention and three-attempt limit
-         └─ ARC-AGI REST API
-```
-
-The REST API was intentionally separated from Omega. Evaluation outputs remained server-side, the API token was never exposed to the agent, and malformed candidates were rejected before consuming an attempt.
-
-## What was tried
-
-### 1. Custom Omega deployment with Telegram
-
-The first deployment used a custom Omega fork, Telegram as the communication channel, a custom OpenRouter-free adapter, local embeddings, persistent memory, and `arc-read` / `arc-submit` integrations.
-
-Interactive tool use worked, but the campaign stopped after the human turn. A Telegram-specific guard intended to suppress unsolicited chat messages also suppressed wake-triggered inference. The container looked healthy and continued incrementing loop iterations while making no provider or ARC calls.
-
-This was reported upstream as [singnet/Omega issue #365](https://github.com/singnet/Omega/issues/365). Subsequent investigation established that the original failure was substantially caused by the old/custom deployment and its loop changes, rather than proving that stock Omega could not wake autonomously.
-
-### 2. Stock Omega v0.1.19 with `openrouter/free`
-
-We redeployed the official `singularitynet/omega:v0.1.19` image without Telegram or core/provider/loop modifications. ARC tools and the durable campaign objective were loaded through Omega's plugin and prompt-extension mechanisms.
-
-The default configured model, `z-ai/glm-5.2`, returned HTTP 402 because no paid OpenRouter credit was available. We therefore used Omega's supported `model=openrouter/free` override.
-
-This test proved that stock Omega can perform scheduled background inference without inbound messages. It repeatedly made wake-driven provider calls and valid autonomous `arc-read` calls.
-
-The blocker moved from scheduling to model/protocol reliability. `openrouter/free` routed requests to different free models, which produced inconsistent outputs:
-
-- valid Omega line commands;
-- empty or null content after spending the output budget on reasoning;
-- prose or native-tool-call markup that stock Omega could not consume;
-- malformed JSON for `arc-submit`; and
-- repeated reads instead of acting on the previous tool result.
-
-Strict local validation prevented malformed submissions from consuming ARC attempts.
-
-### 3. Explicit free model
-
-We also tested explicit free models to remove router variability. `stealth/space-bunny-alpha` was the strongest text-protocol candidate observed:
-
-- it produced parser-compatible `arc-read` and `arc-submit` commands;
-- Omega autonomously solved ARC task `009d5c81` correctly on the first attempt;
-- it submitted a structurally valid but incorrect answer for `00dbd492`; and
-- it later produced malformed, truncated, repeated, or incorrect candidates for another task.
-
-This demonstrated the full end-to-end path, but not reliable continuous operation.
-
-### 4. Prompt and feedback tightening
-
-We tried a stricter textual command contract, durable startup objectives, high-recency “next required action” instructions, local candidate validation, and detailed validator feedback. These changes sometimes converted an invalid candidate into a structurally valid submission, but did not make behavior consistently correct or continuous.
-
-### 5. Loop changes and configuration experiments
-
-During diagnosis we tried or evaluated:
-
-- allowing wake-triggered inference independently of a new Telegram message;
-- initializing and resetting wake state such as `nextWakeAt` and the loop budget;
-- recovering from a loop counter that could fall below zero and permanently fail a `> 0` guard;
-- running headless with `commchannel=websocket` and no inbound endpoint; and
-- numeric CLI overrides such as `maxFeedback=12000`.
-
-The stock headless wake path worked in observed runs. Some modified/rebuilt loop deployments were fragile or entered tight no-inference loops because wake state was missing or the loop budget was not reset. Numeric command-line tuning also failed in the tested stock invocation with:
+## Architecture overview
 
 ```text
-Arithmetic: '12000'/0 is not a function
+Omega agent on private infrastructure
+  ├─ scheduled autonomous wake loop (no inbound message required)
+  ├─ ASI:One (asi1) model via PR #358 native tools API
+  ├─ arc-read / arc-submit Omega skills (ARC-AGI-labelled)
+  └─ optional read-only DAS retrieval adapter
+       ├─ bounded, opt-in Python skill (advertised only when enabled)
+       ├─ private JSON read proxy on an internal Docker network
+       └─ DAS services: MongoDB, Redis, attention broker, query engine
+            (internal backend/client networks, no host ports published)
 ```
 
-We reverted unstable changes rather than presenting them as a solution.
+A host-side capability proxy separates evaluation state from the agent. It enforces task-scoped authorization and expiry, strict `{outputs, reasoning}` payload validation, rectangular 1–30×30 integer grids, duplicate-candidate rejection, and an atomic three-attempt budget, failing closed when `/tasks/next` and the authorized task disagree.
 
-## Root technical limitation
+## Campaign conclusion
 
-Stock Omega v0.1.19 describes tools in the textual system prompt and asks the model to emit line commands. It consumes `message.content`; it does not send an OpenAI-compatible `tools` schema or consume `message.tool_calls`.
+The campaign included three earlier verified ARC task solves during the broader run. A final resumed task, `05a7bcf2`, was an **incomplete run**: 0/3 attempts used, no submission, no solve. ASI:One tool calling continued to work without auth, quota, or rate-limit failures, but reasoning/output budget exhaustion and a failed task-to-Python handoff prevented completion. There is no evidence of material native MeTTa execution. See [the status report](artifacts/status-2026-10-05.md) for the distinct historical versus final-run accounting.
 
-That creates avoidable failure modes: prose instead of commands, XML/tool markup, malformed embedded JSON, truncation, parser ambiguity, and loss of tool-call/result association between turns. A model being advertised as “tool capable” does not help if Omega does not use the native tool-call API.
+## Current conclusions
 
-Upstream [PR #358](https://github.com/singnet/Omega/pull/358), **“Use tools API to pass the list of tools to the LLM,”** is intended to address much of this integration problem. Omega maintainers referenced it directly in issue #365 and requested retesting after it is merged.
+- Stock Omega scheduled wake works headlessly and can perform autonomous provider calls without a new human message.
+- ASI:One (`asi1`) works out of the box with PR #358 native tool calls (`provider=ASIOne model=asi1 finish_reason=tool_calls`).
+- Free-router LLM output is variable and not reliable as a continuous solver.
+- PR #358 replaces text-command emulation with the native tools API, but does not by itself guarantee ARC reasoning quality; at the reviewed head, skill parameters were typed as strings.
+- The bounded read-only DAS retrieval adapter was validated historically on a separate verification image; the live Omega container is **not** currently attached to the DAS client network, so DAS retrieval is not enabled on the running instance.
 
-At the time of this report, both [issue #365](https://github.com/singnet/Omega/issues/365) and [PR #358](https://github.com/singnet/Omega/pull/358) were open. PR #358 should reduce transport and command-parsing failures, but it cannot guarantee ARC reasoning quality. Its then-current schema also represented every skill parameter as a string, so the nested ARC submission remained JSON encoded inside a string and still required strict downstream validation.
+## Reproducible setup
 
-## Outcome
+Requirements: Docker Engine and Docker Compose, or a single host with Python 3.10+ and network access to the provider. The exact versions validated are documented in the per-artifact provenance sections.
 
-The experiment achieved several important partial results:
+1. Build a PR #358 image (see provenance below) or use an upstream release once PR #358 lands.
+2. Configure provider auth (ASI:One) and ARC tool credentials through read-only mounted secret files or environment variables; never commit secrets.
+3. Configure the optional DAS read-only lane (disabled by default) if retrieval-augmented tool use is desired.
+4. Launch the autonomous wake loop.
 
-- deployed Omega on owned infrastructure;
-- built and deployed a leak-resistant ARC-AGI evaluation API;
-- proved stock Omega's scheduled wake mechanism can run without inbound messages;
-- proved complete autonomous `arc-read` and `arc-submit` plumbing;
-- obtained one correct autonomous ARC solution with an explicitly selected free model; and
-- isolated native tool-call integration as a major reliability dependency.
-
-It did **not** achieve the original goal of a dependable, continuously operating Omega campaign using only free LLM inference. The combination of variable free-router model behavior, textual tool-command parsing, occasional null/truncated output, model reasoning errors, and fragile experimental loop modifications prevented a repeatable deployment guide.
-
-## Related repositories and upstream work
+## Source and image provenance
 
 - Omega upstream: https://github.com/singnet/Omega
-- Continuous-campaign discussion and findings: https://github.com/singnet/Omega/issues/365
-- Native tools API work: https://github.com/singnet/Omega/pull/358
-- ARC-AGI REST API implementation used by this experiment: https://github.com/ktfh-claw/ARC-AGI
-- Original ARC-AGI repository and dataset: https://github.com/fchollet/ARC-AGI
+- Omega PR #358 (native tools API): https://github.com/singnet/Omega/pull/358
+- Omega PR #358 head (fork): `c193ab39857944017e067b426779d66113649313` in `vsbogd/Omega`
+- Omega image used for the latest run: `omegaclaw:pr358-c193ab3`, runtime image ID/digest `sha256:f78dbd811c23081aecdf1b5a46fb83d848b6a9c78b651b9218bd973e0dfdb491`
+- At the time of this report, PR #358 and [issue #365](https://github.com/singnet/Omega/issues/365) remain open.
+- ARC-AGI benchmark: https://github.com/fchollet/ARC-AGI
+- ARC-AGI REST API (field report): https://github.com/ktfh-claw/ARC-AGI
 
-## Detailed report
+## DAS integration provenance
 
-See [`artifacts/experiment-report.md`](artifacts/experiment-report.md) for the test matrix, observed failures, safety controls, and criteria for a future retest.
+These components are tracked on the project's public forks and have independent provenance from the Omega PR #358 runtime image:
+
+- Omega adapter (read-only DAS retrieval skill) on `ktfh-claw/OmegaClaw-Core`, branch `omega-das-integration`, commit `fee679c3702e76c5c64f1a3113b3904346e1bb5c`.
+- Alternative baseline adapter commit `0ba45fd210c8e44699e56e4afe3832e424214226` plus an nginx startup fix (`bd6638a3fd492348da5d32291a163c6dad1a95f0`; documented in [issue #365](https://github.com/singnet/Omega/issues/365) context but not a fix PR).
+- DAS deployment lane on `ktfh-claw/das-toolbox`, branches `omega-das-integration` (commit `d9e136d0f2a9094e0243364db34cb31c8dc1ed25`) and `omega-das-write-integration` (commit `bc9bf1002e34a8f7dfbd82f69452dfe75d49c5ea`).
+
+See [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md) for the build/test steps, deployment checks, and limitations.
+
+## Related repositories
+
+- Omega Claw Core: https://github.com/ktfh-claw/OmegaClaw-Core
+- DAS toolchain: https://github.com/ktfh-claw/das-toolbox
+
+## Bottom line
+
+The infrastructure and autonomous tooling were validated, including one correct autonomous ARC solution and a separately verified read-only DAS retrieval path. Free LLM inference and reasoning quality remain the limiting constraints and are not sufficient to publish as a dependable, continuously operating free-LLM setup.
+
+> This is a field report. It intentionally does not claim a reproducible one-command deployment until PR #358 lands in an official release and free-router output quality improves.
