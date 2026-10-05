@@ -1,65 +1,70 @@
-# Omega agent + bounded read-only Distributed AtomSpace (DAS) integration
+# Omega persistence and Distributed AtomSpace (DAS) integration
 
 **Canonical task:** `omega-das-integration`
-**Status:** read-only retrieval lane validated historically; opt-in and disabled by default. The live Omega container on private infrastructure is **not** currently attached to the DAS client network, so DAS retrieval is not enabled on the running instance. The steps below document what was validated so the lane can be re-deployed and re-tested later.
+**Scope:** private, internal-only DAS deployment; bounded read access and separately authorized import/write operations.
+**Important:** Omega local MeTTa persistence and DAS persistence are different systems. This document records the interface boundary and the evidence required for each claim.
 
-## What this integration is (and is not)
+## Status at the documented deployment snapshot (2026-10-05)
 
-- **Is:** a narrow, opt-in Python retrieval skill that talks to a **read-only JSON proxy** on a private Docker network; the proxy forwards bounded pattern queries to the DAS query engine.
-- **Is not:** an import of `hyperon-das` into Omega's process, a full knowledge import, or an autonomous inference agent. The DAS query engine itself is a multi-service stack, but the agent-only view is a single HTTP `POST /v1/query` endpoint.
+- `omega-curiosity` is the Telegram-facing autonomous Omega agent, running `omegaclaw:pr358-c193ab3`.
+- Its logs show successful `add-atom &persistent …` operations and campaign-state appends. These are **local Omega/PeTTa persistent-space writes**.
+- The live container is on Docker's default `bridge` network only. It has no DAS adapter files, DAS environment variables, or attachment to the DAS client network. Therefore it **does not directly write atoms to DAS**.
+- The DAS stack is a separate internal compose deployment. Its services are running, and Redis reported `DBSIZE 8884` during the snapshot inspection. That counter alone does not attribute any record to `omega-curiosity`.
+- A bounded DAS read adapter and a separately gated campaign import/write tool were validated on dedicated integration lanes. They are not automatically enabled merely because the DAS services are running.
 
-**Operational principle:** the agent never writes. MongoDB and Redis state must be identical before and after an adapter call, and no backend network host is reachable from the Omega client container.
+## Architecture and trust boundary
 
-## Source provenance (distinct from the PR #358 runtime image)
+```text
+Telegram → Omega scheduled loop
+             │
+             ├─ `metta (add-atom &persistent …)`
+             │      └─ local PeTTa/Omega persistent space
+             │
+             └─ [not connected in live deployment]
 
-| Component | Public reference |
+DAS compose deployment (internal networks only)
+  client:  read proxy ↔ query engine
+  backend: query engine ↔ attention broker ↔ MongoDB / Redis
+
+Operator-only import: validated corpus → campaign_import.py → offline backup → one-shot db_loader → DAS datastore
+```
+
+The Omega agent receives no database credential and no direct datastore route. The query-facing proxy exposes only a constrained `POST /v1/query` endpoint. The import profile is not part of normal `docker compose up`.
+
+## What `&persistent` proves, and what it does not
+
+A log line such as:
+
+```text
+(metta "(add-atom &persistent (Inheritance …))")
+… RETURN: "true"
+```
+
+proves that the Omega-side MeTTa call succeeded in its `&persistent` space. It does **not** prove an HTTP call to the DAS proxy, a `db_loader` invocation, a MongoDB change, or a Redis change.
+
+A claim that an atom was persisted to DAS needs all of the following evidence:
+
+1. the operator import invocation and its validated manifest;
+2. the loader result (including any `loaded-unverified` state); and
+3. a scoped datastore-side before/after check that identifies the imported marker or atom.
+
+Do not use generic service health, Redis `DBSIZE`, or `&persistent` log text as a substitute for these checks.
+
+## Source provenance
+
+| Component | Reference |
 |---|---|
-| Omega read-only DAS adapter (Python skill) | `https://github.com/ktfh-claw/OmegaClaw-Core`, branch `omega-das-integration` at `fee679c3702e76c5c64f1a3113b3904346e1bb5c` |
-| Baseline adapter | same repo, commit `0ba45fd210c8e44699e56e4afe3832e424214226` |
-| nginx startup fix (master root, unprivileged workers) | same repo, commit `bd6638a3fd492348da5d32291a163c6dad1a95f0` |
-| DAS deployment lane (compose, config, preflight, tests) | `https://github.com/ktfh-claw/das-toolbox`, branch `omega-das-integration` at `d9e136d0f2a9094e0243364db34cb31c8dc1ed25` |
-| DAS campaign write/import lane | same repo, branch `omega-das-write-integration` at `bc9bf1002e34a8f7dfbd82f69452dfe75d49c5ea` |
-| DAS upstream | `https://github.com/singnet/das-toolbox` |
+| Omega runtime image | `omegaclaw:pr358-c193ab3`, PR #358 fork commit `c193ab39857944017e067b426779d66113649313` |
+| Live Omega on-disk source | `7037f4c2ad378c52fc328004fe216d5118b674f0` (`v0.1.11.1-899-gc193ab3`) |
+| DAS-capable Omega source | `https://github.com/ktfh-claw/OmegaClaw-Core` at `bd6638a3fd492348da5d32291a163c6dad1a95f0`; adapter baseline `0ba45fd210c8e44699e56e4afe3832e424214226` |
+| DAS deployment/read lane | `https://github.com/ktfh-claw/das-toolbox`, branch `omega-das-integration` at `d9e136d0f2a9094e0243364db34cb31c8dc1ed25` |
+| DAS operator import/write lane | same repository, branch `omega-das-write-integration` at `bc9bf1002e34a8f7dfbd82f69452dfe75d49c5ea` |
 
-These commits are the **source of the adapter/deployment work only**. They are separate from the PR #358 build that ships the live container (`c193ab39857944017e067b426779d66113649313` → image `omegaclaw:pr358-c193ab3`).
+The DAS-capable source/image lineage is distinct from the live PR #358 image; availability of an image tag is not deployment evidence.
 
-## Services and topology
+## Read path
 
-DAS is a self-contained multi-service system. The deployment lane runs only the data plane, on two private networks with **no host ports published**:
-
-- `client` network: read proxy, query engine, Omega client/adapter.
-- `backend` network: query engine, attention broker, MongoDB, Redis.
-
-| Service | Role |
-|---|---|
-| MongoDB | AtomDB persistence |
-| Redis | Attention Broker state; append-only persistence, protected mode disabled only within `backend` |
-| Attention broker | ECAN-based result prioritization |
-| Query engine | Pattern-token dispatch and answer assembly; `POST /v1/query` |
-| JSON read proxy | Bounded request validation, reverse callback delivery, normalized JSON response (`200 {answers:[],count:0,truncated:false}`) |
-
-### Deployment checks
-
-Before considering the lane usable:
-
-1. `docker compose up -d` — the operator profile must **not** start; if it does, inspect `docker compose ps`.
-2. `docker compose` policy tests: every network `internal=true`; every container reports empty `PortBindings`.
-3. Preflight: rendered `config/config.json` matches the digest-only `.env` inputs; all image digests resolve at build time.
-4. Services: MongoDB/Redis report healthy; query engine and attention broker report their own peers; no listener binds to the host.
-5. Read-proxy: `POST /v1/query` with a structurally valid pattern returns `200` within seconds, not a 502/timeout.
-
-## The Omega adapter skill
-
-Placed as a narrow Python module and called from one MeTTa skill, advertised only when explicitly enabled:
-
-- **Default disabled** — `OMEGA_DAS_ENABLED=0` by default; `das-retrieve` is not advertised in `(getSkills)` and no endpoint is resolved, so startup fails closed and existing prompt behavior is preserved.
-- **Opt-in** — enable via `OMEGA_DAS_ENABLED=1` and an exact proxy origin, e.g. `OMEGA_DAS_PROXY_ORIGIN=http://das-read-proxy:8080/v1/query`.
-- **Result marking** — responses are normalized as untrusted: `DAS_RETRIEVE_OK untrusted=true count=N truncated=false results=[...]`.
-- **Immutability** — verified MongoDB and Redis state are unchanged after a call; no write API is exposed.
-
-## Structured query example
-
-Valid pattern queries follow the DAS token grammar. Example:
+The opt-in adapter is a narrow Python skill. When explicitly enabled, it sends grammatically valid DAS token patterns to the internal read proxy:
 
 ```json
 POST /v1/query
@@ -73,36 +78,47 @@ POST /v1/query
 }
 ```
 
-Response: `{"answers": [...], "count": 0, "truncated": false}` (empty when no matching atoms exist; the AtomDB must be seeded separately).
+Valid structured requests previously returned `200` in about 1–2 seconds. Bare or malformed token lists can make the query engine omit a completion callback; the proxy then times out (historically `502` after 60 seconds). Results are explicitly untrusted retrieval data, not instructions.
 
-**Invalid inputs:** bare or unstructured tokens (for example a single term with no grammar) are rejected by the query engine but historically failed to send the completion callback, causing the proxy to wait until its timeout returns `502`. Always use grammatically valid patterns and treat timeouts as evidence of a bad query, not engine failure.
+## Write/import path
 
-## Tests
+The supported DAS writer is `deploy/omega-das-integration/scripts/campaign_import.py` in `das-toolbox`. It is intentionally **operator-only** and uses a bounded pipeline:
 
-- **Adapter unit/integration tests** in the Omega adapter repo run without a live DAS cluster when `OMEGA_DAS_LIVE_TEST=0`; live end-to-end checks run only with `OMEGA_DAS_LIVE_TEST=1` against a seeded marker atom, and skip automatically when unset.
-- **DAS proxy and client tests** verify bounded request shape, callback delivery, JSON normalization, and network policy.
-- **Deployment tests** verify compose policy (internal networks, no published ports) and preflight digest resolution.
+1. validate the input campaign corpus strictly;
+2. take an offline volume backup;
+3. create an auditable manifest;
+4. run the one-shot `db_loader`; and
+5. report the resulting `loaded-unverified` state until an independent datastore verification is complete.
 
-## Operator-only write/import lane (separate, gated)
+This design keeps an LLM-controlled agent out of the write path. It protects the isolated deployment posture: both `client` and `backend` networks remain internal, and no DAS data-plane ports are published to the host.
 
-A bounded, operator-only campaign import path exists in the DAS toolbox under `deploy/omega-das-integration/`: `scripts/campaign_import.py` (strict validator, offline volume backup, one-shot `db_loader`, manifest, `loaded-unverified` semantics). It is designed to be a separately authorized lane: the operator profile is never started by normal `up`, and data import requires explicit authorization. It is documented, not assumed to be deployed.
+## Operational verification checklist
 
-## What was actually deployed vs. design-only
+### Omega local persistence
 
-| Item | State |
-|---|---|
-| DAS data-plane compose + config + preflight | Deployed and validated historically on the verification lane; internal-only, no host ports. |
-| JSON read proxy + query engine + attention broker + Mongo/Redis | Validated: valid pattern queries returned `200` in ~1–2 s; callback delivery and normalization confirmed in logs. |
-| Adapter tests (no live cluster) | Ran, passed. |
-| Adapter on the Omega verification image | Ran a live private-network structured query successfully with `OMEGA_DAS_ENABLED=1`; confirmed read-only invariants. |
-| Integration into the **live** `omegaclaw:pr358-c193ab3` container | **Not enabled.** The live container is on the default bridge only and does not have DAS enabled. The current branch/README state should be read as "historically validated, live deployment disabled." |
+- Observe a successful `add-atom &persistent …` return in `omega-curiosity` logs.
+- Confirm the expected local campaign-state/history change.
+- Report this as **local Omega persistence**, never as a DAS write.
+
+### DAS read
+
+- Ensure the test container is attached only to the private DAS client network.
+- Set `OMEGA_DAS_ENABLED=1` and an exact proxy origin only in that test deployment.
+- Submit a valid structured pattern; confirm normalized JSON and unchanged datastore state.
+
+### DAS import/write
+
+- Stop the campaign if the import procedure requires an offline corpus snapshot.
+- Run only the operator profile and `campaign_import.py` after explicit authorization.
+- Preserve the manifest, loader output, and a marker-specific datastore verification.
+- Re-run network policy tests: internal networks only; no published data-plane ports.
 
 ## Limitations
 
-- The adapter requires a seeded AtomDB to return non-empty results; an empty query is a correct answer, not a defect.
-- Query grammar errors can produce a proxy-level timeout rather than an immediate error.
-- DAS is a multi-service stack with operational surface (several stateful containers, credential files, rolling digests); pinning digests and running policy tests are mandatory.
-- Native MeTTa/NAL inference is a separate concern and not required by this integration path.
+- DAS service health does not demonstrate that the live Omega agent can read or write it.
+- `&persistent` is useful durable agent memory but is not a distributed durability guarantee.
+- The live `omega-curiosity` image must be rebuilt/redeployed from the DAS-capable source and explicitly network-attached before it can use even the bounded read adapter.
+- Enabling automatic LLM-directed writes would be a different security design and is intentionally outside this documented setup.
 
 ---
 *Last updated: 2026-10-05.*
