@@ -6,7 +6,7 @@
 
 ## Status at the documented deployment snapshot (2026-10-05)
 
-> **Current live state (updated 2026-10-06):** the sections below describe the 2026-10-05 snapshot taken before the DAS-enabled cutover. Since then, `omega-curiosity` was redeployed on the DAS-enabled image `omegaclaw:das-bd6638a`, attached to the internal DAS client network, and performs **bounded DAS reads** through the deployed read proxy. DAS writes remain operator-only via the [import runbook](operator-das-import-runbook.md); the agent still has no write capability. Two operator imports have been executed and independently verified (`omega-curiosity-20261005-final`, `omega-curiosity-20261006`). The snapshot text is retained as the integration-lane record.
+> **Current live state (updated 2026-10-06):** the sections below describe the 2026-10-05 snapshot taken before the DAS-enabled cutover. The deployment now runs `omegaclaw:das-0d61c8e` from `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `0d61c8e`, attached to the internal DAS client network, with `OMEGA_DAS_ENABLED=1` and the bounded `das-retrieve` tool registered. DAS writes remain operator-only via the [import runbook](operator-das-import-runbook.md); the agent still has no write capability. Two operator imports have been executed and independently verified (`omega-curiosity-20261005-final`, `omega-curiosity-20261006`). The snapshot text is retained as the integration-lane record.
 
 - `omega-curiosity` is the Telegram-facing autonomous Omega agent, running `omegaclaw:pr358-c193ab3`.
 - Its logs show successful `add-atom &persistent …` operations and campaign-state appends. These are **local Omega/PeTTa persistent-space writes**.
@@ -57,13 +57,15 @@ Do not use generic service health, Redis `DBSIZE`, or `&persistent` log text as 
 
 | Component | Reference |
 |---|---|
-| Omega runtime image | `omegaclaw:pr358-c193ab3`, PR #358 fork commit `c193ab39857944017e067b426779d66113649313` |
-| Live Omega on-disk source | `7037f4c2ad378c52fc328004fe216d5118b674f0` (`v0.1.11.1-899-gc193ab3`) |
-| DAS-capable Omega source | `https://github.com/ktfh-claw/OmegaClaw-Core` at `bd6638a3fd492348da5d32291a163c6dad1a95f0`; adapter baseline `0ba45fd210c8e44699e56e4afe3832e424214226` |
+| Current Omega runtime image | `omegaclaw:das-0d61c8e`, digest `sha256:f29ccb27a7a07b2d29affea327d43105bd89ec1ec399fbf349af75d5c26bd272` |
+| Current DAS-capable Omega source | `https://github.com/ktfh-claw/OmegaClaw-Core`, branch `uplift-v0.1.20-pr358` at `0d61c8eff59dcfdbac7c358315e08d3c179b7c7a` |
+| Historical Omega runtime image | `omegaclaw:pr358-c193ab3`, PR #358 fork commit `c193ab39857944017e067b426779d66113649313` |
+| Historical Omega on-disk source | `7037f4c2ad378c52fc328004fe216d5118b674f0` (`v0.1.11.1-899-gc193ab3`) |
+| Historical DAS-capable Omega source | `https://github.com/ktfh-claw/OmegaClaw-Core` at `bd6638a3fd492348da5d32291a163c6dad1a95f0`; adapter baseline `0ba45fd210c8e44699e56e4afe3832e424214226` |
 | DAS deployment/read lane | `https://github.com/ktfh-claw/das-toolbox`, branch `omega-das-integration` at `d9e136d0f2a9094e0243364db34cb31c8dc1ed25` |
 | DAS operator import/write lane | same repository, branch `omega-das-write-integration` at `bc9bf1002e34a8f7dfbd82f69452dfe75d49c5ea` |
 
-The DAS-capable source/image lineage is distinct from the live PR #358 image; availability of an image tag is not deployment evidence.
+The older rows record the 2026-10-05 snapshot. Current deployment evidence, rather than image-tag availability alone, is documented in the [v0.1.20 uplift report](omega-1020-uplift.md).
 
 ## Read path
 

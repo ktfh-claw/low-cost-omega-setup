@@ -1,12 +1,12 @@
 # Omega Container Build Documentation
 
-**Purpose:** Reproducible build instructions for the `omegaclaw:pr358-c193ab3` image based on the PR #358 source tree.
+**Purpose:** Historical reproducible build instructions for the superseded `omegaclaw:pr358-c193ab3` image based on the PR #358 source tree. For the current live image, see [`omega-1020-uplift.md`](omega-1020-uplift.md).
 
 ---
 
 ## Overview
 
-This document describes the exact steps used to build the Omega Docker image referenced in the low-cost Omega setup. The image contains the PR #358 changes and can be used to run a headlessly waking Omega campaign with ASI:One (`asi1`) model support.
+This document preserves the exact steps used to build the earlier PR #358 image. It is not the current live deployment; the v0.1.20 uplift uses ASI:One `asi1-ultra` and is documented separately.
 
 ---
 

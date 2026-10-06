@@ -4,7 +4,7 @@
 **Tool:** `deploy/omega-das-integration/scripts/campaign_import.py` in [`ktfh-claw/das-toolbox`](https://github.com/ktfh-claw/das-toolbox), branch `omega-das-write-integration`, reviewed at commit `dfccfae75b149f11733b158dee342c00530c4627`.
 **Audience:** the human operator. The autonomous Omega agent has no part in this workflow and must never receive a DAS write capability.
 
-This runbook reflects the procedure as validated end-to-end twice: imports `omega-curiosity-20261005-final` (initial) and `omega-curiosity-20261006` (delta).
+This runbook reflects the procedure validated end-to-end in the documented production imports. Immediately before the v0.1.20 uplift, the latest run extracted 336 unique facts (316 old, 20 new, 0 dropped), processed 3,232 atoms, and independently verified all 20 new facts plus provenance through both the datastore and deployed read proxy.
 
 ---
 
@@ -48,8 +48,10 @@ The importer requires a quiescent corpus; concurrent agent writes during extract
 
    ```bash
    mkdir -p "$IMPORT_SRC"
+   # The volume root is the Omega memory directory in the container, so the
+   # live file /PeTTa/repos/Omega/memory/history.metta appears as /src/history.metta.
    docker run --rm -v <campaign-memory-volume>:/src:ro -v "$IMPORT_SRC":/dst \
-     alpine sh -c 'cp /src/repos/OmegaClaw-Core/memory/history.metta \
+     alpine sh -c 'cp /src/history.metta \
        /dst/history-$(date -u +%Y%m%dT%H%M%SZ).metta'
    ```
 
@@ -175,7 +177,9 @@ POST http://read-proxy:8080/v1/query
 | Import | Date (UTC) | Facts loaded | Atoms processed | Note |
 |---|---|---:|---:|---|
 | `omega-curiosity-20261005-final` | 2026-10-05 | 311 (initial) | 2,981 | Initial campaign import |
-| `omega-curiosity-20261006` | 2026-10-06 | 5 (delta) | 3,040 | 311 duplicates upserted + 5 new facts |
+| `omega-curiosity-20261006` | 2026-10-06 | 5 (delta) | 3,040 | Earlier 2026-10-06 delta run; superseded by the pre-uplift corpus import evidence |
+
+The subsequent pre-uplift import on 2026-10-06 covered 336 unique facts (316 old and 20 new), processed 3,232 atoms, and had 0 dropped facts. Its exact host-side manifests and verification outputs are retained with the deployment evidence; this public runbook does not assign an import identifier that is absent from the recorded summary.
 
 ---
 *Last updated: 2026-10-06.*

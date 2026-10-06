@@ -15,13 +15,14 @@ The canonical campaign label for the run documented here is **RKGI**; the evalua
 | [`artifacts/status-2026-10-05.md`](artifacts/status-2026-10-05.md) | Separate status report for the RKGI-ARC campaign conclusion and the final resumed task. |
 | [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md) | Reproducible topology, read path, operator-only DAS import/write lane, and evidence rules for distinguishing it from Omega local persistence. |
 | [`artifacts/operator-das-import-runbook.md`](artifacts/operator-das-import-runbook.md) | Step-by-step operator runbook for persisting Omega campaign atoms into DAS: freeze, dry run, delta analysis, apply, independent verification, resume. |
+| [`artifacts/omega-1020-uplift.md`](artifacts/omega-1020-uplift.md) | Omega v0.1.20 uplift provenance, test evidence, live runtime validation, and known follow-ups. |
 
 ## Architecture overview
 
 ```text
 Omega agent (`omega-curiosity`)
   ├─ scheduled autonomous wake loop (no inbound message required)
-  ├─ ASI:One (asi1) model via PR #358 native tools API
+  ├─ ASI:One (`asi1-ultra`) model via PR #358 native tools API
   ├─ MeTTa: `add-atom &persistent …`
   │    └─ local Omega persistent space + mounted campaign memory files
   └─ DAS service (separate internal compose deployment)
@@ -45,7 +46,7 @@ The campaign included three earlier verified ARC task solves during the broader 
 ## Current conclusions
 
 - Stock Omega scheduled wake works headlessly and can perform autonomous provider calls without a new human message.
-- ASI:One (`asi1`) works out of the box with PR #358 native tool calls (`provider=ASIOne model=asi1 finish_reason=tool_calls`).
+- ASI:One (`asi1-ultra`) is validated through the live deployment with PR #358 native tool calls (`provider=ASIOne model=asi1-ultra finish_reason=tool_calls`).
 - Free-router LLM output is variable and not reliable as a continuous solver.
 - PR #358 replaces text-command emulation with the native tools API, but does not by itself guarantee ARC reasoning quality; at the reviewed head, skill parameters were typed as strings.
 - The bounded DAS adapter and the separately gated DAS campaign-import path are deployed and validated end-to-end twice in production (initial import 2026-10-05, delta import 2026-10-06). The live `omega-curiosity` container runs the DAS-enabled image attached to the internal DAS client network and performs bounded DAS reads; its observed `&persistent` operations remain local Omega persistence, not direct DAS writes.
@@ -64,12 +65,11 @@ Requirements: Docker Engine and Docker Compose, or a single host with Python 3.1
 
 - Omega upstream: https://github.com/singnet/Omega
 - Omega PR #358 (native tools API): https://github.com/singnet/Omega/pull/358
-- Omega PR #358 head (fork): `c193ab39857944017e067b426779d66113649313` in `vsbogd/Omega`
-- Omega **live deployment version**: v0.1.11.1-899-gc193ab3 (reported in Telegram and confirmed in container)
-- Omega **source commit on disk**: `7037f4c2ad378c52fc328004fe216d5118b674f0`
-- Omega image used for the latest run: `omegaclaw:pr358-c193ab3`, runtime image ID/digest `sha256:f78dbd811c23081aecdf1b5a46fb83d848b6a9c78b651b9218bd973e0dfdb491`
-- Upstream releases available: v0.1.19 (stable), v0.1.20-rc (release candidate); both contain PR #358 changes
-- At the time of this report, PR #358 and [issue #365](https://github.com/singnet/Omega/issues/365) remain open.
+- Omega v0.1.20 release: `19e94bb336378eebb66e8e689d0d3ff0e1bf5f77`
+- Omega PR #358 head: `c193ab39857944017e067b426779d66113649313` (still open and not included in v0.1.20 at validation time)
+- Merged fork branch: `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `0d61c8eff59dcfdbac7c358315e08d3c179b7c7a` (v0.1.20 + PR #358 + fork ARC/DAS/nginx line + validation fixes)
+- Live image: `omegaclaw:das-0d61c8e`, digest `sha256:f29ccb27a7a07b2d29affea327d43105bd89ec1ec399fbf349af75d5c26bd272`, size 2.34 GB
+- Full construction and validation evidence: [`artifacts/omega-1020-uplift.md`](artifacts/omega-1020-uplift.md)
 - ARC-AGI benchmark: https://github.com/fchollet/ARC-AGI
 - ARC-AGI REST API (field report): https://github.com/ktfh-claw/ARC-AGI
 
@@ -78,26 +78,20 @@ Requirements: Docker Engine and Docker Compose, or a single host with Python 3.1
 | Property | Value |
 |---|---|
 | Container | `omega-curiosity` |
-| Image | `omegaclaw:das-bd6638a` (rebuilt 2026-10-06 with the `asi1` model-selection patch after the `asi1-ultra` tier returned a zero-quota 429) |
-| Base | DAS-capable source `ktfh-claw/OmegaClaw-Core` at `bd6638a` (PR #358 lineage + DAS adapter); original PR #358 fork base `vsbogd/Omega` at `c193ab3` |
-| Provider | ASIOne / `asi1` |
+| Image | `omegaclaw:das-0d61c8e` (2.34 GB; `sha256:f29ccb27a7a07b2d29affea327d43105bd89ec1ec399fbf349af75d5c26bd272`) |
+| Source | `ktfh-claw/OmegaClaw-Core`, branch `uplift-v0.1.20-pr358` at `0d61c8eff59dcfdbac7c358315e08d3c179b7c7a` |
+| Provider | ASIOne / `asi1-ultra` |
+| Embedding provider | Local |
+| Channel | Telegram |
 | Network | Default bridge + internal DAS client network (`omega-das-integration-client`) |
-| Omega local persistence | **Enabled** — `add-atom &persistent …` operations append to the mounted campaign memory volume. |
-| DAS read integration | **Enabled** — bounded reads through the deployed internal read proxy via the DAS adapter. |
+| Omega local persistence | **Enabled** — campaign volume mounted at `/PeTTa/repos/Omega/memory` after the OMEGA-468 path migration. |
+| DAS read integration | **Enabled** — `OMEGA_DAS_ENABLED=1`; the registered `das-retrieve` tool performs bounded reads through the internal read proxy. |
 | DAS writes | **Not a live agent capability.** The supported path is the operator import runbook; `&persistent` must not be reported as a DAS write. |
-| Notes | DAS tooling provenance: `ktfh-claw/das-toolbox` branches `omega-das-integration` at `d9e136d` and `omega-das-write-integration` at `bc9bf10` (importer reviewed at `dfccfae`). Operator imports executed so far: `omega-curiosity-20261005-final` (311 facts) and `omega-curiosity-20261006` (5-fact delta). |
+| Notes | DAS tooling provenance: `ktfh-claw/das-toolbox` branches `omega-das-integration` at `d9e136d` and `omega-das-write-integration` at `bc9bf10` (importer reviewed at `dfccfae`). Before uplift, the latest corpus import extracted 336 unique facts (316 previously covered, 20 new, 0 dropped); all 20 new facts and provenance were independently verified through both the datastore and read proxy. |
 
-## Upgrade path to Omega v0.1.20
+## Omega v0.1.20 uplift
 
-A new issue has been created in this repository to track upgrading the base image to Omega v0.1.20 once it is fully released. See `.github/ISSUE_TEMPLATE/upgrade-base-image.md` for the acceptance criteria and current deployment state snapshot.
-
-When v0.1.20 is fully released, the workflow will be:
-1. Rebuild the Docker image from `singularitynet/omega:v0.1.20` (or equivalent release tag)
-2. Verify PR #358 changes are present
-3. Re-validate: autonomous wake loop, ASI:One tool calling, ARC skills
-4. Re-validate DAS read-only lane (opt-in) on the new image
-5. Update `README.md` provenance section with new image digest and version
-6. Switch live deployment after validation
+The live deployment was uplifted on 2026-10-06. Because upstream v0.1.20 did not contain the still-open PR #358, the deployed fork merges v0.1.20, PR #358's native tools API, and the fork's guarded ARC, read-only DAS, and nginx changes. The exact merge construction, 132-test mandatory lane, broader 140-pass lane, deployment configuration, and live validation matrix are recorded in [`artifacts/omega-1020-uplift.md`](artifacts/omega-1020-uplift.md).
 
 The DAS integration reference is [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md), and the live operator write path is documented in [`artifacts/operator-das-import-runbook.md`](artifacts/operator-das-import-runbook.md). The historical PR #358 container build procedure is preserved in [`artifacts/container-build.md`](artifacts/container-build.md) for reference.
 
@@ -108,6 +102,6 @@ The DAS integration reference is [`artifacts/omega-das-integration.md`](artifact
 
 ## Bottom line
 
-The infrastructure and autonomous tooling were validated, including one correct autonomous ARC solution, active local Omega persistence, a verified bounded DAS read path, and a separately gated DAS import path executed twice in production. The live agent does not currently write directly to DAS. Free LLM inference and reasoning quality remain the limiting constraints and are not sufficient to publish as a dependable, continuously operating free-LLM setup.
+The infrastructure and autonomous tooling were validated, including one correct autonomous ARC solution, active local Omega persistence, a verified bounded DAS read path, and a separately gated DAS import path executed twice in production. The uplifted live deployment uses ASI:One `asi1-ultra`; the live agent does not write directly to DAS. Historical free-router reasoning limitations still apply to the earlier campaign results.
 
-> This is a field report. It intentionally does not claim a reproducible one-command deployment until PR #358 lands in an official release and free-router output quality improves.
+> This is a field report. It intentionally does not claim a reproducible one-command deployment while PR #358 remains an externally merged fork change rather than part of the validated upstream release.
