@@ -6,6 +6,8 @@
 
 ## Status at the documented deployment snapshot (2026-10-05)
 
+> **Current live state (updated 2026-10-06):** the sections below describe the 2026-10-05 snapshot taken before the DAS-enabled cutover. Since then, `omega-curiosity` was redeployed on the DAS-enabled image `omegaclaw:das-bd6638a`, attached to the internal DAS client network, and performs **bounded DAS reads** through the deployed read proxy. DAS writes remain operator-only via the [import runbook](operator-das-import-runbook.md); the agent still has no write capability. Two operator imports have been executed and independently verified (`omega-curiosity-20261005-final`, `omega-curiosity-20261006`). The snapshot text is retained as the integration-lane record.
+
 - `omega-curiosity` is the Telegram-facing autonomous Omega agent, running `omegaclaw:pr358-c193ab3`.
 - Its logs show successful `add-atom &persistent …` operations and campaign-state appends. These are **local Omega/PeTTa persistent-space writes**.
 - The live container is on Docker's default `bridge` network only. It has no DAS adapter files, DAS environment variables, or attachment to the DAS client network. Therefore it **does not directly write atoms to DAS**.
@@ -20,7 +22,8 @@ Telegram → Omega scheduled loop
              ├─ `metta (add-atom &persistent …)`
              │      └─ local PeTTa/Omega persistent space
              │
-             └─ [not connected in live deployment]
+             └─ bounded DAS read (live since 2026-10-05 cutover)
+                    └─ Omega DAS adapter → internal read proxy → query engine
 
 DAS compose deployment (internal networks only)
   client:  read proxy ↔ query engine
@@ -82,7 +85,7 @@ Valid structured requests previously returned `200` in about 1–2 seconds. Bare
 
 ## Write/import path
 
-The supported DAS writer is `deploy/omega-das-integration/scripts/campaign_import.py` in `das-toolbox`. It is intentionally **operator-only** and uses a bounded pipeline:
+The supported DAS writer is `deploy/omega-das-integration/scripts/campaign_import.py` in `das-toolbox`. It is intentionally **operator-only** and uses a bounded pipeline. The step-by-step operator procedure (freeze → dry run → delta analysis → apply → independent verification → resume) is documented in [`artifacts/operator-das-import-runbook.md`](operator-das-import-runbook.md), including both validated production runs.
 
 1. validate the input campaign corpus strictly;
 2. take an offline volume backup;
@@ -117,8 +120,8 @@ This design keeps an LLM-controlled agent out of the write path. It protects the
 
 - DAS service health does not demonstrate that the live Omega agent can read or write it.
 - `&persistent` is useful durable agent memory but is not a distributed durability guarantee.
-- The live `omega-curiosity` image must be rebuilt/redeployed from the DAS-capable source and explicitly network-attached before it can use even the bounded read adapter.
+- ~~The live `omega-curiosity` image must be rebuilt/redeployed from the DAS-capable source and explicitly network-attached before it can use even the bounded read adapter.~~ Resolved 2026-10-05: the live container now runs the DAS-enabled image on the client network (read-only).
 - Enabling automatic LLM-directed writes would be a different security design and is intentionally outside this documented setup.
 
 ---
-*Last updated: 2026-10-05.*
+*Last updated: 2026-10-06.*

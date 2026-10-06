@@ -14,6 +14,7 @@ The canonical campaign label for the run documented here is **RKGI**; the evalua
 | [`artifacts/experiment-report.md`](artifacts/experiment-report.md) | Full experiment report: test matrix, failures, safety controls, retest criteria. |
 | [`artifacts/status-2026-10-05.md`](artifacts/status-2026-10-05.md) | Separate status report for the RKGI-ARC campaign conclusion and the final resumed task. |
 | [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md) | Reproducible topology, read path, operator-only DAS import/write lane, and evidence rules for distinguishing it from Omega local persistence. |
+| [`artifacts/operator-das-import-runbook.md`](artifacts/operator-das-import-runbook.md) | Step-by-step operator runbook for persisting Omega campaign atoms into DAS: freeze, dry run, delta analysis, apply, independent verification, resume. |
 
 ## Architecture overview
 
@@ -23,16 +24,16 @@ Omega agent (`omega-curiosity`)
   ├─ ASI:One (asi1) model via PR #358 native tools API
   ├─ MeTTa: `add-atom &persistent …`
   │    └─ local Omega persistent space + mounted campaign memory files
-  └─ optional DAS service (separate compose deployment)
+  └─ DAS service (separate internal compose deployment)
        ├─ private client/backend Docker networks
-       ├─ bounded read proxy → query engine → MongoDB/Redis
-       └─ separately authorized `campaign_import.py` operator write/import path
+       ├─ bounded read: Omega DAS adapter → internal read proxy → query engine → MongoDB/Redis
+       └─ operator-only DAS write: `campaign_import.py` runbook (the agent has no write capability)
 ```
 
 ### Two persistence planes — do not conflate them
 
 1. **Omega local persistence.** The running agent issues MeTTa such as `add-atom &persistent …` and appends campaign state under `./repos/Omega/memory`. The live logs prove this path is active. It is persistence inside Omega/PeTTa, not a network write to the Distributed AtomSpace.
-2. **DAS persistence.** The DAS stack persists atom data through its own MongoDB/Redis-backed services. The documented write path is a bounded, operator-authorized import (`campaign_import.py`); it is deliberately not exposed as an autonomous agent tool. A DAS write claim requires import/loader evidence plus a datastore-side before/after check.
+2. **DAS persistence.** The DAS stack persists atom data through its own MongoDB/Redis-backed services. The documented write path is a bounded, operator-authorized import (`campaign_import.py`); it is deliberately not exposed as an autonomous agent tool. A DAS write claim requires import/loader evidence plus a datastore-side before/after check. The full procedure is in the [operator DAS import runbook](artifacts/operator-das-import-runbook.md).
 
 The distinction prevents a common false positive: seeing `&persistent` in an Omega log does **not** establish that the atom reached DAS.
 
@@ -47,7 +48,7 @@ The campaign included three earlier verified ARC task solves during the broader 
 - ASI:One (`asi1`) works out of the box with PR #358 native tool calls (`provider=ASIOne model=asi1 finish_reason=tool_calls`).
 - Free-router LLM output is variable and not reliable as a continuous solver.
 - PR #358 replaces text-command emulation with the native tools API, but does not by itself guarantee ARC reasoning quality; at the reviewed head, skill parameters were typed as strings.
-- The bounded DAS adapter and the separately gated DAS campaign-import path were validated historically on a dedicated integration lane. The live `omega-curiosity` container is on the default `bridge` network only; it has no DAS adapter or DAS environment settings. Its observed `&persistent` operations are local Omega persistence, not direct DAS writes.
+- The bounded DAS adapter and the separately gated DAS campaign-import path are deployed and validated end-to-end twice in production (initial import 2026-10-05, delta import 2026-10-06). The live `omega-curiosity` container runs the DAS-enabled image attached to the internal DAS client network and performs bounded DAS reads; its observed `&persistent` operations remain local Omega persistence, not direct DAS writes.
 
 ## Reproducible setup
 
@@ -56,7 +57,7 @@ Requirements: Docker Engine and Docker Compose, or a single host with Python 3.1
 1. Build a PR #358 image (see provenance below) or use an upstream release once PR #358 lands.
 2. Configure provider auth (ASI:One) and ARC tool credentials through read-only mounted secret files or environment variables; never commit secrets.
 3. Configure the optional DAS read-only lane (disabled by default) if retrieval-augmented tool use is desired.
-4. If DAS data must be seeded or imported, run the separately authorized operator import workflow; never grant the autonomous Omega loop a direct DAS write endpoint.
+4. If DAS data must be seeded or imported, follow the [operator DAS import runbook](artifacts/operator-das-import-runbook.md); never grant the autonomous Omega loop a direct DAS write endpoint.
 5. Launch the autonomous wake loop.
 
 ## Source and image provenance
@@ -72,20 +73,19 @@ Requirements: Docker Engine and Docker Compose, or a single host with Python 3.1
 - ARC-AGI benchmark: https://github.com/fchollet/ARC-AGI
 - ARC-AGI REST API (field report): https://github.com/ktfh-claw/ARC-AGI
 
-## Live deployment state (as of 2026-10-05)
+## Live deployment state (as of 2026-10-06)
 
 | Property | Value |
 |---|---|
 | Container | `omega-curiosity` |
-| Image | `omegaclaw:pr358-c193ab3` |
-| Omega version | v0.1.11.1-899-gc193ab3 |
-| Base | PR #358 fork (`vsbogd/Omega` at `c193ab3`) |
+| Image | `omegaclaw:das-bd6638a` (rebuilt 2026-10-06 with the `asi1` model-selection patch after the `asi1-ultra` tier returned a zero-quota 429) |
+| Base | DAS-capable source `ktfh-claw/OmegaClaw-Core` at `bd6638a` (PR #358 lineage + DAS adapter); original PR #358 fork base `vsbogd/Omega` at `c193ab3` |
 | Provider | ASIOne / `asi1` |
-| Network | Default bridge only |
-| Omega local persistence | **Enabled** — recent logs include successful `add-atom &persistent …` operations and campaign-state updates. |
-| DAS read integration | **Not enabled on this container** — no DAS networks, no DAS env vars, no adapter in container. |
-| DAS writes | **Not a live agent capability.** The supported path is separately authorized operator import; `&persistent` must not be reported as a DAS write. |
-| Notes | DAS read/write tooling was validated historically on separate integration lanes (`ktfh-claw/das-toolbox` branches `omega-das-integration` at `d9e136d`, `omega-das-write-integration` at `bc9bf10`; `ktfh-claw/OmegaClaw-Core` at `bd6638a`). The live container is currently on default bridge only. |
+| Network | Default bridge + internal DAS client network (`omega-das-integration-client`) |
+| Omega local persistence | **Enabled** — `add-atom &persistent …` operations append to the mounted campaign memory volume. |
+| DAS read integration | **Enabled** — bounded reads through the deployed internal read proxy via the DAS adapter. |
+| DAS writes | **Not a live agent capability.** The supported path is the operator import runbook; `&persistent` must not be reported as a DAS write. |
+| Notes | DAS tooling provenance: `ktfh-claw/das-toolbox` branches `omega-das-integration` at `d9e136d` and `omega-das-write-integration` at `bc9bf10` (importer reviewed at `dfccfae`). Operator imports executed so far: `omega-curiosity-20261005-final` (311 facts) and `omega-curiosity-20261006` (5-fact delta). |
 
 ## Upgrade path to Omega v0.1.20
 
@@ -99,7 +99,7 @@ When v0.1.20 is fully released, the workflow will be:
 5. Update `README.md` provenance section with new image digest and version
 6. Switch live deployment after validation
 
-Historical DAS integration provenance is preserved in `artifacts/omega-das-integration.md` and `artifacts/container-build.md` for reference.
+The DAS integration reference is [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md), and the live operator write path is documented in [`artifacts/operator-das-import-runbook.md`](artifacts/operator-das-import-runbook.md). The historical PR #358 container build procedure is preserved in [`artifacts/container-build.md`](artifacts/container-build.md) for reference.
 
 ## Related repositories
 
@@ -108,6 +108,6 @@ Historical DAS integration provenance is preserved in `artifacts/omega-das-integ
 
 ## Bottom line
 
-The infrastructure and autonomous tooling were validated, including one correct autonomous ARC solution, active local Omega persistence, a separately verified DAS read path, and a separately gated DAS import path. The live agent does not currently write directly to DAS. Free LLM inference and reasoning quality remain the limiting constraints and are not sufficient to publish as a dependable, continuously operating free-LLM setup.
+The infrastructure and autonomous tooling were validated, including one correct autonomous ARC solution, active local Omega persistence, a verified bounded DAS read path, and a separately gated DAS import path executed twice in production. The live agent does not currently write directly to DAS. Free LLM inference and reasoning quality remain the limiting constraints and are not sufficient to publish as a dependable, continuously operating free-LLM setup.
 
 > This is a field report. It intentionally does not claim a reproducible one-command deployment until PR #358 lands in an official release and free-router output quality improves.
