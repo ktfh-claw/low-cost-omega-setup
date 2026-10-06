@@ -97,7 +97,7 @@ Duplicate facts are safe — the loader's merger upserts them — but an import 
 
 Decision rule: delta of 0 → stop, no import needed. `dropped_from_old > 0` → investigate why previously imported facts disappeared before applying. Record all counts as evidence.
 
-Validated example (2026-10-06 run): 316 extracted facts → 311 old, 5 new, 0 dropped.
+Validated earlier-delta example (2026-10-06): 316 extracted facts → 311 old, 5 new, 0 dropped. The later pre-uplift run superseded this snapshot with 336 extracted facts → 316 old, 20 new, 0 dropped.
 
 ## Phase 4 — Apply (the only mutating step)
 

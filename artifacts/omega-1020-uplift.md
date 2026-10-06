@@ -36,6 +36,54 @@ The live launcher and environment now use:
 
 There is no `asi1-ultra` to `asi1` downgrade patch in this build. The provider default and explicit launch model are both `asi1-ultra`.
 
+### Reproduce the validated build
+
+The deployed image was built from an archive of the exact source commit. A fresh checkout can reconstruct the same source and image configuration, although dependency indexes and tag-selected base/dependency images mean that a later rebuild is not guaranteed to have the same byte-for-byte image digest:
+
+```bash
+git clone https://github.com/ktfh-claw/OmegaClaw-Core.git
+cd OmegaClaw-Core
+git checkout 0d61c8eff59dcfdbac7c358315e08d3c179b7c7a
+test "$(git rev-parse HEAD)" = "0d61c8eff59dcfdbac7c358315e08d3c179b7c7a"
+docker build --tag omegaclaw:das-0d61c8e .
+docker image inspect --format '{{.Id}}' omegaclaw:das-0d61c8e
+```
+
+The validated live image ID is the digest in the provenance table above. Treat a different ID from a later rebuild as a new artifact that requires validation, not as evidence that the checkout is wrong.
+
+### Reproduce the validated launch shape
+
+Store `runtime.env` with mode `0600`. Use real values only on the deployment host; the placeholders below are not credentials:
+
+```dotenv
+ASIONE_API_KEY=<provider-secret>
+TG_BOT_TOKEN=<telegram-bot-secret>
+OMEGA_AUTH_SECRET=<one-time-owner-auth-secret>
+IMPORT_KB_ON_START=0
+MEMORY_DIR=/PeTTa/repos/Omega/memory
+OMEGA_DAS_ENABLED=1
+OMEGA_DAS_PROXY_ORIGIN=http://read-proxy:8080
+```
+
+The validated service launcher is equivalent to the following sanitized command sequence. The named volume is mounted directly at the post-OMEGA-468 memory directory. Docker creates the container on the default `bridge`; the second network attachment adds only the internal DAS client route.
+
+```bash
+docker create --rm --name omega-curiosity -t \
+  --security-opt no-new-privileges:true --init \
+  --tmpfs /tmp:size=256m,mode=1777 \
+  --tmpfs /var/tmp:size=64m,mode=1777 \
+  --tmpfs /run:size=16m,mode=755 \
+  --volume omega-curiosity-memory:/PeTTa/repos/Omega/memory \
+  --env-file "$(pwd)/runtime.env" \
+  omegaclaw:das-0d61c8e \
+  commchannel=telegram provider=ASIOne model=asi1-ultra embeddingprovider=Local
+
+docker network connect omega-das-integration-client omega-curiosity
+docker start --attach omega-curiosity
+```
+
+The DAS compose deployment must create `omega-das-integration-client` first. Do not attach Omega to the DAS backend network, publish DAS data-plane ports, or add a DAS write credential to `runtime.env`.
+
 ## Phase A test evidence
 
 The mandatory offline lane on a disposable Ubuntu 24.04 VM ran against the exact final commit and reported **132 passed, 0 failed, 0 skipped**. A broader lane including import-knowledge shell tests reported **140 passed, 0 failed, 2 environment-gated skips** in 26.68 seconds.

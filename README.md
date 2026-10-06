@@ -49,13 +49,13 @@ The campaign included three earlier verified ARC task solves during the broader 
 - ASI:One (`asi1-ultra`) is validated through the live deployment with PR #358 native tool calls (`provider=ASIOne model=asi1-ultra finish_reason=tool_calls`).
 - Free-router LLM output is variable and not reliable as a continuous solver.
 - PR #358 replaces text-command emulation with the native tools API, but does not by itself guarantee ARC reasoning quality; at the reviewed head, skill parameters were typed as strings.
-- The bounded DAS adapter and the separately gated DAS campaign-import path are deployed and validated end-to-end twice in production (initial import 2026-10-05, delta import 2026-10-06). The live `omega-curiosity` container runs the DAS-enabled image attached to the internal DAS client network and performs bounded DAS reads; its observed `&persistent` operations remain local Omega persistence, not direct DAS writes.
+- The bounded DAS adapter is deployed and validated. Three operator import operations were independently verified in production: the initial 2026-10-05 import, an earlier five-fact delta on 2026-10-06, and the final 20-fact pre-uplift delta on 2026-10-06. The live `omega-curiosity` container runs the DAS-enabled image attached to the internal DAS client network and performs bounded DAS reads; its observed `&persistent` operations remain local Omega persistence, not direct DAS writes.
 
 ## Reproducible setup
 
-Requirements: Docker Engine and Docker Compose, or a single host with Python 3.10+ and network access to the provider. The exact versions validated are documented in the per-artifact provenance sections.
+The validated deployment requires a Linux host with Git and Docker Engine; Docker Compose is also required when deploying the optional DAS stack. The host needs network access to the selected inference provider and communication channel. Exact validated versions and provenance are recorded in the artifacts below.
 
-1. Build a PR #358 image (see provenance below) or use an upstream release once PR #358 lands.
+1. Build the exact v0.1.20 + PR #358 fork commit using the [uplift build procedure](artifacts/omega-1020-uplift.md#reproduce-the-validated-build). Plain upstream v0.1.20 is insufficient because it does not include PR #358.
 2. Configure provider auth (ASI:One) and ARC tool credentials through read-only mounted secret files or environment variables; never commit secrets.
 3. Configure the optional DAS read-only lane (disabled by default) if retrieval-augmented tool use is desired.
 4. If DAS data must be seeded or imported, follow the [operator DAS import runbook](artifacts/operator-das-import-runbook.md); never grant the autonomous Omega loop a direct DAS write endpoint.
@@ -102,6 +102,6 @@ The DAS integration reference is [`artifacts/omega-das-integration.md`](artifact
 
 ## Bottom line
 
-The infrastructure and autonomous tooling were validated, including one correct autonomous ARC solution, active local Omega persistence, a verified bounded DAS read path, and a separately gated DAS import path executed twice in production. The uplifted live deployment uses ASI:One `asi1-ultra`; the live agent does not write directly to DAS. Historical free-router reasoning limitations still apply to the earlier campaign results.
+The infrastructure and autonomous tooling were validated, including one correct autonomous ARC solution, active local Omega persistence, a verified bounded DAS read path, and a separately gated DAS import path executed three times in production. The uplifted live deployment uses ASI:One `asi1-ultra`; the live agent does not write directly to DAS. Historical free-router reasoning limitations still apply to the earlier campaign results.
 
 > This is a field report. It intentionally does not claim a reproducible one-command deployment while PR #358 remains an externally merged fork change rather than part of the validated upstream release.

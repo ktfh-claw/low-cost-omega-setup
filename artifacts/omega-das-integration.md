@@ -4,15 +4,15 @@
 **Scope:** private, internal-only DAS deployment; bounded read access and separately authorized import/write operations.
 **Important:** Omega local MeTTa persistence and DAS persistence are different systems. This document records the interface boundary and the evidence required for each claim.
 
-## Status at the documented deployment snapshot (2026-10-05)
+## Historical deployment snapshot (2026-10-05)
 
-> **Current live state (updated 2026-10-06):** the sections below describe the 2026-10-05 snapshot taken before the DAS-enabled cutover. The deployment now runs `omegaclaw:das-0d61c8e` from `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `0d61c8e`, attached to the internal DAS client network, with `OMEGA_DAS_ENABLED=1` and the bounded `das-retrieve` tool registered. DAS writes remain operator-only via the [import runbook](operator-das-import-runbook.md); the agent still has no write capability. Two operator imports have been executed and independently verified (`omega-curiosity-20261005-final`, `omega-curiosity-20261006`). The snapshot text is retained as the integration-lane record.
+> **Current live state (updated 2026-10-06):** the deployment now runs `omegaclaw:das-0d61c8e` from `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `0d61c8e`, attached to the internal DAS client network, with `OMEGA_DAS_ENABLED=1` and the bounded `das-retrieve` tool registered. DAS writes remain operator-only via the [import runbook](operator-das-import-runbook.md); the agent still has no write capability. Three import operations were independently verified: the initial 2026-10-05 import, an earlier five-fact delta on 2026-10-06, and the final 20-fact pre-uplift delta. The bullets immediately below are retained only as the pre-cutover integration snapshot.
 
-- `omega-curiosity` is the Telegram-facing autonomous Omega agent, running `omegaclaw:pr358-c193ab3`.
-- Its logs show successful `add-atom &persistent …` operations and campaign-state appends. These are **local Omega/PeTTa persistent-space writes**.
-- The live container is on Docker's default `bridge` network only. It has no DAS adapter files, DAS environment variables, or attachment to the DAS client network. Therefore it **does not directly write atoms to DAS**.
-- The DAS stack is a separate internal compose deployment. Its services are running, and Redis reported `DBSIZE 8884` during the snapshot inspection. That counter alone does not attribute any record to `omega-curiosity`.
-- A bounded DAS read adapter and a separately gated campaign import/write tool were validated on dedicated integration lanes. They are not automatically enabled merely because the DAS services are running.
+- At that snapshot, `omega-curiosity` was the Telegram-facing autonomous Omega agent and ran `omegaclaw:pr358-c193ab3`.
+- Its logs showed successful `add-atom &persistent …` operations and campaign-state appends. Those were **local Omega/PeTTa persistent-space writes**.
+- The snapshot container was on Docker's default `bridge` network only. It had no DAS adapter files, DAS environment variables, or attachment to the DAS client network. Therefore it **did not directly write atoms to DAS**.
+- The DAS stack was a separate internal compose deployment. Its services were running, and Redis reported `DBSIZE 8884` during the snapshot inspection. That counter alone did not attribute any record to `omega-curiosity`.
+- A bounded DAS read adapter and a separately gated campaign import/write tool had been validated on dedicated integration lanes. They were not automatically enabled merely because the DAS services were running.
 
 ## Architecture and trust boundary
 

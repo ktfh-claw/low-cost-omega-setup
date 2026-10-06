@@ -244,7 +244,7 @@ docker image inspect --format="{{json .Id}}" "$tag"
 ```bash
 # Retrieve the exact commit for the built image (if you used the versioned-source stage)
 # The version file should contain the source Git commit
-docker run --rm -v "$(pwd)/tmp:/tmp" "$tag" sh -c 'cat /omega-source/version 2>/dev/null || echo "version file not found"'
+docker run --rm "$tag" sh -c 'cat /PeTTa/repos/Omega/version'
 
 # Check the entrypoint script to ensure PR #358 changes are included
 # Look for specific changes from PR #358, such as native tool calls, etc.
@@ -256,8 +256,8 @@ docker run --rm -v "$(pwd)/tmp:/tmp" "$tag" sh -c 'cat /omega-source/version 2>/
 
 - **Dockerfile:** Available in the Omega source tree at `c193ab39857944017e067b426779d66113649313/Dockerfile`
 - **requirements.txt:** `c193ab39857944017e067b426779d66113649313/requirements.txt`
-- **Version file:** Generated during the build, contains the source Git commit
-- **Image layer digests:** All layers are pinned to the exact build commands and file checksums
+- **Version file:** Generated during the build at `/PeTTa/repos/Omega/version`; it contains the source Git commit.
+- **Image identity:** Record the image ID and layer digests produced by the build. The recipe does not guarantee a bit-for-bit identical image because the base image is tag-selected, `CHROMADB_REF` is `master`, and OS/Python package indexes can change.
 
 ---
 
@@ -272,7 +272,7 @@ docker run --rm -v "$(pwd)/tmp:/tmp" "$tag" sh -c 'cat /omega-source/version 2>/
 
 ## Notes
 
-1. **Reproducibility:** All arguments and tool versions are pinned at the build time to ensure reproducibility.
+1. **Reproducibility:** The Omega checkout, PeTTa and FAISS tags, and explicit Torch version are pinned. For stronger reproducibility, also pin the base image by digest, replace `CHROMADB_REF=master` with a commit, and lock OS/Python dependencies.
 2. **Security:** The build does not expose any secrets or internal files.
 3. **Dependencies:** All Python dependencies are installed via `requirements.txt`.
 4. **Pre-downloaded assets:** The embedding model (`intfloat/e5-large-v2`) is downloaded during the build to eliminate runtime network dependencies.
