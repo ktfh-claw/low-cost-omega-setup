@@ -65,14 +65,10 @@ OMEGA_DAS_ENABLED=1
 OMEGA_DAS_PROXY_ORIGIN=http://read-proxy:8080
 ```
 
-The validated service launcher is equivalent to the following sanitized command sequence. The named volume is mounted directly at the post-OMEGA-468 memory directory. Docker creates the container on the default `bridge`; the second network attachment adds only the internal DAS client route.
+The following minimal launch template applies the evidence-backed deployment settings. The named volume is mounted directly at the post-OMEGA-468 memory directory. Docker creates the container on the default `bridge`; the second network attachment adds only the internal DAS client route. Add host-specific hardening and service supervision separately.
 
 ```bash
 docker create --rm --name omega-curiosity -t \
-  --security-opt no-new-privileges:true --init \
-  --tmpfs /tmp:size=256m,mode=1777 \
-  --tmpfs /var/tmp:size=64m,mode=1777 \
-  --tmpfs /run:size=16m,mode=755 \
   --volume omega-curiosity-memory:/PeTTa/repos/Omega/memory \
   --env-file "$(pwd)/runtime.env" \
   omegaclaw:das-0d61c8e \
