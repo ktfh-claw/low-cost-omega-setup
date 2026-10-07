@@ -6,7 +6,7 @@
 
 ## Historical deployment snapshot (2026-10-05)
 
-> **Current live state (updated 2026-10-06):** the deployment now runs `omegaclaw:das-0d61c8e` from `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `0d61c8e`, attached to the internal DAS client network, with `OMEGA_DAS_ENABLED=1` and the bounded `das-retrieve` tool registered. DAS writes remain operator-only via the [import runbook](operator-das-import-runbook.md); the agent still has no write capability. Three import operations were independently verified: the initial 2026-10-05 import, an earlier five-fact delta on 2026-10-06, and the final 20-fact pre-uplift delta. The bullets immediately below are retained only as the pre-cutover integration snapshot.
+> **Current live state (updated 2026-10-07):** the deployment now runs `omegaclaw:das-f38217f` from `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `f38217f`, attached to the internal DAS client network, with `OMEGA_DAS_ENABLED=1` and the bounded `das-retrieve` tool registered. DAS writes remain operator-only via the [import runbook](operator-das-import-runbook.md); the agent still has no write capability. Three import operations were independently verified: the initial 2026-10-05 import, an earlier five-fact delta on 2026-10-06, and the final 20-fact pre-uplift delta. The bullets immediately below are retained only as the pre-cutover integration snapshot.
 
 - At that snapshot, `omega-curiosity` was the Telegram-facing autonomous Omega agent and ran `omegaclaw:pr358-c193ab3`.
 - Its logs showed successful `add-atom &persistent …` operations and campaign-state appends. Those were **local Omega/PeTTa persistent-space writes**.
@@ -57,8 +57,8 @@ Do not use generic service health, Redis `DBSIZE`, or `&persistent` log text as 
 
 | Component | Reference |
 |---|---|
-| Current Omega runtime image | `omegaclaw:das-0d61c8e`, digest `sha256:f29ccb27a7a07b2d29affea327d43105bd89ec1ec399fbf349af75d5c26bd272` |
-| Current DAS-capable Omega source | `https://github.com/ktfh-claw/OmegaClaw-Core`, branch `uplift-v0.1.20-pr358` at `0d61c8eff59dcfdbac7c358315e08d3c179b7c7a` |
+| Current Omega runtime image | `omegaclaw:das-f38217f`, digest `sha256:d9d157826beb152e0d4f5183ed69ac6acff30b65267a599db68bb6fe625efe2c` |
+| Current DAS-capable Omega source | `https://github.com/ktfh-claw/OmegaClaw-Core`, branch `uplift-v0.1.20-pr358` at `f38217fa6b34a277cd4c0e780d2340af85eb4f67` |
 | Historical Omega runtime image | `omegaclaw:pr358-c193ab3`, PR #358 fork commit `c193ab39857944017e067b426779d66113649313` |
 | Historical Omega on-disk source | `7037f4c2ad378c52fc328004fe216d5118b674f0` (`v0.1.11.1-899-gc193ab3`) |
 | Historical DAS-capable Omega source | `https://github.com/ktfh-claw/OmegaClaw-Core` at `bd6638a3fd492348da5d32291a163c6dad1a95f0`; adapter baseline `0ba45fd210c8e44699e56e4afe3832e424214226` |
@@ -126,4 +126,4 @@ This design keeps an LLM-controlled agent out of the write path. It protects the
 - Enabling automatic LLM-directed writes would be a different security design and is intentionally outside this documented setup.
 
 ---
-*Last updated: 2026-10-06.*
+*Last updated: 2026-10-07.*

@@ -67,22 +67,24 @@ The validated deployment requires a Linux host with Git and Docker Engine; Docke
 - Omega PR #358 (native tools API): https://github.com/singnet/Omega/pull/358
 - Omega v0.1.20 release: `19e94bb336378eebb66e8e689d0d3ff0e1bf5f77`
 - Omega PR #358 head: `c193ab39857944017e067b426779d66113649313` (still open and not included in v0.1.20 at validation time)
-- Merged fork branch: `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `0d61c8eff59dcfdbac7c358315e08d3c179b7c7a` (v0.1.20 + PR #358 + fork ARC/DAS/nginx line + validation fixes)
-- Live image: `omegaclaw:das-0d61c8e`, digest `sha256:f29ccb27a7a07b2d29affea327d43105bd89ec1ec399fbf349af75d5c26bd272`, size 2.34 GB
+- Merged fork branch: `ktfh-claw/OmegaClaw-Core` branch `uplift-v0.1.20-pr358` at `f38217fa6b34a277cd4c0e780d2340af85eb4f67` (v0.1.20 + PR #358 + fork ARC/DAS/nginx line + validation fixes + opt-in Telegram autonomous wakes)
+- Live image: `omegaclaw:das-f38217f`, digest `sha256:d9d157826beb152e0d4f5183ed69ac6acff30b65267a599db68bb6fe625efe2c`, size approximately 2.34 GB
 - Full construction and validation evidence: [`artifacts/omega-1020-uplift.md`](artifacts/omega-1020-uplift.md)
 - ARC-AGI benchmark: https://github.com/fchollet/ARC-AGI
 - ARC-AGI REST API (field report): https://github.com/ktfh-claw/ARC-AGI
 
-## Live deployment state (as of 2026-10-06)
+## Live deployment state (as of 2026-10-07)
 
 | Property | Value |
 |---|---|
 | Container | `omega-curiosity` |
-| Image | `omegaclaw:das-0d61c8e` (2.34 GB; `sha256:f29ccb27a7a07b2d29affea327d43105bd89ec1ec399fbf349af75d5c26bd272`) |
-| Source | `ktfh-claw/OmegaClaw-Core`, branch `uplift-v0.1.20-pr358` at `0d61c8eff59dcfdbac7c358315e08d3c179b7c7a` |
+| Image | `omegaclaw:das-f38217f` (approximately 2.34 GB; `sha256:d9d157826beb152e0d4f5183ed69ac6acff30b65267a599db68bb6fe625efe2c`) |
+| Source | `ktfh-claw/OmegaClaw-Core`, branch `uplift-v0.1.20-pr358` at `f38217fa6b34a277cd4c0e780d2340af85eb4f67` |
 | Provider | ASIOne / `asi1-ultra` |
 | Embedding provider | Local |
 | Channel | Telegram |
+| Campaign mode | Opt-in autonomous Telegram wakes enabled by the bare `telegramAutonomousWake` launch argument; upstream/default message-driven behavior remains available when omitted. |
+| Mission | Research Fetch.ai use cases and existing projects, then continue open-ended decentralized-AI research using arXiv papers and Substack posts; prompt stored in the campaign memory volume. |
 | Network | Default bridge + internal DAS client network (`omega-das-integration-client`) |
 | Omega local persistence | **Enabled** — campaign volume mounted at `/PeTTa/repos/Omega/memory` after the OMEGA-468 path migration. |
 | DAS read integration | **Enabled** — `OMEGA_DAS_ENABLED=1`; the registered `das-retrieve` tool performs bounded reads through the internal read proxy. |
@@ -91,7 +93,7 @@ The validated deployment requires a Linux host with Git and Docker Engine; Docke
 
 ## Omega v0.1.20 uplift
 
-The live deployment was uplifted on 2026-10-06. Because upstream v0.1.20 did not contain the still-open PR #358, the deployed fork merges v0.1.20, PR #358's native tools API, and the fork's guarded ARC, read-only DAS, and nginx changes. The exact merge construction, 132-test mandatory lane, broader 140-pass lane, deployment configuration, and live validation matrix are recorded in [`artifacts/omega-1020-uplift.md`](artifacts/omega-1020-uplift.md).
+The live deployment was uplifted on 2026-10-06 and received its final autonomous-wake fixes on 2026-10-07. Because upstream v0.1.20 did not contain the still-open PR #358, the deployed fork merges v0.1.20, PR #358's native tools API, and the fork's guarded ARC, read-only DAS, and nginx changes. It also adds a default-off Telegram autonomous-wake option and runtime-tested fixes for two production regressions found while enabling it. The exact construction, test evidence, deployment configuration, wake-fix journey, and live validation matrix are recorded in [`artifacts/omega-1020-uplift.md`](artifacts/omega-1020-uplift.md).
 
 The DAS integration reference is [`artifacts/omega-das-integration.md`](artifacts/omega-das-integration.md), and the live operator write path is documented in [`artifacts/operator-das-import-runbook.md`](artifacts/operator-das-import-runbook.md). The historical PR #358 container build procedure is preserved in [`artifacts/container-build.md`](artifacts/container-build.md) for reference.
 
