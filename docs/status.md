@@ -15,6 +15,7 @@ Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Re
 - **Google Doc:** re-opened as live progress doc; §16 "Execution campaign" appended with directive, plan, iteration-1 entry, repo/fork links.
 - **Cron:** `omega-das-bridge-30m` activated (30-min isolated agentTurn; disabled at pause points, removed at close-out).
 - **GitHub:** bridge repo pushed: https://github.com/ktfh-claw/low-cost-omega-setup (main @ 975518e) — links recorded in the doc.
+- **Overlay + deployment set added** (Balázs follow-up 22:06 UTC): full Omega config overlay (`deploy/omega/config-overlay.yaml`, verbatim from the live OVH campaign), `start.sh`, systemd unit, `runtime.env.example` (keys only), plus the DAS side (`deploy/das/`: digest-pinned compose, config template + render scripts, bounded read proxy, ops scripts) → [commit 8f0f666](https://github.com/ktfh-claw/low-cost-omega-setup/commit/8f0f666). Secrets excluded; pre-bridge DAS README preserved in `historical/`.
 - **Next (iteration 2):** Phase 1 start — read-proxy MeTTa-mode config wrapper + `das-write` skill v1 skeleton; spawn coder-opencode for the python-client wrapper module.
 
 ## Evidence pointers

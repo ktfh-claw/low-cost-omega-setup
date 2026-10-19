@@ -1,0 +1,8 @@
+# Secrets — never commit real credential files (use the *.example templates)
+deploy/omega/runtime.env
+deploy/das/.env
+
+# Generated artifacts
+deploy/das/generated/
+__pycache__/
+*.pyc
