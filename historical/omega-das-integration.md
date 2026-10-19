@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-19):** this historical document describes the pre-bridge operator-gated DAS import lane. The current design is the agent-direct Path B bridge documented in the repo README and `docs/`. Retained for historical provenance only.
+
 # Omega persistence and Distributed AtomSpace (DAS) integration
 
 **Canonical task:** `omega-das-integration`
