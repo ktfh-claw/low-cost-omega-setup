@@ -1,0 +1,180 @@
+name: omega-das-integration
+
+x-task-labels: &task-labels
+  io.ktfh-claw.task: omega-das-integration
+  io.ktfh-claw.purpose: experimental-read-only-retrieval
+
+services:
+  read-proxy:
+    build:
+      context: ./proxy
+      args:
+        PYTHON_IMAGE_DIGEST: ${PYTHON_IMAGE_DIGEST:?set PYTHON_IMAGE_DIGEST to sha256:<64 hex chars>}
+    environment:
+      DAS_CALLBACK_PORT_LOWER: "43000"
+      DAS_CALLBACK_PORT_UPPER: "43031"
+      DAS_CALLBACK_PEER_HOST: query-engine
+      DAS_CLIENT_ENDPOINT: read-proxy:42999
+      DAS_QUERY_ENGINE: query-engine:40002
+      PROXY_HTTP_HOST: 0.0.0.0
+      PROXY_HTTP_PORT: "8080"
+      PROXY_MAX_ANSWERS: "100"
+      PROXY_MAX_QUERY_TOKENS: "256"
+      PROXY_QUERY_TIMEOUT_SECONDS: "60"
+    networks: [client]
+    labels: *task-labels
+    restart: unless-stopped
+    depends_on:
+      query-engine: {condition: service_started}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  mongodb:
+    image: mongodb/mongodb-community-server@${MONGODB_IMAGE_DIGEST:?set MONGODB_IMAGE_DIGEST to sha256:<64 hex chars>}
+    command: ["mongod", "--bind_ip_all", "--port", "27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USERNAME:?set MONGODB_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:?set MONGODB_PASSWORD}
+      MONGODB_INITDB_ROOT_USERNAME: ${MONGODB_USERNAME:?set MONGODB_USERNAME}
+      MONGODB_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:?set MONGODB_PASSWORD}
+    volumes:
+      - omega-das-integration-mongodb:/data/db
+    networks: [backend]
+    labels: *task-labels
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 2)' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    security_opt: ["no-new-privileges:true"]
+
+  redis:
+    image: redis@${REDIS_IMAGE_DIGEST:?set REDIS_IMAGE_DIGEST to sha256:<64 hex chars>}
+    command: ["redis-server", "--port", "6379", "--appendonly", "yes", "--protected-mode", "no", "--bind", "0.0.0.0"]
+    volumes:
+      - omega-das-integration-redis:/data
+    networks: [backend]
+    labels: *task-labels
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    security_opt: ["no-new-privileges:true"]
+
+  attention-broker:
+    image: trueagi/das@${DAS_IMAGE_DIGEST:?set DAS_IMAGE_DIGEST to sha256:<64 hex chars>}
+    command: ["attention_broker_service", "0.0.0.0:40001"]
+    networks: [backend]
+    labels: *task-labels
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  query-engine:
+    image: trueagi/das@${DAS_IMAGE_DIGEST:?set DAS_IMAGE_DIGEST to sha256:<64 hex chars>}
+    command:
+      - busnode
+      - --service=query-engine
+      - --endpoint=0.0.0.0:40002
+      - --ports-range=42000:42999
+      - --atomdb-type=redismongodb
+      - --config=/etc/das/config.json
+      - --attention-broker-endpoint=attention-broker:40001
+      - --bus-endpoint=query-engine:40002
+    volumes:
+      - ./generated/config.json:/etc/das/config.json:ro
+    networks: [backend, client]
+    labels: *task-labels
+    restart: unless-stopped
+    depends_on:
+      mongodb: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      attention-broker: {condition: service_started}
+    security_opt: ["no-new-privileges:true"]
+
+  # Operator-only, one-shot services. Neither service is started by `compose up`.
+  # The loader command is intentionally fixed: the operator wrapper controls both
+  # bind sources and does not pass through db_loader flags.
+  campaign-loader:
+    profiles: ["operator"]
+    image: trueagi/das@${DAS_IMAGE_DIGEST:?set DAS_IMAGE_DIGEST to sha256:<64 hex chars>}
+    command:
+      - db_loader
+      - --config=/etc/das/config.json
+      - --file=/input/campaign.metta
+    volumes:
+      - type: bind
+        source: ./generated/config.json
+        target: /etc/das/config.json
+        read_only: true
+      - type: bind
+        source: ${CAMPAIGN_IMPORT_FILE:-/dev/null}
+        target: /input/campaign.metta
+        read_only: true
+    networks: [backend]
+    labels:
+      io.ktfh-claw.task: omega-das-integration
+      io.ktfh-claw.purpose: operator-campaign-import
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+  campaign-backup:
+    profiles: ["operator"]
+    image: python@${PYTHON_IMAGE_DIGEST:?set PYTHON_IMAGE_DIGEST to sha256:<64 hex chars>}
+    command: ["python3", "/opt/backup-volumes.py", "/backup"]
+    network_mode: none
+    volumes:
+      - type: volume
+        source: omega-das-integration-mongodb
+        target: /source/mongodb
+        read_only: true
+      - type: volume
+        source: omega-das-integration-redis
+        target: /source/redis
+        read_only: true
+      - type: bind
+        source: ${CAMPAIGN_BACKUP_DIR:-/dev/null}
+        target: /backup
+      - ./scripts/backup-volumes.py:/opt/backup-volumes.py:ro
+    labels:
+      io.ktfh-claw.task: omega-das-integration
+      io.ktfh-claw.purpose: operator-datastore-backup
+    restart: "no"
+    user: "0:0"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    # Required to read database files owned by the two images and to write the
+    # host bind. The datastore mounts themselves remain read-only.
+    cap_add: ["DAC_OVERRIDE", "DAC_READ_SEARCH"]
+
+networks:
+  backend:
+    name: omega-das-integration-backend
+    internal: true
+    labels: *task-labels
+  client:
+    name: omega-das-integration-client
+    internal: true
+    labels: *task-labels
+
+volumes:
+  omega-das-integration-mongodb:
+    name: omega-das-integration-mongodb
+    labels: *task-labels
+  omega-das-integration-redis:
+    name: omega-das-integration-redis
+    labels: *task-labels

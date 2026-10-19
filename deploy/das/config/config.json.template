@@ -1,0 +1,41 @@
+{
+  "atomdb": {
+    "uid": "omega-das-integration",
+    "type": "redismongodb",
+    "composite_type_enabled": true,
+    "mongodb": {
+      "image": "runtime-is-compose-managed",
+      "endpoint": "mongodb:27017",
+      "username": "__MONGODB_USERNAME__",
+      "password": "__MONGODB_PASSWORD__",
+      "cluster": false,
+      "cluster_secret_key": "None",
+      "nodes": [{"context": "default", "ip": "mongodb", "username": "container"}]
+    },
+    "redis": {
+      "image": "runtime-is-compose-managed",
+      "endpoint": "redis:6379",
+      "cluster": false,
+      "nodes": [{"context": "default", "ip": "redis", "username": "container"}]
+    }
+  },
+  "loaders": {
+    "metta": {"image": "unused-in-read-only-poc"},
+    "morkdb": {"image": "unused-in-read-only-poc"}
+  },
+  "vault": {"type": "none", "endpoint": "unused:1"},
+  "agents": {
+    "schema_version": "1.2.0",
+    "attention": {"endpoint": "attention-broker:40001"},
+    "base_proxy": {"params": {"orchestration_schema": 0}},
+    "base_query": {"params": {"unique_assignment_flag": false, "attention_update": 0, "attention_correlation": 0, "attention_focus_strictness": 0.0, "max_bundle_size": 1000, "max_answers": 0, "populate_metta_mapping": false, "use_metta_as_query_tokens": false, "allow_incomplete_chain_path": false, "public_key_tokens": ""}},
+    "query": {"endpoint": "query-engine:40002", "ports_range": "42000:42999", "params": {"positive_importance_flag": false, "disregard_importance_flag": true, "unique_value_flag": false, "count_flag": false}},
+    "link_creation": {"endpoint": "unused:40003", "ports_range": "43000:43999", "params": {"unique_assignment_flag": false, "positive_importance_flag": false, "disregard_importance_flag": true, "unique_value_flag": false, "max_successful_creation_per_round": 0, "max_unproductive_visits_per_round": 0, "max_visit_attempts_per_round": 0, "max_rounds": 0, "link_creation_strength_threshold": 1.0}},
+    "evolution": {"endpoint": "unused:40005", "ports_range": "45000:45999", "params": {"population_size": 0, "max_generations": 0, "elitism_rate": 0.0, "selection_rate": 0.0}},
+    "context": {"endpoint": "unused:40006", "ports_range": "46000:46999", "params": {"context": "unused", "use_cache": false, "enforce_cache_recreation": false, "initial_rent_rate": 0.0, "initial_spreading_rate_lowerbound": 0.0, "initial_spreading_rate_upperbound": 0.0}},
+    "atomdb": {"endpoint": "unused:40007", "ports_range": "47000:47999"},
+    "command_router": {"endpoint": "unused:40008", "ports_range": "48000:48999", "http_api": {"endpoint": "unused:40009", "thread_pool_size": 1, "max_concurrent_executions": 1, "max_queued_executions": 1, "max_events_per_execution": 1, "stream_items_per_chunk": 1, "execution_retention_ms": 1}}
+  },
+  "environment": {"jupyter": {"endpoint": "unused:40019"}},
+  "services": {"database": {"atomdb_backend": "redis_mongodb"}}
+}

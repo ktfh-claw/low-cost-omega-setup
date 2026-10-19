@@ -1,0 +1,19 @@
+[Unit]
+Description=Omega curiosity exploration campaign
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+SupplementaryGroups=docker
+ExecStart=/home/ubuntu/omega-curiosity/start.sh
+ExecStop=-/usr/bin/docker stop -t 30 omega-curiosity
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
