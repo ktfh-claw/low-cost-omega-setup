@@ -43,7 +43,9 @@ class DasQueryRunner:
         ).get_instance()
         self._lock = threading.Lock()
 
-    def query(self, tokens: list[str], max_answers: int, timeout: float) -> list[dict[str, Any]]:
+    def query(
+        self, tokens: list[str], max_answers: int, timeout: float, metta_mode: bool = False
+    ) -> list[dict[str, Any]]:
         proxy = PatternMatchingQueryProxy(tokens=tokens)
         # These values are fixed here, not copied from the HTTP request. The only
         # permitted operation is pattern matching, without attention updates.
@@ -53,9 +55,16 @@ class DasQueryRunner:
         proxy.set_parameter("unique_assignment_flag", False)
         proxy.set_parameter("use_link_template_cache", False)
         proxy.set_parameter("populate_metta_mapping", False)
-        proxy.set_parameter("user_metta_as_query_tokens", False)
         proxy.set_parameter("max_bundle_size", min(max_answers, 100))
         proxy.set_parameter("max_answers", max_answers)
+        # MeTTa-form queries: the pinned python client ships a typo'd parameter
+        # name constant ("user_metta_as_query_tokens", base.py USE_METTA_AS_QUERY_TOKENS)
+        # while the C++ server reads "use_metta_as_query_tokens" (BaseQueryProxy.cc).
+        # Setting the correctly-spelled key directly keeps this a config-only fix:
+        # the server parses the single MeTTa token with its own MettaParser when
+        # the flag is true (verified live 2026-10-18, re-eval experiment B).
+        proxy.parameters.pop("user_metta_as_query_tokens", None)
+        proxy.set_parameter("use_metta_as_query_tokens", bool(metta_mode))
 
         answers: list[dict[str, Any]] = []
         deadline = time.monotonic() + timeout

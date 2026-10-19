@@ -1,0 +1,63 @@
+# Write-bridge service for the existing omega-das-integration deployment.
+#
+# The atomdb-broker itself is deployed OUT of compose (live-verified command
+# from 2026-10-18, re-eval campaign E1; see docs/architecture.md section 5):
+#
+#   docker run -d --name omega-das-integration-atomdb-broker \
+#     --network omega-das-integration-backend --network omega-das-integration-client \
+#     --restart unless-stopped \
+#     -v $PWD/generated/config.json:/etc/das/config.json:ro \
+#     trueagi/das@sha256:<DAS_IMAGE_DIGEST> \
+#     busnode --service=atomdb-broker --endpoint=0.0.0.0:40007 \
+#       --ports-range=47000:47999 --atomdb-type=redismongodb --config=/etc/das/config.json
+#
+# Broker deployment invariants (violating any of these breaks the lane):
+#   1. bind 0.0.0.0 (not a hostname) in multi-network docker;
+#   2. clients join the broker DIRECTLY (DAS_BROKER_ENDPOINT = broker DNS
+#      name); a mis-routed atomdb command crashes the query engine;
+#   3. the callback-peer rewrite host for atomdb commands is the broker
+#      name (DAS_BROKER_PEER_HOST).
+#
+# This snippet attaches to the networks created by deploy/das/compose.yaml;
+# start that stack first (docker compose -f deploy/das/compose.yaml up -d).
+
+name: omega-das-write-bridge
+
+x-task-labels: &task-labels
+  io.ktfh-claw.task: omega-das-integration
+  io.ktfh-claw.purpose: experimental-write-bridge
+
+services:
+  write-bridge:
+    build:
+      context: ./write-bridge
+      args:
+        PYTHON_IMAGE_DIGEST: ${PYTHON_IMAGE_DIGEST:?set PYTHON_IMAGE_DIGEST to sha256:<64 hex chars>}
+    environment:
+      # Direct broker join (invariant 2) -- never route atomdb via query-engine.
+      DAS_BROKER_ENDPOINT: atomdb-broker:40007
+      # Callback-peer rewrite host for atomdb commands (invariant 3).
+      DAS_BROKER_PEER_HOST: atomdb-broker
+      # Read-back verification joins the query engine directly instead.
+      DAS_QUERY_ENGINE: query-engine:40002
+      DAS_CALLBACK_PORT_LOWER: "43300"
+      DAS_CALLBACK_PORT_UPPER: "43331"
+      DAS_CLIENT_ENDPOINT: write-bridge:43999
+      DAS_VERIFY_TIMEOUT_SECONDS: "30"
+      DAS_PEER_JOIN_TIMEOUT_SECONDS: "10"
+      WRITE_HTTP_HOST: 0.0.0.0
+      WRITE_HTTP_PORT: "8080"
+      WRITE_MAX_METTA_CHARS: "2048"
+    networks: [client]
+    labels: *task-labels
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+networks:
+  client:
+    name: omega-das-integration-client
+    external: true
