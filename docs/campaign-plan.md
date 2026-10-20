@@ -17,9 +17,9 @@
 - [x] Write path verification: canary fact written by the lane, read back through the metta query path, then removed with zero residue — **two consecutive fully green loops (iter7-a1, iter8-a1)**, each with a first-pass-correct oracle absence verdict and mongo ground truth (totals 1864/3710 unchanged).
 - [x] Absence oracle (added beyond the original plan, iters 6–7): alternate-pattern verification + bounded standby re-checks; the in-window absence verdict is no longer advisory. Residual upstream ask (fork-local draft): delete-apply ack.
 
-### Phase 2 — Integration
-- [ ] Thin import wrapper (segmentation → syntax gate → newline-escape fallback → provenance → db_loader) replacing the operator lane for bulk loads; validated against a copy of real history.metta (expected ≥99%).
-- [ ] `&persistent` interception hook in the Omega skill layer; agent persistence vocabulary becomes durable DAS writes (agent container resumes with skill mounted; service stays disabled until Balázs re-activates the Omega campaign — verify the hook in a test container first, do not restart the live agent without approval).
+### Phase 2 — Integration — **COMPLETE 2026-10-20 05:55 UTC** (both items live-validated)
+- [x] Thin import wrapper (segmentation → syntax gate → newline-escape fallback → provenance → db_loader) replacing the operator lane for bulk loads; validated against a copy of real history.metta — **99.17% yield (8,216/8,285), atom_types 0, exactly one ground CampaignProvenance link per entry** (iters 9–10).
+- [x] `&persistent` interception hook in the Omega skill layer (plugin `das-write`, config-only): agent persistence vocabulary becomes durable, verified DAS writes; validated in a test container (enabled path: BRIDGE-PERSIST-OK verified=7 + read-proxy read-back + oracle cleanup + mongo zero-residue; disabled path: zero behavioral change). **Live agent stays STOPPED — restart only with explicit Balázs approval.**
 
 ### Phase 3 — Upstream contribution ladder (fork-local drafts)
 - [ ] All 5 issue drafts finalized in `docs/contributions/` (re-validated against latest upstream).

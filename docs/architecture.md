@@ -62,7 +62,7 @@ This replaces the retired `campaign_import.py` operator lane for bulk loads; pro
 - **Skill I/O (`das-write`):** input = MeTTa expression(s) + optional provenance metadata; output = verified handle list or explicit failure with stage. The skill never returns success without read-back.
 - **Handles:** Mongo document `_id`/`handle` values as produced upstream (MD5-based, deterministic).
 - **Provenance schema (bridge-owned):** atoms linking each persisted fact to campaign id, source, and store epoch — implemented as regular atoms via the same write path; documented in `skills/das-write/`.
-- **`&persistent` hook:** interception at the Omega skill layer (`skills.metta` route), so the agent's existing `add-atom &persistent …` vocabulary flows into the bridge write path; local PeTTa persistence behavior is preserved as-is.
+- **`&persistent` hook (implemented, iteration 11):** the `das-write` Omega plugin rebinds the `metta` skill clause — the stock clause is removed and a bridged clause installed (single-definition invariant: a second clause would double-evaluate). `add-atom &persistent <balanced-expression>` routes to the write-bridge `/v1/write` endpoint with mandatory read-back verification; `remove-atom &persistent` returns a truthful not-supported status (v1 does not bridge deletion); when the stock config key `dasWriteEnabled != 1` nothing changes (stock clause stays in place, the Python module double-gates on every call). Config keys (not raw env vars — the stock image entrypoint scrubs the agent environment to an allowlist) resolve through Omega's stock config machinery: command line > `OMEGA_<key>` env > config.yaml. Plugin + overlay under `deploy/omega/plugins/das-write/`.
 
 ## 4. Deployment topology (validated host: OVH `omega-experimental`)
 
