@@ -151,16 +151,30 @@ lists with a trailing `delete_link_targets` flag; `--delete-link-targets`
 opts into recursive target deletion). Deletion is fire-and-forget too — the
 read-back absence check is what makes the result credible.
 
-Deletion is also **eventual** (live-measured iterations 3+4): the
-server-side apply ranged from ~1-2 s to >= 10-13 s from the delete command
-(and each verify pass itself costs seconds — one bus round-trip per link).
-`cleanup.py` therefore verifies absence inside a bounded grace window
-(defaults: `--grace-seconds 30`, `--poll-interval 1`; first check immediate,
-`attempts` reported in the result; bus failures fail fast, never retried).
+Deletion is also **eventual** (live-measured iterations 3-5): the
+server-side apply ranged from ~1-2 s to >= 10-13 s to >= ~33 s from the
+delete command (and each verify pass itself costs seconds — one bus
+round-trip per link). `cleanup.py` therefore verifies absence inside a
+bounded grace window (defaults: `--grace-seconds 90`, `--poll-interval 1`;
+first check immediate, `attempts` reported in the result; bus failures fail
+fast, never retried). The window early-exits on success, so the wide default
+costs nothing when the delete lands fast.
 A persistent `absent: false` after the window means the delete genuinely
 did not land — re-run or investigate, do not ignore.
 
 ## Deployment
+
+- Resolve the builder digest first (the same pinned python image the tests
+  use), then build + start the service from `deploy/das/`:
+
+```bash
+export PYTHON_IMAGE_DIGEST=sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+docker compose -f write-bridge/compose.write-bridge.yaml up -d --build
+```
+
+Every compose invocation interpolates `PYTHON_IMAGE_DIGEST` (up/ps/run
+alike); either keep it exported or put it in `write-bridge/.env` (compose
+auto-loads it from the project directory; see `.env.example`).
 
 - Image: `Dockerfile` reuses the read-proxy's pinned-digest builder pattern
   (python@sha256 digest, grpc codegen from the pinned das proto submodule,
@@ -173,6 +187,23 @@ did not land — re-run or investigate, do not ignore.
   a second broker from compose would clash with the live one.
 - No ports are published; the facade is reachable only on the internal
   client network.
+
+### `compose run` one-off containers MUST override the bus node id
+
+`DAS_CLIENT_ENDPOINT` is the service-bus node id, and its host part is what
+the ServiceBus BINDS its callback ports on. A `docker compose run` cleanup
+container inherits the service's value (`write-bridge:43999`) and would join
+the broker with the SAME node id as the live service — corrupting the
+broker's peer routing. And an arbitrary unresolvable name fails the callback
+bind outright (live-discovered iteration 5: `getaddrinfo` failure). Always
+name the one-off container (`--name`) and use that same name as the node-id
+host — docker DNS resolves container names on user-defined networks:
+
+```bash
+docker compose -f write-bridge/compose.write-bridge.yaml run --rm --name wb-cleanup \
+    -e DAS_CLIENT_ENDPOINT=wb-cleanup:43999 write-bridge \
+    /app/cleanup.py --metta '(Inheritance (Concept "canary-20261019") (Concept "write-bridge-test"))'
+```
 
 ## Tests
 

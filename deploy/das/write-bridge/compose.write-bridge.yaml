@@ -40,7 +40,11 @@ x-task-labels: &task-labels
 services:
   write-bridge:
     build:
-      context: ./write-bridge
+      # Relative paths resolve against THIS file's directory, so the build
+      # context is the write-bridge/ directory itself (found broken at the
+      # iteration-5 service deployment: ./write-bridge resolved to
+      # write-bridge/write-bridge and the build failed).
+      context: .
       args:
         PYTHON_IMAGE_DIGEST: ${PYTHON_IMAGE_DIGEST:?set PYTHON_IMAGE_DIGEST to sha256:<64 hex chars>}
     environment:

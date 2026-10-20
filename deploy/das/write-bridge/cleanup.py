@@ -52,11 +52,13 @@ from metta_to_atoms import MettaParseError, parse_fact
 from write_client import DasWriteRunner, WriteFailure
 
 
-# Live-measured apply latency (iteration 4 probe): the server-side delete
-# applied in ~1-2 s (iteration 3) but took >= 10-13 s once -- two verify
-# passes (each ~5 s for a 3-link fact) inside a 10 s window were not enough.
-# 30 s absorbs the observed worst case with headroom (~4-5 passes).
-DEFAULT_VERIFY_GRACE_SECONDS = 30.0
+# Live-measured apply latency is highly variable and trending up across
+# probes: ~1-2 s (iteration 3), >= 10-13 s (iteration 4), >= ~33 s
+# (iteration 5 service-path canary: absent: false after 6 passes / 33.8 s,
+# gone seconds later via the metta path). The window early-exits on success,
+# so a wide default costs nothing when the delete lands fast.
+# 90 s absorbs the observed worst case with headroom.
+DEFAULT_VERIFY_GRACE_SECONDS = 90.0
 DEFAULT_VERIFY_POLL_INTERVAL = 1.0
 
 

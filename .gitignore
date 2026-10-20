@@ -1,6 +1,7 @@
 # Secrets — never commit real credential files (use the *.example templates)
 deploy/omega/runtime.env
 deploy/das/.env
+deploy/das/write-bridge/.env
 
 # Generated artifacts
 deploy/das/generated/
