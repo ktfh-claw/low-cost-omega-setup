@@ -2,9 +2,20 @@
 
 Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Report](https://docs.google.com/document/d/1Pw5diOmac40Abc8_D1CG0_b3OrOHntq1BSzOv2H63dM/edit) (§16+ = execution campaign). This page mirrors it per iteration.
 
-## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — **SIGNED OFF 2026-10-20 02:41 UTC** (two consecutive oracle-green live loops, iters 7–8); next: Phase 2 (thin import wrapper)
+## Current phase: Phase 2 — Integration — thin import wrapper BUILT + LIVE-VALIDATED (iters 9–10: 99.17% yield on real history, atom_types = 0, provenance = one ground link per entry); next: `&persistent` interception hook (test container first)
 
 ## Iteration log
+
+### Iteration 10 — 2026-10-20 04:07–04:40 UTC — Collision reconciled; `(:`-ascription defect FIXED; wrapper live-revalidated clean (atom_types 0) ✅
+- **Unit:** applied the iter9-discovered fix to the standing wrapper implementation (commit `64839d7`, written by the concurrent tick — reconciled this tick as the sole owner: tree quiet 03:50–04:40, no concurrent writers observed).
+- **Fix:** ALL `(:` type-ascription forms removed from the load file (`provenance_header_lines` deleted; header block gone; empty-input blank-file guard added). Provenance = one ground `CampaignProvenance` expression per entry ONLY. Root cause (iter9 live evidence): the stock `db_loader` registers every `(:` line as a junk `Symbol` type-lattice entry (16,455 atom_types on the polluted load vs 0 on the October operator-lane baseline) and ascribes no actual types — the forms were pure pollution.
+- **Suite:** 30 → **33 passed + 3 skipped** (new `TestNoTypeAscriptions`: load output contains no `(:` forms; module exports no header builder; empty input writes a blank file; stale header-golden test removed).
+- **Live revalidation (iter10, OVH, stock parser image `trueagi/das:1.0.0-metta-parser`, fresh scratch mongo `das-reeval-mongo-iter10`):** gate run on the real history (`sha256 f71cfb47…`, 26,556 lines): 8,285 entries, **8,216 emitted (99.17% ≥ 99% target MET)**; pass_raw 7,988 + pass_escaped 228; 69 skipped (50 gate-failure = known shell-quirk residuals incl. lines 1243/3404; 19 bare-angle-outside-strings); 199 prose lines. `db_loader --skip-redis`: **STEP 1/1 100% (33,231/33,231), exit 0.**
+- **Ground truth (the decisive check):** **atom_types = 0** (polluted load: 16,455); nodes 25,789 / links 20,752; **CampaignProvenance links = 8,216 = exactly one per emitted entry** (5-target Expression, leading `Symbol:CampaignProvenance` target, payloads exact: `"sha256:<entry-sha>" "campaign:omega-das-bridge" "source:history-v1" "epoch:epoch-1"`). Loader semantics documented: the stock loader types every expression as generic `Expression` (no symbol→type inference), so provenance links are identified by leading-symbol target — the `(:` ascriptions could never have worked.
+- **Ops:** scratch mongo creds generated per-run, stored root-only on OVH (`~/omega-das-bridge/iter10/mongo.env`, chmod 600), never printed; iter9 scratch container still up (disposable, holds the polluted load — drop before the next scratch use). Zero production contact this tick; prod DB untouched (E1 canary + 1864/3710 last verified iter 8).
+- **Evidence:** `memory/omega-das-bridge/evidence/iter10-probe/` (TRANSCRIPT, report.json, groundtruth output).
+- **Standing state:** Omega agent STOPPED (pause holding). Write-bridge service + DAS stack + broker healthy.
+- **Next (iteration 11):** Phase 2 remaining item: `&persistent` interception hook in the Omega skill layer — design + test container first (agent container stays STOPPED; no live-agent restart without approval); then Phase 3 ladder.
 
 ### Iteration 8 — 2026-10-20 02:37–03:05 UTC — Phase-1 SIGN-OFF: second consecutive oracle-green loop + full acceptance record ✅✅
 - **Unit: the sign-off itself.** Deployed tree md5-verified against repo HEAD (all 5 write-bridge files identical) before running anything; suite re-run on the synced OVH tree: **123 passed**. Ops note recorded: the tests image ENTRYPOINT is already `python -m pytest`, so plain `docker run … <img> tests/ -q` suffices.

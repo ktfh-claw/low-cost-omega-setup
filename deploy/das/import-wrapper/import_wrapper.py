@@ -39,8 +39,6 @@ PROVENANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,63}$")
 ENTRY_START_RE = re.compile(r'^\("\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"')
 FAILURE_NOTE_MAX = 200
 
-PROVENANCE_TYPES = ("Campaign", "Source", "Epoch")
-
 # Error patterns the gate scans for in syntax_check stdout/stderr.  The
 # upstream failure path prints "Parse error near line N" / "Error
 # message: ..." via yyerror; belt-and-suspenders against builds whose
@@ -239,15 +237,13 @@ def _binary_exists(binary: str) -> bool:
     return shutil.which(binary) is not None
 
 
-def provenance_header_lines(campaign: str, source: str, epoch: str) -> list[str]:
-    """Header block: type declarations + the Campaign/Source/Epoch atoms."""
-    lines = []
-    for type_name in PROVENANCE_TYPES:
-        lines.append(f"(: {type_name} Type)")
-    lines.append(f'(: "campaign:{campaign}" Campaign)')
-    lines.append(f'(: "source:{source}" Source)')
-    lines.append(f'(: "epoch:{epoch}" Epoch)')
-    return lines
+# The load file must contain NO type-ascription forms (`(: ...)`) —
+# upstream db_loader turns every `(:` line into a junk Symbol type-lattice
+# registration (live-measured iter9: atom_types 16455 on a load that should
+# have produced 0; the October operator-lane baseline for the same loader
+# and client was atom_types = 0).  Provenance is therefore expressed ONLY
+# as ground links (one CampaignProvenance Expression per entry), which the
+# same live load proved to land correctly with exact payloads.
 
 
 def entry_provenance_lines(
@@ -368,11 +364,12 @@ def run(  # noqa: C901
             }
         )
 
-    # Output file: header block, then accepted entries in original order
-    # (escaped version when that's what passed), each followed by its
-    # per-entry provenance lines.  Prose lines are NOT emitted.
+    # Output file: accepted entries in original order (escaped version
+    # when that's what passed), each followed by its per-entry ground
+    # provenance link.  NO header block and NO `(:` type-ascription forms
+    # anywhere (they pollute the atom_types lattice; see module comment).
+    # Prose lines are NOT emitted.
     out_lines: list[str] = []
-    out_lines.extend(provenance_header_lines(campaign, source, epoch))
     for entry, emitted_text in emitted:
         fact_sha = hashlib.sha256(entry.text.encode("utf-8")).hexdigest()
         out_lines.append(emitted_text)
@@ -380,6 +377,8 @@ def run(  # noqa: C901
             out_lines.extend(
                 entry_provenance_lines(fact_sha, campaign, source, epoch)
             )
+    if not out_lines:
+        out_lines = [""]  # empty input: emit a single blank line
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(out_lines) + "\n")
 

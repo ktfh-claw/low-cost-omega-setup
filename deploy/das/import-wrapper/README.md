@@ -17,9 +17,25 @@ history.metta
   -> escape fallback (raw \n inside double-quoted strings -> two-char \n)
   -> flag (bare < / > outside strings: silently dropped by the lexer)
   -> skip (entries failing both raw and escaped; recorded in the report)
-  -> provenance decoration (Campaign/Source/Epoch atoms)
+  -> provenance decoration (one ground CampaignProvenance link per entry)
   -> load file (db_loader-ready)
 ```
+
+## Provenance model (live-measured)
+
+The load file contains **no type-ascription forms** (`(: ...)`). Under
+the stock `db_loader`, every `(:` line becomes a junk `Symbol` type-lattice
+registration without typing anything (live-measured 2026-10-20: 16,455
+atom_types on a load that must produce 0; the October operator-lane
+baseline for the same loader was atom_types = 0). Provenance is expressed
+ONLY as one ground `CampaignProvenance` expression per entry:
+
+```metta
+(CampaignProvenance "sha256:<entry-sha256>" "campaign:<id>" "source:<id>" "epoch:<id>")
+```
+
+Live-validated: loads land with atom_types = 0 and exactly one
+CampaignProvenance link per emitted entry, payloads exact.
 
 ## CLI
 

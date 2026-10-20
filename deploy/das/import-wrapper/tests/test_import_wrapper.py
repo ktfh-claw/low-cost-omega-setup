@@ -27,7 +27,6 @@ from import_wrapper import (
     escape_in_string_newlines,
     has_bare_angle,
     load_input,
-    provenance_header_lines,
     resolve_syntax_check_bin,
     run,
     run_syntax_check,
@@ -198,23 +197,57 @@ class TestBareAngle:
 
 
 class TestProvenanceRendering:
-    def test_header_golden(self):
-        lines = provenance_header_lines("omega-das-bridge", "history-v1", "epoch-1")
-        assert lines == [
-            "(: Campaign Type)",
-            "(: Source Type)",
-            "(: Epoch Type)",
-            '(: "campaign:omega-das-bridge" Campaign)',
-            '(: "source:history-v1" Source)',
-            '(: "epoch:epoch-1" Epoch)',
-        ]
-
     def test_entry_golden(self):
         lines = entry_provenance_lines("abc123", "omega-das-bridge", "history-v1", "epoch-1")
         assert lines == [
             '(CampaignProvenance "sha256:abc123" '
             '"campaign:omega-das-bridge" "source:history-v1" "epoch:epoch-1")'
         ]
+
+
+class TestNoTypeAscriptions:
+    """Iter-9 live-measured contract: `(:` value-ascriptions are junk
+    atom_types registrations under the stock db_loader (16455 atom_types
+    on a load that must produce 0). The load file must carry provenance
+    ONLY as ground CampaignProvenance links."""
+
+    def test_load_file_has_no_ascription_forms(self, tmp_path, monkeypatch):
+        fake = FakeGate()
+        monkeypatch.setattr("import_wrapper.run_syntax_check", fake)
+        out = tmp_path / "load.metta"
+        report = tmp_path / "report.json"
+        run(
+            str(make_history(tmp_path, '("2026-10-02 18:50:03" \n ((query "x")) \n)')),
+            str(out),
+            str(report),
+            "omega-das-bridge",
+            "history-v1",
+            "epoch-1",
+            syntax_check_bin=make_dummy_binary(tmp_path),
+        )
+        text = out.read_text()
+        assert "(:" not in text
+        assert "CampaignProvenance" in text
+
+    def test_module_exports_no_header_builder(self):
+        import import_wrapper
+
+        assert not hasattr(import_wrapper, "provenance_header_lines")
+
+    def test_empty_input_writes_blank_file(self, tmp_path):
+        out = tmp_path / "load.metta"
+        report = tmp_path / "report.json"
+        rc = run(
+            str(make_history(tmp_path, "just prose, no entries")),
+            str(out),
+            str(report),
+            "omega-das-bridge",
+            "history-v1",
+            "epoch-1",
+            skip_gate=True,
+        )
+        assert rc == 0
+        assert out.read_text() == "\n"
 
 
 class TestGateDispatch:
