@@ -1,0 +1,47 @@
+# Import-wrapper compose wiring (consistent with write-bridge conventions).
+#
+# The wrapper is a CLI tool, not a long-running service: it runs as a
+# one-shot container. The syntax gate uses the local syntax_check binary
+# (DAS_SYNTAX_CHECK_BIN; the same binary the stock parser image ships);
+# the db_loader load step runs the stock image directly against the
+# Mongo target. See README.md for the full runbook.
+#
+# This snippet attaches to the networks created by deploy/das/compose.yaml;
+# start that stack first (docker compose -f deploy/das/compose.yaml up -d).
+
+name: omega-das-import-wrapper
+
+x-task-labels: &task-labels
+  io.ktfh-claw.task: omega-das-integration
+  io.ktfh-claw.purpose: experimental-import-wrapper
+
+services:
+  import-wrapper:
+    image: trueagi/das@sha256:${DAS_IMAGE_DIGEST:?set DAS_IMAGE_DIGEST}
+    command:
+      - db_loader
+      - --skip-redis
+      - /input/load.metta
+    environment:
+      DAS_MONGODB_HOSTNAME: ${DAS_MONGODB_HOSTNAME:?set DAS_MONGODB_HOSTNAME}
+      DAS_MONGODB_PORT: ${DAS_MONGODB_PORT:-27017}
+      DAS_MONGODB_USERNAME: ${DAS_MONGODB_USERNAME:?set DAS_MONGODB_USERNAME}
+      DAS_MONGODB_PASSWORD: ${DAS_MONGODB_PASSWORD:?set DAS_MONGODB_PASSWORD}
+    networks: [backend]
+    labels: *task-labels
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    volumes:
+      - type: bind
+        source: ${IMPORT_WRAPPER_INPUT:-/dev/null}
+        target: /input/load.metta
+        read_only: true
+
+networks:
+  backend:
+    name: omega-das-integration-backend
+    external: true
