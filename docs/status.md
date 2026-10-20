@@ -2,7 +2,7 @@
 
 Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Report](https://docs.google.com/document/d/1Pw5diOmac40Abc8_D1CG0_b3OrOHntq1BSzOv2H63dM/edit) (§16+ = execution campaign). This page mirrors it per iteration.
 
-## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — canary loop DONE, grace-window hardening in, sign-off pending
+## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — deployed; functional acceptance met with one documented caveat (absence-verdict advisory); oracle upgrade next, sign-off entry after
 
 ## Iteration log
 
@@ -66,3 +66,11 @@ Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Re
 - **Verdict:** Phase-1 functional acceptance is MET on the deployed services (write→verify→metta read→cleanup, zero residue, suite green). Documented caveat: the in-window absence verdict is advisory until the upstream delete-apply path gets an ack — candidate upstream issue. Evidence: `memory/omega-das-bridge/evidence/iter5-probe/` (probe + TRANSCRIPT with the run matrix + groundtruth.js).
 - **Standing state:** Omega agent STOPPED (pause holding). Write-bridge service LIVE; DAS stack + broker healthy.
 - **Next (iteration 6):** re-tune cleanup defaults (grace 300 s / poll 5 s, bounded early-exit fail-fast unchanged) + one validation run; Phase-1 sign-off verdict entry (with the caveat + upstream recommendation); then Phase 2 (thin import wrapper).
+
+### Iteration 6 — 2026-10-20 01:41–02:12 UTC — 300 s window false-alarms identically → window-widening is a dead end; alternate-token oracle form validated; mechanism pinned 🧭
+- **Defaults re-tuned and live-validated:** grace 90→300 s / poll 1→5 s (suite **114 green** on OVH). Validation run: service write `verified: true` (4.28 s) → metta read green (1.3 s) → cleanup `absent: false` after **32 attempts / 310.7 s** → PHASE5 metta **0 answers ~2 s after loop exit** → mongo zero residue (totals 1864/3710 unchanged). The window matrix is now complete — **30 s (6 attempts), 90 s (16), 90 s/poll-5 s (10), 300 s/5 s (32) all false-alarm identically**; the apply consistently lands only after the verify loop stops querying.
+- **Mechanism probe (iter6b, same-run visibility matrix):** the **alternate-token query form is validated** (leading symbol ground, variable in a later position: completes on the pinned engine, exact expected assignment) → a second differently-shaped pattern is a viable absence oracle. Light-traffic run: the SAME node+pattern that false-alarmed at T+5 s saw absence at **T+7.8 s** → the query path is not intrinsically stale; apply latency is variable and loop-coupled, not fixed. Inner-link loose alternate form is **schema-ambiguous** (other historical `(Concept "…")` links match) — the oracle must pin expected assignments per link.
+- **Verdict:** window-widening is a dead end — the advisory-verdict caveat stands. **Next: oracle upgrade in `cleanup.py`** (per-link alternate-pattern verification + a bounded standby re-check) + unit tests + live validation; Phase-1 sign-off entry lands after that validates. Upstream ask unchanged: a delete-apply ack.
+- **Ops notes:** `rsync --delete` clobbered the OVH-side untracked `write-bridge/.env` (holds `PYTHON_IMAGE_DIGEST`) — restored, future syncs exclude it; mongo ground-truth queries need `--authenticationDatabase admin`. Two probe-authoring defects (read-proxy port typo caught pre-run; dropped helper NameError caught on first run) — fixed, no DB impact; both canaries mongo-verified zero-residue.
+- **Standing state:** Omega agent STOPPED (pause holding). Write-bridge service + DAS stack + broker healthy. Evidence: `memory/omega-das-bridge/evidence/iter6-probe/` (TRANSCRIPT + probe copies).
+- **Next (iteration 7):** absence-oracle upgrade (alternate-token second pattern per link + bounded standby re-check) + tests + live validation; then Phase-1 sign-off verdict entry; then Phase 2 (thin import wrapper).

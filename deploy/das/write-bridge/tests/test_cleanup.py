@@ -155,14 +155,15 @@ class TestGraceWindow:
         assert runner.verify_calls == 3
 
     def test_default_window_absorbs_observed_apply_latency(self, monkeypatch):
-        # The shipped default (90 s) must absorb the live-measured worst
-        # case (~33 s apply, iteration 5; earlier samples 1-13 s): a delete
-        # that lands on the third check resolves absent with the DEFAULTS,
-        # no flags.
+        # The shipped defaults (300 s grace / 5 s poll, iteration 6) must
+        # absorb the live-measured worst case (~90-96 s apply, iteration 5
+        # runs C/D; earlier samples 1-33 s): a delete that lands on the third
+        # check resolves absent with the DEFAULTS, no flags.
         runner = self.EventualDeleteRunner(absent_after=2)
         sleeps = []
         monkeypatch.setattr(cleanup_module.time, "sleep", lambda s: sleeps.append(s))
-        assert cleanup_module.DEFAULT_VERIFY_GRACE_SECONDS == 90.0
+        assert cleanup_module.DEFAULT_VERIFY_GRACE_SECONDS == 300.0
+        assert cleanup_module.DEFAULT_VERIFY_POLL_INTERVAL == 5.0
         result = run_cleanup(runner, X402)  # default grace/poll
         assert result["absent"] is True
         assert result["attempts"] == 3

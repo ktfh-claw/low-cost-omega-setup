@@ -151,14 +151,16 @@ lists with a trailing `delete_link_targets` flag; `--delete-link-targets`
 opts into recursive target deletion). Deletion is fire-and-forget too — the
 read-back absence check is what makes the result credible.
 
-Deletion is also **eventual** (live-measured iterations 3-5): the
-server-side apply ranged from ~1-2 s to >= 10-13 s to >= ~33 s from the
-delete command (and each verify pass itself costs seconds — one bus
-round-trip per link). `cleanup.py` therefore verifies absence inside a
-bounded grace window (defaults: `--grace-seconds 90`, `--poll-interval 1`;
-first check immediate, `attempts` reported in the result; bus failures fail
-fast, never retried). The window early-exits on success, so the wide default
-costs nothing when the delete lands fast.
+Deletion is also **eventual** (live-measured iterations 3-6): the
+server-side apply ranged from ~1-2 s through >= 10-13 s to ~90-96 s from
+the delete command (highly variable; the 30 s and 90 s windows both
+false-alarmed while mongo confirmed complete deletions; each verify pass
+itself costs seconds — one bus round-trip per link). `cleanup.py` therefore
+verifies absence inside a bounded grace window (defaults: `--grace-seconds
+300`, `--poll-interval 5`; first check immediate, `attempts` reported in the
+result; bus failures fail fast, never retried; poll density was proven not
+to affect apply latency). The window early-exits on success, so the wide
+default costs nothing when the delete lands fast.
 A persistent `absent: false` after the window means the delete genuinely
 did not land — re-run or investigate, do not ignore.
 

@@ -14,10 +14,11 @@ answers. Immediate absence-verification therefore false-alarms
 window: it re-checks every ``poll_interval`` seconds until the links are
 gone or ``grace_seconds`` elapses (one final check happens even with a
 zero grace window; bus-level query failures still fail fast -- they are
-not evidence of eventual deletion). Defaults: 30 s window, 1 s poll --
-live-measured apply latency ranged ~1-2 s (iteration 3) to >= 10-13 s
-(iteration 4) from the delete command, and each verify pass itself costs
-seconds (~5 s for a 3-link fact).
+not evidence of eventual deletion). Defaults: 300 s window, 5 s poll --
+live-measured apply latency ranged ~1-2 s (iteration 3) through >= 10-13 s
+(iteration 4) to ~90-96 s (iteration 5: three service-path runs; both the
+30 s and the 90 s windows false-alarmed while mongo confirmed the deletion),
+and each verify pass itself costs seconds (~5 s for a 3-link fact).
 
 Safety (live-DB measured 2026-10-20, bridge iteration 3): deletion is
 immediate and un-acked (fire-and-forget, like add_atoms) and removes
@@ -53,13 +54,16 @@ from write_client import DasWriteRunner, WriteFailure
 
 
 # Live-measured apply latency is highly variable and trending up across
-# probes: ~1-2 s (iteration 3), >= 10-13 s (iteration 4), >= ~33 s
-# (iteration 5 service-path canary: absent: false after 6 passes / 33.8 s,
-# gone seconds later via the metta path). The window early-exits on success,
-# so a wide default costs nothing when the delete lands fast.
-# 90 s absorbs the observed worst case with headroom.
-DEFAULT_VERIFY_GRACE_SECONDS = 90.0
-DEFAULT_VERIFY_POLL_INTERVAL = 1.0
+# probes: ~1-2 s (iteration 3), >= 10-13 s (iteration 4), ~33 s (iteration 5
+# run B) and ~90-96 s (iteration 5 runs C/D -- both the 30 s and the 90 s
+# window false-alarmed while mongo confirmed a real, complete deletion).
+# The window early-exits on success, so a wide default costs nothing when
+# the delete lands fast; 300 s is >3x the observed worst case. Poll 5 s
+# halves the verify-pass bus traffic per window (each pass costs ~5 s of
+# link queries for a 3-link fact) -- poll density was proven not to affect
+# the apply latency (iteration 5 run D).
+DEFAULT_VERIFY_GRACE_SECONDS = 300.0
+DEFAULT_VERIFY_POLL_INTERVAL = 5.0
 
 
 def cleanup(
