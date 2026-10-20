@@ -5,8 +5,12 @@ from __future__ import annotations
 import pytest
 
 from conftest import (
+    ALT_EXPECTED_ASSIGNMENTS,
+    ALT_T_TOP,
     EXPECTED_HANDLES,
     EXPECTED_WIRE_ARGS,
+    INNER_PP_HANDLE,
+    INNER_X402_HANDLE,
     T_INNER_PP,
     T_INNER_X402,
     T_TOP,
@@ -19,9 +23,11 @@ from metta_to_atoms import (
     MAX_ATOMS,
     MAX_NAME_CHARS,
     UNASSIGNED_HANDLE,
+    ALT_UNASSIGNED_HANDLE,
     Expression,
     MettaParseError,
     Symbol,
+    alt_template_tokens,
     ground_template_tokens,
     parse_expression,
     parse_fact,
@@ -162,6 +168,86 @@ class TestParseFact:
     def test_names_longer_than_cap_rejected(self):
         with pytest.raises(MettaParseError):
             parse_fact("(" + "a" * (MAX_NAME_CHARS + 1) + ")")
+
+
+class TestAltTemplates:
+    """The alternate-pattern absence oracle (iteration 7).
+
+    Live-validated iteration 6b: a second, differently-shaped pattern
+    (leading symbol GROUND, variable in the first non-leading position)
+    completes on the pinned engine with the exact expected assignment --
+    the form the cleanup oracle uses, because sustained querying of the
+    primary form starves the server-side delete apply.
+    """
+
+    def test_alt_form_of_top_link(self):
+        # (Inheritance <inner1> <inner2>): leading symbol ground, variable
+        # at position 2, remaining positions fully ground. This is exactly
+        # the live-validated iter6b P_NEW form.
+        fact = parse_fact(X402)
+        assert fact.link_absence_queries == [
+            (
+                TOP_HANDLE,
+                ALT_T_TOP,
+                {ALT_UNASSIGNED_HANDLE: INNER_X402_HANDLE},
+            )
+        ]
+        assert ALT_EXPECTED_ASSIGNMENTS[tuple(ALT_T_TOP)] == {
+            ALT_UNASSIGNED_HANDLE: INNER_X402_HANDLE
+        }
+
+    def test_two_arity_links_admit_no_tight_alt(self):
+        # (Concept "x402"): a variable in the second position matches every
+        # (Concept <anything>) link -- schema-ambiguous on the shared live DB
+        # (live-measured 6b) -- so 2-arity links keep the primary verdict.
+        fact = parse_fact(X402)
+        alt_handles = [handle for handle, _, _ in fact.link_absence_queries]
+        assert INNER_X402_HANDLE not in alt_handles
+        assert INNER_PP_HANDLE not in alt_handles
+
+    def test_alt_builder_returns_none_for_symbol_and_short_links(self):
+        assert alt_template_tokens(Symbol("a")) is None
+        assert alt_template_tokens(parse_expression("(a b)").__class__ and parse_expression("(a b)")) is None
+        assert alt_template_tokens(parse_expression("(a b c)")) == [
+            "LINK_TEMPLATE", "Expression", "3",
+            "NODE", "Symbol", "a",
+            "VARIABLE", ALT_UNASSIGNED_HANDLE,
+            "NODE", "Symbol", "c",
+        ]
+
+    def test_alt_form_of_arity_4_links_pins_position_2(self):
+        # Position 2 is an inner EXPRESSION: the alt variable binds to that
+        # link's handle (the disambiguation iter6b called for).
+        fact = parse_fact('(Similarity (Concept "a") (Concept "b") (Concept "c"))')
+        (handle, tokens, assignment), = fact.link_absence_queries
+        assert handle == fact.top_handle
+        assert tokens == [
+            "LINK_TEMPLATE", "Expression", "4",
+            "NODE", "Symbol", "Similarity",
+            "VARIABLE", ALT_UNASSIGNED_HANDLE,
+            "LINK_TEMPLATE", "Expression", "2",
+            "NODE", "Symbol", "Concept", "NODE", "Symbol", '"b"',
+            "LINK_TEMPLATE", "Expression", "2",
+            "NODE", "Symbol", "Concept", "NODE", "Symbol", '"c"',
+        ]
+        # Position 2 = the FIRST (Concept "a") link, not a quoted node.
+        first_inner = next(
+            h for h, _, _ in fact.link_queries if h != fact.top_handle
+        )
+        assert assignment == {ALT_UNASSIGNED_HANDLE: first_inner}
+
+    def test_alt_builder_requires_leading_symbol(self):
+        with pytest.raises(MettaParseError):
+            alt_template_tokens(parse_expression("((a b) c d)"))
+
+    def test_alt_and_primary_forms_are_disjoint_patterns(self):
+        # The oracle only works because the alternate tokens differ from the
+        # primary variable-form tokens (a stale primary match cannot keep
+        # the alternate pattern warm).
+        fact = parse_fact(X402)
+        primary = {tuple(tokens) for _, tokens, _ in fact.link_queries}
+        alt = {tuple(tokens) for _, tokens, _ in fact.link_absence_queries}
+        assert alt and not (alt & primary)
 
 
 class TestGroundTemplates:

@@ -447,6 +447,22 @@ EXPECTED_ASSIGNMENTS = {
     tuple(T_TOP): {"unassigned": "9028a696c1b6d3d9ff8c4f496da77378"},
 }
 
+# Alternate-oracle templates (iteration 7): the second, differently-shaped
+# pattern for absence verification -- leading symbol GROUND, variable in the
+# first non-leading position (live-validated iteration 6b). Only links with
+# arity >= 3 admit a tight alternate form; the x402 fact's 2-arity inner
+# links admit none (a second-position variable would match every
+# (Concept <anything>) link -- schema-ambiguous on the shared live DB).
+ALT_T_TOP = [
+    "LINK_TEMPLATE", "Expression", "3",
+    "NODE", "Symbol", "Inheritance",
+    "VARIABLE", "altassigned",
+    *GROUND_INNER_PP,
+]
+ALT_EXPECTED_ASSIGNMENTS = {
+    tuple(ALT_T_TOP): {"altassigned": INNER_X402_HANDLE},
+}
+
 
 @pytest.fixture()
 def bridge_env(monkeypatch):

@@ -151,18 +151,28 @@ lists with a trailing `delete_link_targets` flag; `--delete-link-targets`
 opts into recursive target deletion). Deletion is fire-and-forget too — the
 read-back absence check is what makes the result credible.
 
-Deletion is also **eventual** (live-measured iterations 3-6): the
-server-side apply ranged from ~1-2 s through >= 10-13 s to ~90-96 s from
-the delete command (highly variable; the 30 s and 90 s windows both
-false-alarmed while mongo confirmed complete deletions; each verify pass
-itself costs seconds — one bus round-trip per link). `cleanup.py` therefore
-verifies absence inside a bounded grace window (defaults: `--grace-seconds
-300`, `--poll-interval 5`; first check immediate, `attempts` reported in the
-result; bus failures fail fast, never retried; poll density was proven not
-to affect apply latency). The window early-exits on success, so the wide
-default costs nothing when the delete lands fast.
-A persistent `absent: false` after the window means the delete genuinely
-did not land — re-run or investigate, do not ignore.
+Deletion is also **eventual and loop-coupled** (live-measured iterations
+3-7): the server-side apply is starved by sustained verification traffic —
+every polling grace window ever shipped (30/90/90-s-poll-5 s/300-s-poll-5 s;
+6/16/10/32 attempts) false-alarmed `absent: false` while mongo confirmed
+complete deletions seconds after the loop stopped querying; a light-traffic
+run saw absence at T+7.8 s. `cleanup.py` therefore does NOT poll: it
+verifies absence through the **alternate-pattern oracle** (iteration 7) —
+each link admitting a tight alternate form (arity >= 3: leading symbol
+ground, variable in the first non-leading position, expected assignment
+pinned; live-validated 6b) is checked through that second, differently-
+shaped pattern, which the verification traffic has not kept warm; 2-arity
+links (no tight alternate — the loose form is schema-ambiguous on a shared
+DB) keep the primary variable-form verdict. If a check still matches, the
+loop waits **query-free** (the apply needs the query path to idle) and
+re-checks, bounded by `--recheck-limit` (default 3) and
+`--recheck-wait-seconds` (default 10; total standby capped at 120 s);
+bus failures fail fast. The result reports `checks` and `standby_seconds`.
+Live-validated iteration 7: the oracle returned `absent: true` on the
+FIRST pass (5.3 s, zero standby) where every polled window had
+false-alarmed. A persistent `absent: false` after the bounded re-checks
+means the delete genuinely did not land — re-run or investigate, do not
+ignore.
 
 ## Deployment
 

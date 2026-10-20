@@ -186,6 +186,23 @@ class DasWriteRunner:
 
     # ----------------------------------------------------------------- verify
 
+    def match_link(
+        self, tokens: list[str], handle: str, expected_assignment: dict[str, str]
+    ) -> bool:
+        """Query one link through ``tokens``; True while the live answer set
+        still contains the link with its expected assignment.
+
+        A match requires BOTH the link handle in the answer's handles and
+        the exact expected assignment (all other positions are fully
+        ground, so a match pins the link's content, not just its type).
+        """
+        answers = self.query(tokens, max_answers=1, timeout=self.verify_timeout)
+        return any(
+            handle in answer["handles"]
+            and answer["assignments"] == expected_assignment
+            for answer in answers
+        )
+
     def verify_handles(self, fact: ParsedFact) -> list[str]:
         """Variable-form query for every written link; return missing handles.
 
@@ -203,13 +220,7 @@ class DasWriteRunner:
         """
         missing: list[str] = []
         for handle, tokens, expected_assignment in fact.link_queries:
-            answers = self.query(tokens, max_answers=1, timeout=self.verify_timeout)
-            found = any(
-                handle in answer["handles"]
-                and answer["assignments"] == expected_assignment
-                for answer in answers
-            )
-            if not found:
+            if not self.match_link(tokens, handle, expected_assignment):
                 missing.append(handle)
         return missing
 

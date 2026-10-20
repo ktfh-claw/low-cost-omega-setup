@@ -40,6 +40,14 @@ EXPRESSION_TYPE = "Expression"
 # variable_template_tokens).
 UNASSIGNED_HANDLE = "unassigned"
 
+# Label of the ALTERNATE oracle's variable: absence is verified through a
+# second, differently-shaped pattern (see alt_template_tokens) whose query
+# traffic is disjoint from the primary read-back form -- sustained querying
+# of the primary form starves the server-side delete apply (live-measured
+# iterations 3-6), so the absence verdict needs a pattern the verification
+# loop has not kept warm.
+ALT_UNASSIGNED_HANDLE = "altassigned"
+
 _WHITESPACE = " \t\r\n"
 
 
@@ -142,6 +150,48 @@ def variable_template_tokens(element: Any) -> list[str]:
     return tokens
 
 
+def alt_template_tokens(element: Any) -> list[str] | None:
+    """Alternate-pattern LINK_TEMPLATE tokens for the absence oracle.
+
+    The primary read-back form (variable_template_tokens) is what a cleanup
+    loop queries -- and live-measured iterations 3-6 showed the server-side
+    delete apply is STARVED by sustained verification traffic: every grace
+    window width (30/90/300 s) false-alarmed while the deletion always
+    landed, and a light-traffic re-check saw absence at T+7.8 s. The absence
+    oracle therefore queries each link through a SECOND, differently-shaped
+    pattern (live-validated iteration 6b: leading symbol ground, variable
+    in the first non-leading position), so a stale primary match can be
+    contradicted by a pattern the verification loop has not kept warm.
+
+    Returns None when the link admits no TIGHT alternate form: 2-arity links
+    have no non-leading ground positions left (a variable in the second
+    position matches every same-leading-symbol link -- schema-ambiguous on
+    a shared DB, live-measured: the live Symbol "Concept" node leads
+    hundreds of links), and arity-1 links have no non-leading position at
+    all. Such links keep the primary verdict (plus bounded standby
+    re-checks).
+
+    For arity >= 3 the pattern is TIGHT: leading symbol ground, variable at
+    position 2, every remaining position fully ground -- a match pins the
+    link, and parse_fact pins the expected assignment (the variable binds
+    to the position-2 element's handle).
+    """
+    if isinstance(element, Symbol):
+        return None
+    if not isinstance(element.elements[0], Symbol):
+        raise MettaParseError(
+            "expression must start with a symbol to be verifiable by alternate-form query"
+        )
+    if len(element.elements) < 3:
+        return None
+    tokens: list[str] = ["LINK_TEMPLATE", EXPRESSION_TYPE, str(len(element.elements))]
+    tokens.extend(ground_template_tokens(element.elements[0]))
+    tokens.extend(["VARIABLE", ALT_UNASSIGNED_HANDLE])
+    for child in element.elements[2:]:
+        tokens.extend(ground_template_tokens(child))
+    return tokens
+
+
 @dataclass
 class ParsedFact:
     """Everything the write/verify/cleanup flows need for one MeTTa fact."""
@@ -152,6 +202,10 @@ class ParsedFact:
     top_handle: str                  # handle of the top-level Expression link
     # (link handle, variable-form template, expected assignment), bottom-up
     link_queries: list[tuple[str, list[str], dict[str, str]]]
+    # (link handle, alternate-form template, expected assignment) for the
+    # links admitting a TIGHT alternate pattern (arity >= 3): the absence
+    # oracle. Bottom-up, same dedup order as link_queries.
+    link_absence_queries: list[tuple[str, list[str], dict[str, str]]]
 
     @property
     def link_handles(self) -> list[str]:
@@ -170,6 +224,7 @@ def _build_fact(
     atoms: list[Any] = []
     seen: dict[str, Any] = {}
     link_queries: list[tuple[str, list[str]]] = []
+    link_absence_queries: list[tuple[str, list[str], dict[str, str]]] = []
 
     def build(element: Any, depth: int) -> str:
         if isinstance(element, Symbol):
@@ -183,6 +238,15 @@ def _build_fact(
             link_queries.append(
                 (link.handle, variable_template_tokens(element), {UNASSIGNED_HANDLE: targets[0]})
             )
+            alt_tokens = alt_template_tokens(element)
+            if alt_tokens is not None:
+                # The alternate oracle's variable sits at position 2: the
+                # expected assignment pins that element's handle (a link
+                # handle for nested expressions, the quoted node handle for
+                # 2-level facts -- the disambiguation iter6b called for).
+                link_absence_queries.append(
+                    (link.handle, alt_tokens, {ALT_UNASSIGNED_HANDLE: targets[1]})
+                )
         return link.handle
 
     top_handle = build(expression, 1)
@@ -192,6 +256,7 @@ def _build_fact(
         handles=[atom.handle for atom in atoms],
         top_handle=top_handle,
         link_queries=link_queries,
+        link_absence_queries=link_absence_queries,
     )
 
 
