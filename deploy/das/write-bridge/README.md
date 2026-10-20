@@ -112,31 +112,44 @@ each written `Expression` link is queried with a fully ground
 
 ## Canary procedure (write -> verify -> cleanup)
 
-Use fresh, uniquely named content — `add_atoms` upserts, and cleanup deletes
-whatever the handles point to (shared/pre-existing atoms would be removed
-too).
+Use fresh, uniquely named content — `add_atoms` upserts. Cleanup defaults
+to deleting ONLY the fact's Expression links: Symbol nodes are shared across
+facts on a live DB (live-measured 2026-10-20: `Symbol "Inheritance"` is the
+target of 421 other links, `Symbol "Concept"` of 791) and deleting them
+would orphan every fact reusing the same symbols. For zero residue on a
+shared DB, delete the canary's unique nodes afterwards via explicit
+`--handle` flags; `--delete-nodes` (all fact handles, nodes included) is for
+scratch databases only.
 
 ```bash
 # 0) the DAS stack + broker must be up (broker deployed out of compose, see
-#    compose.write-bridge.yaml header for the live-verified docker run)
+#    compose.write-bridge.yaml header for the live-verified docker run +
+#    client-network alias connect)
 
 # 1) write + verify (read-back is on by default)
 curl -s http://write-bridge:8080/v1/write -H 'Content-Type: application/json' \
   -d '{"metta": "(Inheritance (Concept \"canary-20261019\") (Concept \"write-bridge-test\"))"}'
 # -> {"handles": [...], "verified": true, "missing": []}
 
-# 2) cleanup: delete exactly those atoms and verify they are gone
+# 2) cleanup: delete the fact's LINKS and verify they are gone
 docker compose -f compose.write-bridge.yaml run --rm write-bridge \
   /app/cleanup.py --metta '(Inheritance (Concept "canary-20261019") (Concept "write-bridge-test"))'
 # -> {"deleted": [...], "absent": true, "still_present": []}
+
+# 3) optional zero-residue: delete the canary's unique NODES explicitly
+#    (bare nodes are not covered by the link-walk verification, so the
+#    result reports absent: null)
+docker compose -f compose.write-bridge.yaml run --rm write-bridge \
+  /app/cleanup.py --metta '(...)' \
+  --handle <canary-node-handle> --handle <canary-concept-node-handle>
 ```
 
 `cleanup.py` re-derives the deterministic handles from the metta expression;
-an explicit `--handle` list (repeatable) must match exactly. The broker-side
-deletion follows the C++ client's wire format (chunked handle lists with a
-trailing `delete_link_targets` flag; `--delete-link-targets` opts into
-recursive target deletion). Deletion is fire-and-forget too — the read-back
-absence check is what makes the result credible.
+an explicit `--handle` list (repeatable) must belong to the fact. The
+broker-side deletion follows the C++ client's wire format (chunked handle
+lists with a trailing `delete_link_targets` flag; `--delete-link-targets`
+opts into recursive target deletion). Deletion is fire-and-forget too — the
+read-back absence check is what makes the result credible.
 
 ## Deployment
 

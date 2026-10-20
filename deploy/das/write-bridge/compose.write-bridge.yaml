@@ -11,12 +11,22 @@
 #     busnode --service=atomdb-broker --endpoint=0.0.0.0:40007 \
 #       --ports-range=47000:47999 --atomdb-type=redismongodb --config=/etc/das/config.json
 #
+#   Then attach the broker's SECOND network with the client-network alias
+#   (docker run with two --network flags keeps only the LAST one's DNS
+#   records, so the alias must be connected afterwards -- live-discovered
+#   2026-10-19, bridge iteration 2):
+#
+#   docker network connect --alias atomdb-broker omega-das-integration-client \
+#     omega-das-integration-atomdb-broker
+#
 # Broker deployment invariants (violating any of these breaks the lane):
 #   1. bind 0.0.0.0 (not a hostname) in multi-network docker;
 #   2. clients join the broker DIRECTLY (DAS_BROKER_ENDPOINT = broker DNS
 #      name); a mis-routed atomdb command crashes the query engine;
 #   3. the callback-peer rewrite host for atomdb commands is the broker
-#      name (DAS_BROKER_PEER_HOST).
+#      name (DAS_BROKER_PEER_HOST);
+#   4. the broker must be DNS-resolvable as "atomdb-broker" on the client
+#      network (second-network connect with --alias, see above).
 #
 # This snippet attaches to the networks created by deploy/das/compose.yaml;
 # start that stack first (docker compose -f deploy/das/compose.yaml up -d).

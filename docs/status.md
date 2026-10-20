@@ -2,7 +2,7 @@
 
 Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Report](https://docs.google.com/document/d/1Pw5diOmac40Abc8_D1CG0_b3OrOHntq1BSzOv2H63dM/edit) (§16+ = execution campaign). This page mirrors it per iteration.
 
-## Current phase: Phase 1 — Bridge core (config-only, live on OVH)
+## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — canary loop DONE, sign-off pending
 
 ## Iteration log
 
@@ -34,3 +34,19 @@ Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Re
 - **Tests:** full suite updated to the new shapes (variable-form vectors, assignment-bearing scripted answers, enum normalization case); tests/Dockerfile added (pinned-client pytest image, digest-build-arg pattern; first build attempt failed on a docstring-in-Dockerfile error — fixed). Test run + live probe rerun = next iteration's first action.
 - **Standing state:** Omega agent STOPPED (verified inactive). Broker alias fix is live on OVH. Canary fact NOT yet written (probe write never landed — by design the canary run only counts with verification green).
 - **Next (iteration 3):** rebuild test image → full unit suite → rerun live probe (write→verify→metta-read→cleanup) → record canary handles; then Phase-1 sign-off.
+
+### Iteration 3 — 2026-10-20 00:07–00:35 UTC — Test suite green (109) + FIRST fully verified live canary loop + safe-cleanup redesign ✅
+- **Test image built live** (`omega-write-bridge-tests`, pinned `python@sha256:a6e34c…` digest-pinned, client e12573cc compiled in-image). First full run: **3 failed / 105 passed** — the iter-2 23:50 haste left regressions. All three fixed with evidence:
+  1. `write_client.py` rewrite dispatch: plain-string `"BusCommand.ATOMDB"` spellings (exactly what `str()` of the pinned str-mixin enum renders) now normalize to `atomdb`; probed the REAL pinned client in-image: `proxy.command` is `BusCommand.ATOMDB` (str-enum, hash/eq = `"atomdb"`), so dict-plain lookup fires live — normalization covers the `str()` spelling too.
+  2. Stale test: link_queries are 3-tuples now — test unpacking updated.
+  3. Stale test: variable-form compared against the TOP expression's ground template — rewritten per-link (each link vs its own ground template; variable replaces the 3-token leading symbol spec with 2 tokens).
+- **Latent iter-2 bug found by the suite:** `ParsedFact.link_handles` still unpacked 2-tuples → crashed on first use. Fixed (3-tuple).
+- **Live-DB safety measurement (mongo, db `das`, 1864 nodes / 3710 links):** `Symbol "Inheritance"` targeted by **421** other links, `Symbol "Concept"` by **791** → the old cleanup default (delete ALL fact handles) would have orphaned prior facts. **Cleanup redesigned:** links-only default, `--delete-nodes` opt-in (scratch DBs), explicit `--handle` lists must belong to the fact, `absent: null` when the deleted set can't be link-verified. README canary procedure + compose header (broker client-network alias invariant) updated; test suite 109/109 green on OVH.
+- **LIVE PROBE (iter3-probe, deployed read-proxy image):**
+  - `PHASE1_WRITE_VERIFY` — **first fully verified live write**: canary `(Inheritance (Concept "omega-bridge-canary-20261020") (Concept "write-bridge-test"))` written + variable-form read-back `verified: true` in 4.5 s.
+  - `PHASE2_METTA_VAR` — fresh fact returned by **metta-mode** query through the deployed read-proxy (1.3 s), assignment binds `$_1`/`$B` to `(Concept "…canary…")` handle.
+  - `PHASE4_CLEANUP` — deleted 3 links (links-only) + `PHASE4B` 2 unique nodes; `PHASE5` metta re-query 0 answers.
+  - **Mongo ground truth:** all 3 canary links = 0, both unique nodes = 0, shared Symbols INTACT, E1 canary INTACT, totals unchanged → **zero residue, nothing else touched.**
+  - **New wire reality — deletion is eventual:** read-back ~1 s after delete still matched the links (PHASE4 false `still_present`); 1 s later the same query = 0; mongo confirms gone. → next iteration: bounded retry/grace window in cleanup verification.
+- **Standing state:** Omega agent STOPPED (untouched this iteration). DAS stack healthy. Evidence: `memory/omega-das-bridge/evidence/iter3-probe/` (probe + TRANSCRIPT).
+- **Next (iteration 4):** cleanup-verify grace window (bounded retry) + test; then Phase-1 sign-off checklist (README runbook + acceptance entry in GDoc) and on to Phase 2 (thin import wrapper).

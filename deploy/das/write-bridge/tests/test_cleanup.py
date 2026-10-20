@@ -9,10 +9,18 @@ import pytest
 import cleanup as cleanup_module
 from cleanup import cleanup as run_cleanup
 from conftest import EXPECTED_HANDLES, TOP_HANDLE, X402_METTA
-from metta_to_atoms import MettaParseError
+from metta_to_atoms import MettaParseError, parse_fact
 from write_client import WriteFailure
 
 X402 = X402_METTA
+# Split by atom arity (NOT by handle order: the x402 fact's bottom-up order
+# interleaves nodes and links: Symbol, Symbol, Symbol, LINK, Symbol, LINK,
+# LINK).
+_FACT = parse_fact(X402)
+LINK_HANDLES = _FACT.link_handles
+NODE_HANDLES = [
+    handle for atom, handle in zip(_FACT.atoms, _FACT.handles) if atom.arity() == 0
+]
 
 
 class FakeCleanupRunner:
@@ -35,14 +43,23 @@ class FakeCleanupRunner:
 
 class TestCleanup:
     def test_full_canary_cycle(self):
+        # Default scope: ONLY the fact's Expression links. Symbol nodes are
+        # shared across facts on a live DB (live-measured iteration 3) and
+        # must never be deleted by default.
         runner = FakeCleanupRunner()
         result = run_cleanup(runner, X402)
-        assert runner.deletions == [(EXPECTED_HANDLES, False)]
+        assert runner.deletions == [(LINK_HANDLES, False)]
         assert result == {
-            "deleted": EXPECTED_HANDLES,
+            "deleted": LINK_HANDLES,
             "absent": True,
             "still_present": [],
         }
+
+    def test_delete_nodes_deletes_every_fact_handle(self):
+        # Opt-in full wipe: only safe on a scratch DB owned by the caller.
+        runner = FakeCleanupRunner()
+        run_cleanup(runner, X402, delete_nodes=True)
+        assert runner.deletions == [(EXPECTED_HANDLES, False)]
 
     def test_still_present_links_reported(self):
         runner = FakeCleanupRunner(verify_missing=[TOP_HANDLE])
@@ -50,25 +67,29 @@ class TestCleanup:
         assert result["absent"] is False
         assert result["still_present"] == [TOP_HANDLE]
 
-    def test_explicit_handles_must_match(self):
+    def test_explicit_handles_must_belong_to_fact(self):
         runner = FakeCleanupRunner()
-        result = run_cleanup(runner, X402, handles=list(EXPECTED_HANDLES))
-        assert result["absent"] is True
-        with pytest.raises(ValueError, match="does not match"):
+        # A subset of the fact's handles (e.g. the canary's unique nodes for
+        # zero-residue cleanup) is accepted and verifiable: bare nodes are
+        # not covered by the link walk, so absence is reported as null.
+        result = run_cleanup(runner, X402, handles=list(NODE_HANDLES))
+        assert runner.deletions == [(NODE_HANDLES, False)]
+        assert result == {"deleted": NODE_HANDLES, "absent": None, "still_present": []}
+        with pytest.raises(ValueError, match="do not belong"):
             run_cleanup(runner, X402, handles=["a" * 32])
         # The mismatched call deleted nothing.
-        assert runner.deletions == [(EXPECTED_HANDLES, False)]
+        assert runner.deletions == [(NODE_HANDLES, False)]
 
     def test_delete_link_targets_flag(self):
         runner = FakeCleanupRunner()
         run_cleanup(runner, X402, delete_link_targets=True)
-        assert runner.deletions == [(EXPECTED_HANDLES, True)]
+        assert runner.deletions == [(LINK_HANDLES, True)]
 
     def test_no_verify_reports_absent_null(self):
         runner = FakeCleanupRunner(verify_missing=[TOP_HANDLE])
         result = run_cleanup(runner, X402, verify=False)
-        assert result == {"deleted": EXPECTED_HANDLES, "absent": None, "still_present": []}
-        assert runner.deletions == [(EXPECTED_HANDLES, False)]
+        assert result == {"deleted": LINK_HANDLES, "absent": None, "still_present": []}
+        assert runner.deletions == [(LINK_HANDLES, False)]
 
     def test_parse_error_propagates_before_delete(self):
         runner = FakeCleanupRunner()
@@ -81,7 +102,7 @@ class TestCleanup:
         with pytest.raises(WriteFailure) as excinfo:
             run_cleanup(runner, X402)
         assert "deletion verification failed" in str(excinfo.value)
-        assert excinfo.value.handles == EXPECTED_HANDLES
+        assert excinfo.value.handles == LINK_HANDLES
 
     def test_delete_failure_propagates(self):
         runner = FakeCleanupRunner(delete_error=WriteFailure("atomdb-broker unreachable"))
@@ -97,7 +118,7 @@ class TestCli:
         assert code == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload == {
-            "deleted": EXPECTED_HANDLES,
+            "deleted": LINK_HANDLES,
             "absent": True,
             "still_present": [],
         }

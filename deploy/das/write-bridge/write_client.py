@@ -342,10 +342,16 @@ def _install_callback_peer_rewrite(host_by_command: dict[str, str]) -> None:
         if separator and host in {"0.0.0.0", "::", "[::]"} and port.isdigit():
             proxy = getattr(getattr(self, "servicer", None), "proxy", None)
             command = getattr(proxy, "command", "")
-            # BusCommand.ATOMDB is a str-mixin enum: str(x) is "BusCommand.ATOMDB"
-            # while x.value is "atomdb". Accept both spellings.
-            if isinstance(command, str) and command in _REWRITE_HOSTS:
-                rewrite_host = _REWRITE_HOSTS[command]
+            # BusCommand.ATOMDB is a str-mixin enum: str(x) is
+            # "BusCommand.ATOMDB" while x.value is "atomdb". The pinned client
+            # carries BOTH the plain-string enum spelling and the value form;
+            # normalize every spelling (live probe root cause, iter 2).
+            rewrite_host = None
+            if isinstance(command, str):
+                if command in _REWRITE_HOSTS:
+                    rewrite_host = _REWRITE_HOSTS[command]
+                elif command.startswith("BusCommand."):
+                    rewrite_host = _REWRITE_HOSTS.get(command.split(".", 1)[1].lower())
             else:
                 rewrite_host = _REWRITE_HOSTS.get(str(getattr(command, "value", "")))
             if rewrite_host:

@@ -155,7 +155,7 @@ class ParsedFact:
 
     @property
     def link_handles(self) -> list[str]:
-        return [handle for handle, _ in self.link_queries]
+        return [handle for handle, _, _ in self.link_queries]
 
 
 def _pinned_factories() -> tuple[Any, Any]:

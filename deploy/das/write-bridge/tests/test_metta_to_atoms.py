@@ -121,7 +121,7 @@ class TestParseFact:
         assert fact.handles == EXPECTED_HANDLES
         assert fact.top_handle == TOP_HANDLE
         assert [atom.handle for atom in fact.atoms] == EXPECTED_HANDLES
-        assert [handle for handle, _ in fact.link_queries] == list(LINK_HANDLES)
+        assert [handle for handle, _, _ in fact.link_queries] == list(LINK_HANDLES)
         assert all(isinstance(atom, (MirrorNode, MirrorLink)) for atom in fact.atoms)
 
     def test_atom_types_follow_db_convention(self):
@@ -188,15 +188,26 @@ class TestGroundTemplates:
             assert assignment == {UNASSIGNED_HANDLE: link.targets[0]}
 
     def test_variable_form_binds_leading_symbol_only(self):
+        # Collect Expression elements bottom-up (same traversal order as
+        # parse_fact's link_queries) and compare each link's variable form
+        # against ITS OWN ground template: identical apart from the leading
+        # symbol spec (3 ground tokens) replaced by the variable (2 tokens).
+        def bottom_up(element):
+            if isinstance(element, Expression):
+                for child in element.elements:
+                    yield from bottom_up(child)
+                yield element
+
         fact = parse_fact(X402)
-        for _handle, tokens, assignment in fact.link_queries:
+        elements = list(bottom_up(parse_expression(X402)))
+        assert len(elements) == len(fact.link_queries)
+        for element, (_handle, tokens, _assignment) in zip(elements, fact.link_queries):
+            assert tokens == variable_template_tokens(element)
             assert tokens[3:5] == ["VARIABLE", UNASSIGNED_HANDLE]
-            ground = ground_template_tokens(fact.expression)
-            # Same shape as the fully-ground template apart from the leading
-            # symbol spec, which the variable replaces.
-            assert len(tokens) == len(ground)
+            ground = ground_template_tokens(element)
+            assert len(tokens) == len(ground) - 1
             assert tokens[:3] == ground[:3]
-            assert tokens[5:] == ground[5:]
+            assert tokens[5:] == ground[6:]
 
     def test_variable_form_requires_leading_symbol(self):
         with pytest.raises(MettaParseError):
