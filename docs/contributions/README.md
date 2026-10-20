@@ -11,7 +11,7 @@ Contribution ladder (order per re-eval report §11):
 | 3 | das-metta-parser lexer silently **drops `<`/`>`** from bare symbols | singnet/das-metta-parser | issue + PR | **DRAFT, re-validated 2026-10-20** (19 bare-angle entries measured in real corpus) — `issue-3-lexer-angle-drop.md` |
 | 4 | `syntax_check` prints "Syntax check OK" even on failure | singnet/das-metta-parser | issue + PR | **DRAFT, re-validated 2026-10-20** — `issue-4-syntax-check-ok.md` |
 | 5 | Raw newline inside quoted string breaks the token (98.2% raw → 99.17% with shipped escape fallback) | singnet/das-metta-parser | issue + PR | **DRAFT, re-validated 2026-10-20** — `issue-5-newline-in-string.md` |
-| 6 | Docs: "Writing atoms from external agents" guide (atomdb-broker deployment, python client example, fire-and-forget caveat, MeTTa-mode guidance) | singnet/das | docs | **PLANNED** (last, after fixes) |
+| 6 | Docs: "Writing atoms from external agents" guide (atomdb-broker deployment, python client example, fire-and-forget caveat, MeTTa-mode guidance) | singnet/das | docs | **DRAFTED 2026-10-20 (iteration 15)** — [`upstream-docs-guide.md`](upstream-docs-guide.md) (every command/API fact re-verified against upstream `48507929` before writing) |
 | 7 | PeTTa superpose/collapse history-garbage leak (real defect behind our fork's garbage history entries) | singnet/Omega (upstream line) | issue + PR | **PLANNED** (coordinate with PR#349 memory redesign) |
 
 ## Fork-local executable state
