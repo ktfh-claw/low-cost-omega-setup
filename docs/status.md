@@ -6,6 +6,12 @@ Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Re
 
 ## Iteration log
 
+### Iteration 21 — 2026-10-20 11:37–11:50 UTC — Idle-hold tick: still no decisions received; standing state re-verified ⏸️
+- **Unit: the standing gate.** No decision from Balázs observed as of 11:37 UTC — the iter-18 decision-request DM (id 1562044955944550482, delivered 10:08:59 UTC) still stands unanswered, and the bridge repo remains at iter-20 state (main @465406c, clean and = origin). No scheduled work remains (campaign COMPLETE substantively since iter 17); all remaining actions are decision-gated. Per the iter-18 cadence rule this tick stays a minimal idle-hold: state re-verify + bookkeeping only, **no repeat decision-request DM**.
+- **Standing state re-verified this tick (read-only, no mutation):** bridge repo main @465406c clean and = origin; OVH: DAS 5-stack (mongodb/redis healthy, attention-broker, query-engine, read-proxy) + atomdb-broker + write-bridge all Up, Omega agent container absent (pause holding), three scratch mongos idle (disposable), disk 26%, mem 2.1 GiB/31 GiB.
+- **Docs:** this entry; GDoc §16 iteration-21 entry.
+- **Next (iteration 22, if still ungated):** idle-hold — execute only Balázs's decisions on the three gated items (upstream filing of 5 issue drafts + docs guide + 2 fork draft branches; live-agent restart with the das-write plugin; cron remove-vs-monitor) plus the minor stale-tree (`~/omega-das-bridge/`) cleanup ask.
+
 ### Iteration 20 — 2026-10-20 11:07–11:20 UTC — Idle-hold tick: still no decisions received; standing state re-verified ⏸️
 - **Unit: the standing gate.** No decision from Balázs observed as of 11:07 UTC — the iter-18 decision-request DM (id 1562044955944550482, delivered 10:08:59 UTC) still stands unanswered, and the bridge repo remains at iter-19 state (main @24f2be2 clean and = origin). No scheduled work remains (campaign COMPLETE substantively since iter 17); all remaining actions are decision-gated. Per the iter-18 cadence rule this tick stays a minimal idle-hold: state re-verify + bookkeeping only, **no repeat decision-request DM**.
 - **Standing state re-verified this tick (read-only, no mutation):** bridge repo main @24f2be2 clean and = origin; OVH: DAS 5-stack (mongodb/redis healthy, attention-broker, query-engine, read-proxy) + atomdb-broker + write-bridge all Up, Omega agent container absent (pause holding), three scratch mongos idle (disposable), disk 26%, mem 2.1 GiB/31 GiB, uptime 3w5d.
