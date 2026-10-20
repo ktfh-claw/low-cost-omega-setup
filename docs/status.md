@@ -2,9 +2,17 @@
 
 Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Report](https://docs.google.com/document/d/1Pw5diOmac40Abc8_D1CG0_b3OrOHntq1BSzOv2H63dM/edit) (§16+ = execution campaign). This page mirrors it per iteration.
 
-## Current phase: LIVE end-to-end campaign (from iteration 22) — Omega agent running with das-write plugin (dasWriteEnabled=1), autonomous research continuation; 8 live agent writes two-layer verified through iteration 23; cron in live-monitor mode (30m). Remaining gated: upstream filing only.
+## Current phase: LIVE end-to-end campaign (from iteration 22) — Omega agent running with das-write plugin (dasWriteEnabled=1), autonomous research continuation; 11 live agent writes two-layer verified through iteration 24; cron in live-monitor mode (30m). Remaining gated: upstream filing only.
 
 ## Iteration log
+
+### Iteration 24 — 2026-10-20 13:37–13:45 UTC — LIVE monitor tick 3: 3 new autonomous writes two-layer verified mid-burst; zero drift ✅
+- **Health (all green):** omega-curiosity Up (since 12:01:10); ASIOne 200s continuous (41 LLM_USAGE lines in the 40 m sweep, last 13:37:34, still going at 13:44); TG long-poll 200s ~21 s cadence; DAS 5-stack + atomdb-broker + write-bridge Up; disk 26%, mem 2.9/31 GiB.
+- **Write ledger 13:02→13:42 (3 new autonomous writes, facade 3×POST 200 in-window):** W9 13:37:38 `(Inheritance "arxiv_2604_22652" "DecentralizedAIResearch")` verified=7; W10 13:37:42 `(Evaluation "describes" "arxiv_2604_22652")` verified=8; W11 13:41:17 `(Inheritance "Web4 Agentverse" "FetchProduct")` verified=7 (landed mid-verification; verified by a second probe pass). Zero real WRITE-FAILED (50 log hits = context-echo trap, 0 standalone tool-result lines), zero remove attempts, zero fall-through, no size violations, no new garbage families beyond the known issue-365 one. Two `&self` local writes observed = stock non-durable behavior, correctly not bridge-routed. One benign agent-side das-retrieve arg quirk (13:37:58, `query` key instead of `tokens`+`max_answers`) — agent read-skill layer, self-corrected next call; not bridge drift.
+- **Two-layer verification 3/3:** Layer-1 read-proxy metta count=1 for every write (W9/W10/W11 incl. a reverse-direction probe for W11; W8 prior-tick + E1 canary re-verified cumulative: x402 count=4). Fully-grounded probe → HTTP 400 by design (runbook variable-form rule, ops-consistent). Layer-2 mongo: **1880/3734 → 1885/3742** = +5/+8 = exactly W9(+2n/+3l)+W10(+1n/+2l)+W11(+2n/+3l), all-fresh (wrapper_refs 1/1/2/1/1; arxiv node refs=2 = its own two writes); all claimed handles resolve to their literal nodes; atom_types 0; E1 canary + Crow canary + prior-import markers ("x402" family incl. bare x402-protocol, "AgentPaymentProtocol") intact; zero residue.
+- **Drift found: none.** Facade/plugin/oracle matched spec throughout. Ops facts extended (window-boundary POST counting; fresh-node-written-by-two-writes shows wrapper_refs=2). No code fixes → no fork pushes beyond docs.
+- **Evidence:** `memory/omega-das-bridge/evidence/iter24-live/` (tick-1337-verification.md, layer1-readproxy-probes.txt, layer2-mongo-groundtruth.txt, iter24-rp-probe.py + probe2, gt24.js + gt24b.js).
+- **Standing:** agent UP researching (mid-burst at tick time); stack all Up; cron stays ON in live-monitor mode. Remaining decision-gated: upstream filing of the 5 issue drafts + docs guide + 2 fork draft branches.
 
 ### Iteration 23 — 2026-10-20 13:02–13:30 UTC — LIVE monitor tick 2: 4 new autonomous writes two-layer verified; iter-22 transcription drift fixed; probe-shape gap documented ✅
 - **Health (all green):** omega-curiosity Up (since 12:01:10); ASIOne 200s + TG long-poll healthy; DAS 5-stack + atomdb-broker + write-bridge Up; disk 26%, mem 2.9/31 GiB.
