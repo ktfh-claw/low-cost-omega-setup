@@ -2,7 +2,7 @@
 set -euo pipefail
 
 container=omega-curiosity
-image=omegaclaw:das-f38217f
+image=omegaclaw:das-a44739e
 
 cleanup() {
   /usr/bin/docker rm -f "$container" >/dev/null 2>&1 || true
