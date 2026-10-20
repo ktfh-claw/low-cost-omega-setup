@@ -23,14 +23,14 @@
 
 ### Phase 3 — Upstream contribution ladder (fork-local drafts)
 - [x] All 5 issue drafts finalized in `docs/contributions/` (re-validated against latest upstream — done iter 12, 2026-10-20).
-- [~] Draft PRs opened in the **forked repos** where executable: python-client typo fix branch — **pushed iter 12** (`fix/python-client-metta-typo` @ 067fc8e1 on ktfh-claw/das); parser `<>` lexer rule + `syntax_check` OK-print + raw-newline fixes — pending (iter 13).
+- [x] Draft PRs opened in the **forked repos** where executable: python-client typo fix branch — pushed iter 12 (`fix/python-client-metta-typo` @ 067fc8e1 on ktfh-claw/das); parser `<>` lexer rule + `syntax_check` OK-print + newline doc — pushed iter 13 (`fix/lexer-bare-angle-symbols` @ 4687c8c on ktfh-claw/das-metta-parser, 3 commits, orchestrator-validated).
 - [x] Fork cleanup: archive/delete superseded branches — **done 2026-10-20 (iter 14)**: das-toolbox lane archived into `docs/contributions/das-toolbox-lane/` (full-history bundle, restore-tested; uncommitted operator-write-lane patch; memory notes); fork branches `omega-das-integration` / `omega-das-write-integration` / `omega-history-extraction-v2` deleted; fork master reset to upstream @928edfc; local lane branches + worktree removed.
 - [ ] Nothing filed/pushed upstream — needs explicit approval, always.
 
 ### Phase 4 — Close-out
-- [ ] End-to-end acceptance test documented in the Google Doc + `docs/status.md`.
-- [ ] Runbook complete (from-scratch reproduction).
-- [ ] Memory files closed out; cron removed or converted to monitor-only.
+- [x] End-to-end acceptance test documented — `docs/acceptance.md` (2026-10-20 09:12 UTC): three consecutive green loops (iter7-a1, iter8-a1, iter16-a1), each first-pass oracle verdict + mongo zero residue; mirrored in the Google Doc §16 + `docs/status.md`.
+- [x] Runbook complete (from-scratch reproduction) — `docs/runbook.md`: full 8-section runbook (digests, broker invariants, node-id rule, canary procedure, bulk-load lane, gated Omega attachment, acceptance loop).
+- [ ] Memory files closed out; cron removed or converted to monitor-only — pending Balázs's decisions (upstream filing, live-agent restart, cron disposition).
 
 ## Tracking rules
 
