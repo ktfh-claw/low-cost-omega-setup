@@ -16,10 +16,13 @@ cleanup
   --tmpfs /var/tmp:size=64m,mode=1777 \
   --tmpfs /run:size=16m,mode=755 \
   --volume omega-curiosity-memory:/PeTTa/repos/Omega/memory \
+  --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-write:/PeTTa/repos/Omega/plugins/das-write:ro \
+  --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins.yaml.overlay:/PeTTa/repos/Omega/config/plugins.yaml:ro \
   --volume /home/ubuntu/omega-curiosity/config-overlay.yaml:/PeTTa/repos/Omega/config/config.yaml:ro \
   --env-file /home/ubuntu/omega-curiosity/runtime.env \
   "$image" \
   commchannel=telegram provider=ASIOne model=asi1-ultra embeddingprovider=Local telegramAutonomousWake \
+  dasWriteEnabled=1 dasWriteOrigin=http://write-bridge:8080 \
   >/dev/null
 
 # The default bridge supplies outbound Telegram/ASI:One connectivity. The
