@@ -79,27 +79,27 @@ When `dasWriteEnabled != 1`:
 - `BRIDGE-PERSIST-REMOVE-UNSUPPORTED: remove-atom &persistent is not
   bridged yet; nothing was removed from DAS` — truthful v1 failure
 
-## Test-container validation (procedure — to be executed next iteration)
+## Validation record
 
-> **Placeholder** — the live validation procedure runs in the next
-> iteration, against a test container on the OVH host (the live agent
-> container stays stopped; no live-agent restart without approval).
->
-> Outline (to be refined):
-> 1. Start the write-bridge compose service (or confirm it is running on
->    `omega-das-integration-client`).
-> 2. Create a test container from `omegaclaw:das-f38217f` with the plugin
->    dir and plugins.yaml overlay bind-mounted (read-only), and
->    `dasWriteEnabled=1` + `dasWriteOrigin=http://write-bridge:8080` on the
->    container command line (stock config resolution),
->    `commchannel=test` (mock channel) so no provider/channel starts.
-> 3. Attach the container to `omega-das-integration-client`.
-> 4. Invoke the `metta` skill with
->    `(add-atom &persistent (Inheritance (Concept "canary") (Concept "das-write-hook")))`
->    and verify the `BRIDGE-PERSIST-OK` status with handles.
-> 5. Verify the fact in DAS via the read path (read-proxy → query-engine).
-> 6. Run a second container without `dasWriteEnabled` and verify zero
->    behavioral change (stock clause in place, `&persistent` interception
->    absent, no DAS write).
-> 7. Clean up the canary fact via handle deletion (documented operator
->    action).
+**Test container (iteration 11, 2026-10-20 ~05:00 UTC):** enabled path
+green — `BRIDGE-PERSIST-OK: verified=7` + read-proxy read-back + oracle
+cleanup + mongo zero-residue; disabled path zero behavioral change;
+stock fall-through intact; suite 58 passed.
+
+**Live agent (iteration 22, 2026-10-20 12:01–12:05 UTC, explicitly approved
+restart):** agent `omega-curiosity` started from the updated `start.sh` with
+the plugin mounted (`dasWriteEnabled=1`, origin
+`http://write-bridge:8080`); loader logged
+`DAS persistent-space bridging enabled`. First two autonomous research
+findings persisted live, no operator involvement:
+
+- `BRIDGE-PERSIST-OK: verified=7` — `(Inheritance (Concept "FetchCoder-V2")
+  (Concept "FetchAI-product"))`
+- `BRIDGE-PERSIST-OK: verified=8` — `(Evaluation (Predicate "released-date")
+  (Concept "FetchCoder-V2-2026-01-15"))`
+
+Both write-bridge POSTs returned 200 with read-back verification. Mongo
+ground truth: handles present, `atom_types` 0, E1/Crow canaries and prior
+import markers intact, totals 1864/3710 → 1868/3716 — cumulative growth,
+zero residue. Evidence:
+`memory/omega-das-bridge/evidence/iter22-live/` (gateway workspace).

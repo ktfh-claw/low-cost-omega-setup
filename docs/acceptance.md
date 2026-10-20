@@ -117,8 +117,15 @@ Unit suite on the pinned upstream client (`e12573cc`): **123 passed**
     invariant; `remove-atom &persistent` → truthful
     `BRIDGE-PERSIST-REMOVE-UNSUPPORTED`.
 - Suite: 58 passed locally.
-- **Live agent remains STOPPED — restart is gated on explicit Balázs
-  approval** (acceptance does NOT include live-agent operation).
+- **Live-agent validation (iteration 22, 2026-10-20 12:01–12:05 UTC,
+  explicitly approved restart):** agent restarted with the plugin mounted
+  (`dasWriteEnabled=1`); loader logged the enabled line; first two
+  autonomous findings persisted live via `&persistent` —
+  `BRIDGE-PERSIST-OK: verified=7` (FetchCoder-V2 → FetchAI-product) and
+  `verified=8` (released-date Evaluation) — both facade POST 200 with
+  read-back; mongo: handles present, `atom_types` 0, canaries + prior
+  imports intact, totals 1864/3710 → 1868/3716 (cumulative, zero
+  residue). Evidence: `memory/omega-das-bridge/evidence/iter22-live/`.
 
 ### B6. Upstream contribution ladder — Phase 3, fork-local drafts only
 
@@ -149,10 +156,13 @@ The omega-das-bridge (Path B) campaign is functionally complete and
 accepted on the deployed OVH services: three consecutive green end-to-end
 loops (A), all component lanes live-validated (B1–B5), upstream
 contributions drafted fork-locally (B6), and a from-scratch runbook (C).
-Outstanding by design: (1) live Omega-agent restart — gated on explicit
-approval; (2) filing any draft upstream — gated on explicit approval;
+Outstanding by design: (1) ~~live Omega-agent restart~~ — **executed
+2026-10-20 12:01 UTC** under explicit approval, live evidence recorded
+(iteration 22; the plugin now runs attached to the live agent);
+(2) filing any draft upstream — gated on explicit approval;
 (3) the two decision-gated issue drafts (QE-crash robustness, delete-apply
 ack) remain drafts.
 
 Evidence: `memory/omega-das-bridge/evidence/iter{2..8,9,10,11,12,13,16}-probe/`
-(gateway workspace); per-iteration details in [`docs/status.md`](status.md).
+plus `evidence/iter22-live/` (live-agent restart + first live writes);
+gateway workspace; per-iteration details in [`docs/status.md`](status.md).
