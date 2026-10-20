@@ -5,7 +5,7 @@
 
 ## 1. Objective
 
-Let the running Omega agent (`omega-curiosity`) persist campaign knowledge into DAS **directly** — matching the intended Hyperon/OpenCog/SingularityNET architecture in which agents are first-class DAS writers — **without maintaining source forks of any upstream component**. Everything is achieved by deploying and configuring existing upstream artifacts:
+Let the running Omega agent (`omega-curiosity`) persist campaign knowledge into DAS **directly** — matching the intended Hyperon/OpenCog/SingularityNET architecture in which agents are first-class DAS writers. Everything this bridge repo contributes is a **runtime-mounted artifact** (plugins, config overlays, prompts, adapter files); the DAS plane is stock upstream pinned-digest images. One correction (2026-10-20, iteration 31 — truth-fixed after a provenance audit): the agent image is a **fork build**, not a stock upstream image — see §Agent-image provenance below.
 
 | Upstream component | Role in the bridge | Source of truth |
 |---|---|---|
@@ -13,8 +13,8 @@ Let the running Omega agent (`omega-curiosity`) persist campaign knowledge into 
 | `atomdb-broker` | the **only** runtime write API (`das-cli atomdb-broker start`) | `singnet/das` |
 | python client `AtomDBProxy.add_atoms` | write client library | `singnet/das` `3rd_party_slots/python_client` |
 | `das-metta-parser` (`syntax_check` + `db_loader`) | bulk/history load lane | `singnet/das-metta-parser` |
-| read proxy (bounded facade) | read plane for the agent (already deployed) | local config, stock query-engine behind it |
-| Omega/PeTTa (upstream image line) | the agent; skill definitions mounted in | `singnet/Omega` line (`omegaclaw:das-f38217f` deployed) |
+| read proxy (bounded facade) | read plane for the agent (our component, config-only) | local build, stock query-engine behind it |
+| Omega/PeTTa (fork image, see provenance note) | the agent; bridge artifacts mounted in | [`ktfh-claw/OmegaClaw-Core`](https://github.com/ktfh-claw/OmegaClaw-Core) @ `f38217f` = upstream `singnet/Omega` v0.1.20 + PR #358 + enumerated fork deltas; built as image `omegaclaw:das-f38217f` (upstream publishes no image) |
 
 ## 2. Data flows
 
@@ -34,15 +34,26 @@ Non-negotiables (live-discovered, re-eval campaign E1):
 - Atoms written via the bus carry **no `metta_expression`** field — verification must use handles/targets, not expression text.
 - The broker **must** be reachable by its network name from the client container (see §5 gotchas).
 
-### Read path (existing, one config fix)
+### Read path (fixed 2026-10-20: adapter v2 + das-read plugin)
 
 ```text
-das-retrieve skill → read-proxy → query-engine → attention-broker → MongoDB/Redis
+das-retrieve skill → (plugin-mounted das_skills v2 adapter) → read-proxy → query-engine → attention-broker → MongoDB/Redis
 ```
 
-- Default mode: structural `LINK_TEMPLATE` tokens (covers ground queries).
-- MeTTa-mode: per-request option for variable queries (`use_metta_as_query_tokens`).
+- **Working shape:** MeTTa-mode patterns `{"metta": "(Inheritance (Concept \"x402\") $X)", "max_answers": 10}` (mandatory `$variable`; ground patterns never complete on the pinned engine); `{"query": ...}` lenient alias; structural `LINK_TEMPLATE` tokens still accepted. The v1 adapter's gates (exact-key request schema forbidding metta mode; response schema rejecting the proxy's `mode` key) made the read path unreachable end-to-end — root-caused + fixed 2026-10-20 iteration 29, live-verified.
+- **Config-only binding:** the `das-read` plugin (mounted `:ro`) rebinds the `das-retrieve` clause to the mounted v2 module — same remove-then-add single-definition invariant as `das-write`. The `src/das_skills.py` `:ro` file overlay in `start.sh` is a redundant fallback with identical bytes.
 - **Workaround applied at config level:** the stock python client sends a typo'd parameter (`user_metta_as_query_tokens`) — the bridge's client wrapper sends the correct spelling until the upstream fix lands (see [contributions](contributions/README.md) #2).
+
+### Agent-image provenance (truth note, 2026-10-20)
+
+- Upstream `singnet/Omega` **publishes no container image** (verified: no `ghcr.io/singnet/omega`, no `trueagi/omega` manifests; CI builds without pushing) — any deployment builds from source.
+- The deployed image is the **ktfh-claw/OmegaClaw-Core fork build** (`omegaclaw:das-f38217f`, upstream v0.1.20 + PR #358). Fork deltas (all pre-campaign agent infrastructure, enumerated for honesty):
+  - `providers/asione.py` — ASI:One LLM provider (upstream has no ASI:One provider)
+  - Telegram autonomous-wake line (`1808b94`/`dd4e0a1`/`f38217f`) — wake gating absent upstream
+  - ARC lane + nginx proxy key isolation + OpenRouter-free provider (pre-bridge campaign work)
+  - the original `das-retrieve` skill clause + v1 adapter (`src/das_skills.py`, Oct-3) — **now superseded at runtime by the mounted das-read plugin / v2 adapter**
+- Bridge-owned artifacts are **all runtime mounts** (`:ro`): das-write plugin, das-read plugin, plugins.yaml overlay, config overlay, boot prompts, adapter files. Nothing in the running image is bridge-owned except the enumerated deltas above.
+- Consequence for validity: every bridge acceptance result (write lane ×3 green loops, wrapper 99.17%, live agent writes, read-path fix 20/20) is genuine — the bridge components are mounts over an image whose deltas are enumerated; the DAS plane is 100% upstream.
 
 ### Bulk/history lane (wrapper)
 

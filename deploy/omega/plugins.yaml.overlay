@@ -66,3 +66,14 @@
 - name: das-write
   loader: metta
   location: "{REPO}/plugins/das-write"
+
+# Appended: the das-read plugin (iteration 31, alignment lane) — rebinds the
+# das-retrieve skill clause to the plugin-mounted v2 adapter so the DAS read
+# path (like the write path) is a config-level artifact of this repo: both
+# the clause and the implementation come from mounts, not the image.
+# The src/das_skills.py :ro file overlay in start.sh is kept as a redundant
+# fallback (same v2 bytes); the plugin wins clause routing when loaded.
+
+- name: das-read
+  loader: metta
+  location: "{REPO}/plugins/das-read"
