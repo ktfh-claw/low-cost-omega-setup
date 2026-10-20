@@ -1,0 +1,214 @@
+diff --git a/deploy/omega-das-integration/.env.example b/deploy/omega-das-integration/.env.example
+index 0c5024e..7718eba 100644
+--- a/deploy/omega-das-integration/.env.example
++++ b/deploy/omega-das-integration/.env.example
+@@ -6,3 +6,9 @@ PYTHON_IMAGE_DIGEST=sha256:a8c546ed35c7976198306b6a352ff97eb18d234ce43cefd76e5fa
+ 
+ MONGODB_USERNAME=omega_poc
+ MONGODB_PASSWORD=REPLACE_WITH_A_LONG_RANDOM_VALUE
++
++# Absolute host path to an uncommitted mode-0400 or mode-0600 bearer token.
++# Generate it without printing it, for example:
++#   install -d -m 0700 /home/ubuntu/omega-das-secrets
++#   umask 077; openssl rand -hex 32 > /home/ubuntu/omega-das-secrets/write-token
++DAS_WRITE_TOKEN_FILE=/home/ubuntu/omega-das-secrets/write-token
+diff --git a/deploy/omega-das-integration/compose.yaml b/deploy/omega-das-integration/compose.yaml
+index e07ea56..4540d48 100644
+--- a/deploy/omega-das-integration/compose.yaml
++++ b/deploy/omega-das-integration/compose.yaml
+@@ -2,7 +2,7 @@ name: omega-das-integration
+ 
+ x-task-labels: &task-labels
+   io.ktfh-claw.task: omega-das-integration
+-  io.ktfh-claw.purpose: experimental-read-only-retrieval
++  io.ktfh-claw.purpose: bounded-das-integration
+ 
+ services:
+   read-proxy:
+@@ -32,6 +32,38 @@ services:
+     security_opt: ["no-new-privileges:true"]
+     cap_drop: ["ALL"]
+ 
++  fact-write-proxy:
++    build:
++      context: ./proxy
++      args:
++        PYTHON_IMAGE_DIGEST: ${PYTHON_IMAGE_DIGEST:?set PYTHON_IMAGE_DIGEST to sha256:<64 hex chars>}
++    command: ["python", "/app/write_app.py"]
++    environment:
++      DAS_CALLBACK_PORT_LOWER: "44000"
++      DAS_CALLBACK_PORT_UPPER: "44031"
++      DAS_CALLBACK_PEER_HOST: query-engine
++      DAS_CLIENT_ENDPOINT: fact-write-proxy:43999
++      DAS_QUERY_ENGINE: query-engine:40002
++      PROXY_AUTH_TOKEN_FILE: /run/secrets/omega_das_write_token
++      PROXY_HTTP_HOST: 0.0.0.0
++      PROXY_HTTP_PORT: "8081"
++      PROXY_WRITE_QUERY_SLICE_SECONDS: "2"
++      PROXY_WRITE_RATE_PER_MINUTE: "30"
++      PROXY_WRITE_TIMEOUT_SECONDS: "10"
++      PROXY_WRITE_VERIFY_POLL_SECONDS: "0.1"
++    secrets: [omega_das_write_token]
++    networks: [client]
++    labels: *task-labels
++    restart: unless-stopped
++    depends_on:
++      query-engine: {condition: service_started}
++      atomdb-broker: {condition: service_started}
++    read_only: true
++    tmpfs:
++      - /tmp:rw,noexec,nosuid,size=16m
++    security_opt: ["no-new-privileges:true"]
++    cap_drop: ["ALL"]
++
+   mongodb:
+     image: mongodb/mongodb-community-server@${MONGODB_IMAGE_DIGEST:?set MONGODB_IMAGE_DIGEST to sha256:<64 hex chars>}
+     command: ["mongod", "--bind_ip_all", "--port", "27017"]
+@@ -99,6 +131,26 @@ services:
+       attention-broker: {condition: service_started}
+     security_opt: ["no-new-privileges:true"]
+ 
++  atomdb-broker:
++    image: trueagi/das@${DAS_IMAGE_DIGEST:?set DAS_IMAGE_DIGEST to sha256:<64 hex chars>}
++    command:
++      - busnode
++      - --service=atomdb-broker
++      - --endpoint=atomdb-broker:40007
++      - --ports-range=47000:47999
++      - --atomdb-type=redismongodb
++      - --config=/etc/das/config.json
++    volumes:
++      - ./generated/config.json:/etc/das/config.json:ro
++    networks: [backend]
++    labels: *task-labels
++    restart: unless-stopped
++    depends_on:
++      mongodb: {condition: service_healthy}
++      redis: {condition: service_healthy}
++      query-engine: {condition: service_started}
++    security_opt: ["no-new-privileges:true"]
++
+   # Operator-only, one-shot services. Neither service is started by `compose up`.
+   # The loader command is intentionally fixed: the operator wrapper controls both
+   # bind sources and does not pass through db_loader flags.
+@@ -178,3 +230,7 @@ volumes:
+   omega-das-integration-redis:
+     name: omega-das-integration-redis
+     labels: *task-labels
++
++secrets:
++  omega_das_write_token:
++    file: ${DAS_WRITE_TOKEN_FILE:?set DAS_WRITE_TOKEN_FILE to an absolute deployment-secret path}
+diff --git a/deploy/omega-das-integration/config/config.json.template b/deploy/omega-das-integration/config/config.json.template
+index 910be5e..d7b1c65 100644
+--- a/deploy/omega-das-integration/config/config.json.template
++++ b/deploy/omega-das-integration/config/config.json.template
+@@ -33,7 +33,7 @@
+     "link_creation": {"endpoint": "unused:40003", "ports_range": "43000:43999", "params": {"unique_assignment_flag": false, "positive_importance_flag": false, "disregard_importance_flag": true, "unique_value_flag": false, "max_successful_creation_per_round": 0, "max_unproductive_visits_per_round": 0, "max_visit_attempts_per_round": 0, "max_rounds": 0, "link_creation_strength_threshold": 1.0}},
+     "evolution": {"endpoint": "unused:40005", "ports_range": "45000:45999", "params": {"population_size": 0, "max_generations": 0, "elitism_rate": 0.0, "selection_rate": 0.0}},
+     "context": {"endpoint": "unused:40006", "ports_range": "46000:46999", "params": {"context": "unused", "use_cache": false, "enforce_cache_recreation": false, "initial_rent_rate": 0.0, "initial_spreading_rate_lowerbound": 0.0, "initial_spreading_rate_upperbound": 0.0}},
+-    "atomdb": {"endpoint": "unused:40007", "ports_range": "47000:47999"},
++    "atomdb": {"endpoint": "atomdb-broker:40007", "ports_range": "47000:47999"},
+     "command_router": {"endpoint": "unused:40008", "ports_range": "48000:48999", "http_api": {"endpoint": "unused:40009", "thread_pool_size": 1, "max_concurrent_executions": 1, "max_queued_executions": 1, "max_events_per_execution": 1, "stream_items_per_chunk": 1, "execution_retention_ms": 1}}
+   },
+   "environment": {"jupyter": {"endpoint": "unused:40019"}},
+diff --git a/deploy/omega-das-integration/proxy/Dockerfile b/deploy/omega-das-integration/proxy/Dockerfile
+index 591498d..9f6ccd8 100644
+--- a/deploy/omega-das-integration/proxy/Dockerfile
++++ b/deploy/omega-das-integration/proxy/Dockerfile
+@@ -36,6 +36,6 @@ ENV PATH=/opt/venv/bin:$PATH \
+     PYTHONUNBUFFERED=1
+ COPY --from=builder /opt/venv /opt/venv
+ WORKDIR /app
+-COPY app.py das_client.py ./
++COPY app.py das_client.py fact_writer.py write_app.py ./
+ USER 65532:65532
+ ENTRYPOINT ["python", "/app/app.py"]
+diff --git a/deploy/omega-das-integration/scripts/preflight.sh b/deploy/omega-das-integration/scripts/preflight.sh
+index b91af56..75f08ef 100755
+--- a/deploy/omega-das-integration/scripts/preflight.sh
++++ b/deploy/omega-das-integration/scripts/preflight.sh
+@@ -30,6 +30,33 @@ done
+ : "${MONGODB_USERNAME:?MONGODB_USERNAME is required}"
+ : "${MONGODB_PASSWORD:?MONGODB_PASSWORD is required}"
+ [ "${#MONGODB_PASSWORD}" -ge 20 ] || { echo "MONGODB_PASSWORD must be at least 20 characters" >&2; exit 1; }
++: "${DAS_WRITE_TOKEN_FILE:?DAS_WRITE_TOKEN_FILE is required}"
++case "$DAS_WRITE_TOKEN_FILE" in
++  /*) ;;
++  *) echo "DAS_WRITE_TOKEN_FILE must be absolute" >&2; exit 1 ;;
++esac
++[ ! -L "$DAS_WRITE_TOKEN_FILE" ] || { echo "DAS_WRITE_TOKEN_FILE must not be a symlink" >&2; exit 1; }
++[ -f "$DAS_WRITE_TOKEN_FILE" ] || { echo "DAS_WRITE_TOKEN_FILE must be a regular file" >&2; exit 1; }
++token_mode=$(stat -c '%a' "$DAS_WRITE_TOKEN_FILE")
++case "$token_mode" in
++  400|600) ;;
++  *) echo "DAS_WRITE_TOKEN_FILE mode must be 0400 or 0600" >&2; exit 1 ;;
++esac
++python3 - "$DAS_WRITE_TOKEN_FILE" <<'PY'
++import pathlib
++import sys
++
++raw = pathlib.Path(sys.argv[1]).read_bytes()
++token = raw.rstrip(b"\r\n")
++if not 32 <= len(token) <= 256 or raw not in (token, token + b"\n", token + b"\r\n"):
++    raise SystemExit("DAS_WRITE_TOKEN_FILE must contain one 32..256-byte token")
++try:
++    text = token.decode("ascii")
++except UnicodeDecodeError:
++    raise SystemExit("DAS_WRITE_TOKEN_FILE token must be printable ASCII")
++if any(character.isspace() or not character.isprintable() for character in text):
++    raise SystemExit("DAS_WRITE_TOKEN_FILE token must be printable ASCII without whitespace")
++PY
+ 
+ "$base_dir/scripts/render-config.sh" "$env_file"
+ docker compose --env-file "$env_file" -f "$base_dir/compose.yaml" config --quiet
+diff --git a/deploy/omega-das-integration/tests/test-compose-policy.py b/deploy/omega-das-integration/tests/test-compose-policy.py
+index fc0146a..612daca 100644
+--- a/deploy/omega-das-integration/tests/test-compose-policy.py
++++ b/deploy/omega-das-integration/tests/test-compose-policy.py
+@@ -66,6 +66,45 @@ for disabled_option in (
+     assert f'proxy.set_parameter("{disabled_option}", False)' in adapter
+ print("compose read-proxy policy test passed")
+ 
++write_proxy = services["fact-write-proxy"]
++assert write_proxy["networks"] == ["client"]
++assert "ports" not in write_proxy
++assert "expose" not in write_proxy
++assert "network_mode" not in write_proxy
++assert write_proxy["read_only"] is True
++assert write_proxy["cap_drop"] == ["ALL"]
++assert write_proxy["secrets"] == ["omega_das_write_token"]
++assert "DAS_WRITE_TOKEN" not in write_proxy["environment"]
++assert write_proxy["environment"]["PROXY_AUTH_TOKEN_FILE"] == "/run/secrets/omega_das_write_token"
++assert write_proxy["environment"]["DAS_QUERY_ENGINE"] == "query-engine:40002"
++assert write_proxy["environment"]["DAS_CLIENT_ENDPOINT"] == "fact-write-proxy:43999"
++assert write_proxy["environment"]["PROXY_WRITE_TIMEOUT_SECONDS"] == "10"
++assert int(write_proxy["environment"]["PROXY_WRITE_RATE_PER_MINUTE"]) <= 60
++assert document["secrets"]["omega_das_write_token"]["file"].startswith("${DAS_WRITE_TOKEN_FILE:")
++
++atomdb_broker = services["atomdb-broker"]
++assert atomdb_broker["networks"] == ["backend"]
++assert "ports" not in atomdb_broker
++assert "expose" not in atomdb_broker
++assert "network_mode" not in atomdb_broker
++assert "--service=atomdb-broker" in atomdb_broker["command"]
++assert "--endpoint=atomdb-broker:40007" in atomdb_broker["command"]
++assert services["mongodb"]["networks"] == ["backend"]
++assert services["redis"]["networks"] == ["backend"]
++
++write_app = (deployment_dir / "proxy" / "write_app.py").read_text(encoding="utf-8")
++assert 'self.path != "/v1/facts"' in write_app
++assert "Authorization" in write_app
++assert "Idempotency-Key" in write_app
++for forbidden in ("/v1/query", "eval(", "exec(", "subprocess", "pymongo", "redis.Redis"):
++    assert forbidden not in write_app
++
++writer = (deployment_dir / "proxy" / "fact_writer.py").read_text(encoding="utf-8")
++assert "AtomDBProxy" in writer
++assert "add_atoms(atoms, use_streaming=False)" in writer
++assert "query_runner.query" in writer
++print("compose fact-write policy test passed")
++
+ loader = services["campaign-loader"]
+ assert loader["profiles"] == ["operator"]
+ assert loader["command"] == [

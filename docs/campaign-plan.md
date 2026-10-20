@@ -24,7 +24,7 @@
 ### Phase 3 — Upstream contribution ladder (fork-local drafts)
 - [x] All 5 issue drafts finalized in `docs/contributions/` (re-validated against latest upstream — done iter 12, 2026-10-20).
 - [~] Draft PRs opened in the **forked repos** where executable: python-client typo fix branch — **pushed iter 12** (`fix/python-client-metta-typo` @ 067fc8e1 on ktfh-claw/das); parser `<>` lexer rule + `syntax_check` OK-print + raw-newline fixes — pending (iter 13).
-- [ ] Fork cleanup: archive/delete superseded branches (`omega-das-integration`, `omega-das-write-integration`, `omega-history-extraction-v2` in das-toolbox — after archiving the campaign-import lane code into this repo).
+- [x] Fork cleanup: archive/delete superseded branches — **done 2026-10-20 (iter 14)**: das-toolbox lane archived into `docs/contributions/das-toolbox-lane/` (full-history bundle, restore-tested; uncommitted operator-write-lane patch; memory notes); fork branches `omega-das-integration` / `omega-das-write-integration` / `omega-history-extraction-v2` deleted; fork master reset to upstream @928edfc; local lane branches + worktree removed.
 - [ ] Nothing filed/pushed upstream — needs explicit approval, always.
 
 ### Phase 4 — Close-out

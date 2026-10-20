@@ -18,11 +18,12 @@ Contribution ladder (order per re-eval report §11):
 
 - `ktfh-claw/das` — synced to upstream `48507929` (was e12573cc, +66 commits). Zero local delta on master.
 - `ktfh-claw/das-metta-parser` — fork created 2026-10-19, pushed at `19022d2`.
-- `ktfh-claw/das-toolbox` — master = upstream + campaign-import lane (14 commits ahead; the lane is being retired into this bridge repo, after which the fork master can be reset to upstream).
+- `ktfh-claw/das-toolbox` — **lane retired 2026-10-20 (iteration 14)**: master reset to upstream `928edfc` (forced update verified via `ls-remote`); superseded lane branches deleted server-side. The 14-commit campaign lane (2026-10-03 → 10-14, +3,165 lines under `deploy/omega-das-integration/`) is archived in [`docs/contributions/das-toolbox-lane/`](das-toolbox-lane/README.md) — full-history git bundle (restore-tested), the uncommitted operator-write-lane worktree patch, and the lane memory notes.
 
 ## Branch hygiene (forks)
 
 Superseded branches are deleted after their content is preserved in this repo (archive policy: content first, then delete). Tracked:
 
-- das-toolbox: `omega-das-integration`, `omega-das-write-integration`, `omega-history-extraction-v2` — superseded by the bridge repo's wrapper lane; delete after the wrapper lands here.
+- das-toolbox: `omega-das-integration`, `omega-das-write-integration`, `omega-history-extraction-v2` — **deleted from fork 2026-10-20 (iteration 14)** after archiving the lane into [`docs/contributions/das-toolbox-lane/`](das-toolbox-lane/README.md); fork master reset to upstream @928edfc.
 - low-cost-omega-setup: `docs/omega-das-direct-write` — deleted 2026-10-19 (was ancestor of main, zero-delta).
+- Note: upstream-legacy branches in `ktfh-claw/das-toolbox` (`artur-*`, `das-*`, `pbc-*`, `fix/*` — old upstream development branches predating this campaign) are not campaign artifacts and were left untouched.

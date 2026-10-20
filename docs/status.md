@@ -2,9 +2,17 @@
 
 Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Report](https://docs.google.com/document/d/1Pw5diOmac40Abc8_D1CG0_b3OrOHntq1BSzOv2H63dM/edit) (§16+ = execution campaign). This page mirrors it per iteration.
 
-## Current phase: Phase 3 — Upstream-contribution ladder (fork-local drafts only) — IN PROGRESS — iteration 13: parser branch (lexer `<>` + syntax_check OK-print + newline doc) validated and pushed to fork
+## Current phase: Phase 3 — Upstream-contribution ladder (fork-local drafts only) — IN PROGRESS — iteration 14: das-toolbox lane archived + fork cleanup COMPLETE (fork = clean upstream mirror @928edfc)
 
 ## Iteration log
+
+### Iteration 14 — 2026-10-20 08:07–08:25 UTC — Fork cleanup: das-toolbox lane archived into bridge repo, fork reset to clean upstream mirror ✅
+- **Unit: the Phase-3 fork-cleanup ladder item.** The 14-commit campaign lane in `ktfh-claw/das-toolbox` (2026-10-03 → 10-14, `master` @a193af4 = upstream `928edfc` + 14 commits, +3,165 lines under `deploy/omega-das-integration/`, all ktfh-claw-authored, never contributed upstream) is superseded by the Path B bridge (write-bridge + import-wrapper) — archived then retired, content-first policy.
+- **Archive (`docs/contributions/das-toolbox-lane/`):** (1) `das-toolbox-lane-master.bundle` — **complete-history** git bundle @a193af4 (upstream base included; restore-tested: fresh clone → 14 lane commits, 19 lane files, upstream `928edfc` verified ancestor; thin `upstream/master..master` bundle rejected as non-self-contained); (2) `worktree-uncommitted-operator-write-lane.patch` — the **never-committed** operator-gated `fact-write-proxy` diff (+131/−3, 6 files: bearer-token write facade service, compose secrets, atomdb-broker entry, preflight token checks) rescued from the `feat/omega-das-direct-write` worktree before its removal — reverse-check verified against the worktree, applies cleanly at `dfccfae` and `a193af4`; (3) `memory-notes/` — 3 lane engineering notes (md5-identical to source). README records why-retired, contents, commit list, disposition.
+- **Disposition executed:** local repo — lane branches `master`(lane) / `omega-das-integration` / `omega-das-write-integration` / `omega-history-extraction-v2` / `feat/omega-das-direct-write` deleted (all verified ancestors of lane master first — zero content outside the bundle), worktree removed, checkout = upstream/master @928edfc, untracked leftovers disposed (rendered credential-bearing `generated/config.json`, `__pycache__`, copied notes — credentials never printed/committed). Fork — lane branches deleted server-side (`git push fork --delete`, `ls-remote`-verified), **master force-reset to `928edfc`** (ls-remote verified: exact upstream SHA). Upstream-legacy branches (`artur-*`, `das-*`, `pbc-*`, `fix/*` — pre-campaign upstream leftovers) deliberately untouched. **Zero production contact; OVH untouched this tick; Omega agent STOPPED (pause holding).**
+- **Docs:** campaign-plan Phase-3 fork-cleanup box ticked; contributions README fork-state + branch-hygiene updated; this entry; GDoc §16 entry.
+- **Standing fork inventory:** ktfh-claw/das `fix/python-client-metta-typo` @067fc8e1 (iter 12, master = upstream parity); ktfh-claw/das-metta-parser `fix/lexer-bare-angle-symbols` @4687c8c (iter 13, master = upstream parity); ktfh-claw/das-toolbox = clean upstream mirror @928edfc.
+- **Next (iteration 15):** Phase 3 remaining: decide the two issue-draft-only items (QE-crash robustness, delete-apply ack — no code drafts planned) and ladder item 6 (docs guide draft); then Phase 4 close-out gate (end-to-end acceptance + runbook) — or hold for Balázs's direction on filing the drafted issues upstream. Nothing upstream without approval.
 
 ### Iteration 13 — 2026-10-20 06:46–07:45 UTC — Parser draft branch: lexer `<>` + syntax_check OK-print + newline doc — subagent healthy, 3 commits validated, pushed to fork ✅
 - **Subagent lane recovered:** `coder-opencode` spawn succeeded this tick (iter-12 recorded two runtime-level spawn failures; the standing retry-first policy worked, no escalation needed). Draft produced in run `b3d90dc9…` on a new branch `fix/lexer-bare-angle-symbols` (base master @19022d2), DRAFTS ONLY as instructed — no push, no origin contact, no PRs; orchestrator validated and pushed.
@@ -77,7 +85,7 @@ Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Re
 
 - Re-eval campaign report + evidence: `memory/omega-das-integration-reeval/` (state.md 22 ticks, final-assessment, coder reviews), `omega-das-reeval-report/report.md`.
 - Live experiments E1–E3 (broker write, parser matrix, typo repro): re-eval report §7; state.md ticks 2–3.
-- Fork states: das @48507929 (upstream parity), das-toolbox @a193af4 (+14 lane commits, retiring), das-metta-parser @19022d2.
+- Fork states: das @48507929 (upstream parity) + draft branch `fix/python-client-metta-typo`; das-metta-parser @19022d2 (upstream parity) + draft branch `fix/lexer-bare-angle-symbols`; das-toolbox = clean upstream mirror @928edfc (lane retired iter 14, archived in `docs/contributions/das-toolbox-lane/`).
 
 ### Iteration 2 — 2026-10-19 23:32–23:57 UTC — Phase 1 core: read-proxy MeTTa-mode + write-bridge v1, live-probed (2 defects found & fixed; unit tests staged) 🔧
 - **Recovered from timeout:** the 23:07 iteration died at the 25-min cron limit mid-verification, leaving work uncommitted. This iteration completed it: shipped proxy update verified live (container `omega-das-integration-read-proxy-1` restarted 23:30:55Z, md5 = repo working tree).
