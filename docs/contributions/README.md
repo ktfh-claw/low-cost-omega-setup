@@ -6,11 +6,11 @@ Contribution ladder (order per re-eval report §11):
 
 | # | Defect / contribution | Target repo | Type | Status |
 |---|---|---|---|---|
-| 1 | Query-engine **crashes** on mis-routed `atomdb` command (uncaught `std::runtime_error("Processor is not registered to process command: atomdb")`); late-joiner command-ownership gap | singnet/das | issue (+robustness PR later) | **DRAFT** — `issue-1-qe-crash.md` |
-| 2 | Python client typo `user_metta_as_query_tokens` → silent no-op → MeTTa queries unusable | singnet/das | issue + trivial PR | **DRAFT** — `issue-2-client-typo.md` |
-| 3 | das-metta-parser lexer silently **drops `<`/`>`** from bare symbols | singnet/das-metta-parser | issue + PR | **DRAFT** — `issue-3-lexer-angle-drop.md` |
-| 4 | `syntax_check` prints "Syntax check OK" even on failure | singnet/das-metta-parser | issue + PR | **DRAFT** — `issue-4-syntax-check-ok.md` |
-| 5 | Raw newline inside quoted string breaks the token (98.2% → 99.3% with escaping workaround) | singnet/das-metta-parser | issue + PR | **DRAFT** — `issue-5-newline-in-string.md` |
+| 1 | Query-engine **crashes** on mis-routed `atomdb` command (uncaught `std::runtime_error("Processor is not registered to process command: atomdb")`); late-joiner command-ownership gap | singnet/das | issue (+robustness PR later) | **DRAFT, re-validated 2026-10-20** — `issue-1-qe-crash.md` |
+| 2 | Python client typo `user_metta_as_query_tokens` → silent no-op → MeTTa queries unusable | singnet/das | issue + trivial PR | **DRAFT re-validated + fork branch drafted 2026-10-20** — `fix/python-client-metta-typo` in ktfh-claw/das; `issue-2-client-typo.md` |
+| 3 | das-metta-parser lexer silently **drops `<`/`>`** from bare symbols | singnet/das-metta-parser | issue + PR | **DRAFT, re-validated 2026-10-20** (19 bare-angle entries measured in real corpus) — `issue-3-lexer-angle-drop.md` |
+| 4 | `syntax_check` prints "Syntax check OK" even on failure | singnet/das-metta-parser | issue + PR | **DRAFT, re-validated 2026-10-20** — `issue-4-syntax-check-ok.md` |
+| 5 | Raw newline inside quoted string breaks the token (98.2% raw → 99.17% with shipped escape fallback) | singnet/das-metta-parser | issue + PR | **DRAFT, re-validated 2026-10-20** — `issue-5-newline-in-string.md` |
 | 6 | Docs: "Writing atoms from external agents" guide (atomdb-broker deployment, python client example, fire-and-forget caveat, MeTTa-mode guidance) | singnet/das | docs | **PLANNED** (last, after fixes) |
 | 7 | PeTTa superpose/collapse history-garbage leak (real defect behind our fork's garbage history entries) | singnet/Omega (upstream line) | issue + PR | **PLANNED** (coordinate with PR#349 memory redesign) |
 

@@ -22,8 +22,8 @@
 - [x] `&persistent` interception hook in the Omega skill layer (plugin `das-write`, config-only): agent persistence vocabulary becomes durable, verified DAS writes; validated in a test container (enabled path: BRIDGE-PERSIST-OK verified=7 + read-proxy read-back + oracle cleanup + mongo zero-residue; disabled path: zero behavioral change). **Live agent stays STOPPED — restart only with explicit Balázs approval.**
 
 ### Phase 3 — Upstream contribution ladder (fork-local drafts)
-- [ ] All 5 issue drafts finalized in `docs/contributions/` (re-validated against latest upstream).
-- [ ] Draft PRs opened in the **forked repos** where executable: python-client typo fix branch; parser `<>` lexer rule + `syntax_check` OK-print + raw-newline fixes.
+- [x] All 5 issue drafts finalized in `docs/contributions/` (re-validated against latest upstream — done iter 12, 2026-10-20).
+- [~] Draft PRs opened in the **forked repos** where executable: python-client typo fix branch — **pushed iter 12** (`fix/python-client-metta-typo` @ 067fc8e1 on ktfh-claw/das); parser `<>` lexer rule + `syntax_check` OK-print + raw-newline fixes — pending (iter 13).
 - [ ] Fork cleanup: archive/delete superseded branches (`omega-das-integration`, `omega-das-write-integration`, `omega-history-extraction-v2` in das-toolbox — after archiving the campaign-import lane code into this repo).
 - [ ] Nothing filed/pushed upstream — needs explicit approval, always.
 

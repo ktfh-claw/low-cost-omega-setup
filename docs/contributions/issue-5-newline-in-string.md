@@ -1,11 +1,13 @@
 # Issue draft 5 — Raw newline inside a quoted string breaks the token
 
 **Target:** singnet/das-metta-parser · **Severity: LOW-MED** · **Type:** bug (lexer) / docs
-**Status:** DRAFT — fork-local; filing upstream requires Balázs's explicit go-ahead.
+**Status:** DRAFT — re-validated against upstream `19022d2` (2026-10-20); filing upstream requires Balázs's explicit go-ahead.
 
 ## Defect
 
-The quoted-string token pattern is `["]([^"\n\\]|\\(.|\n))*["]` — a raw newline (unescaped `\n`) inside a quoted string terminates the token match. The string content then leaks out as bare tokens → parse errors or silent mis-tokenization.
+The quoted-string token pattern is `["]([^"\n\\]|\\(.|\n))*["]` (`src/metta.l:56`) — a raw newline (unescaped `\n`) inside a quoted string terminates the token match. The string content then leaks out as bare tokens → parse errors or silent mis-tokenization.
+
+Re-validation 2026-10-20 (source review at `19022d2`): pattern byte-for-byte unchanged. Campaign evidence updated by the Phase-2 wrapper (iters 9–10): real `history.metta` gate run — 8,285 entries, 8,216 emitted (**99.17%**, meets ≥99% target), 69 skipped of which the newline/shell-quirk residual is 50 known shell-heredoc quirks (incl. lines 1243/3404); the shipped newline-escape fallback is what carries the pipeline past this lexer defect. Confirmed unchanged.
 
 ## Evidence + validated workaround (2026-10-18)
 

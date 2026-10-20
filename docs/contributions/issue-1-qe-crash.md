@@ -1,7 +1,7 @@
 # Issue draft 1 — Query Engine crashes on mis-routed ATOMDB command (uncaught exception)
 
 **Target:** singnet/das · **Severity: HIGH** · **Type:** bug
-**Status:** DRAFT — fork-local; filing upstream requires Balázs's explicit go-ahead.
+**Status:** DRAFT — re-validated against upstream `48507929` (2026-10-20); filing upstream requires Balázs's explicit go-ahead.
 
 ## Defect
 
@@ -10,6 +10,8 @@ In a multi-peer DAS service-bus deployment, routing an `atomdb` command to a que
 ```
 std::runtime_error("Processor is not registered to process command: atomdb")
 ```
+
+Re-validation 2026-10-20 (upstream master `48507929`): the throw is still exactly where it was — `src/service_bus/ServiceBus.cc:172`, `RAISE_ERROR("Processor is not registered to process command: " + this->command)` — and `RAISE_ERROR` (`src/commons/Utils.h:202`) expands to `Utils::error(msg, true, false)` = fatal process exit with stack trace. Defect confirmed unchanged.
 
 The QE process exits (container crash-restarts under Docker restart policy). Related gap: command-ownership discovery does not propagate to late-joining bus peers — a client that joins a different bus peer (e.g. the query-engine's) cannot have its `atomdb` commands routed to the atomdb-broker; it must join the broker directly.
 
