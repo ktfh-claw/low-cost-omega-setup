@@ -8,13 +8,14 @@
 - [x] Cleanup: `artifacts/` → `historical/`; operator-import runbook removed; stale `docs/omega-das-direct-write` branch deleted (was ancestor of main, zero-delta).
 - [x] Repo sync: `das` fork fast-forwarded e12573cc → 48507929 (upstream +66) and pushed; `das-toolbox` already current; `das-metta-parser` fork created (ktfh-claw) and pushed.
 - [x] Campaign docs created in this repo: README, architecture, plan, status, contributions.
-- [ ] Google Doc re-opened as live progress doc: append "Execution campaign" section with directive, plan, iteration log.
-- [ ] 30-minute cron activated.
+- [x] Google Doc re-opened as live progress doc: append "Execution campaign" section with directive, plan, iteration log.
+- [x] 30-minute cron activated.
 
-### Phase 1 — Bridge core (config-only, live on OVH)
-- [ ] Read proxy: apply config-level MeTTa-mode (`use_metta_as_query_tokens`) wrapper; verify MeTTa-form + structural queries both work (both ground and variable queries).
-- [ ] `das-write` skill v1: MeTTa → atoms → `AtomDBProxy.add_atoms` → read-back verification → verified handles. Live-tested against the running broker; write logged; canary cleanup procedure documented.
-- [ ] Write path verification: one canary fact written by the skill, read back through the query path, then removed.
+### Phase 1 — Bridge core (config-only, live on OVH) — **SIGNED OFF 2026-10-20 02:41 UTC**
+- [x] Read proxy: config-level MeTTa-mode (`use_metta_as_query_tokens`) wrapper applied and live; MeTTa-form + structural queries, ground and variable forms, all verified live (iters 2–8).
+- [x] `das-write` skill v1: MeTTa → atoms → `AtomDBProxy.add_atoms` → read-back verification → verified handles; live as compose service `omega-das-write-bridge-write-bridge-1` (iters 5–8); canary cleanup procedure documented (README §Canary procedure).
+- [x] Write path verification: canary fact written by the lane, read back through the metta query path, then removed with zero residue — **two consecutive fully green loops (iter7-a1, iter8-a1)**, each with a first-pass-correct oracle absence verdict and mongo ground truth (totals 1864/3710 unchanged).
+- [x] Absence oracle (added beyond the original plan, iters 6–7): alternate-pattern verification + bounded standby re-checks; the in-window absence verdict is no longer advisory. Residual upstream ask (fork-local draft): delete-apply ack.
 
 ### Phase 2 — Integration
 - [ ] Thin import wrapper (segmentation → syntax gate → newline-escape fallback → provenance → db_loader) replacing the operator lane for bulk loads; validated against a copy of real history.metta (expected ≥99%).

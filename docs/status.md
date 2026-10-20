@@ -2,9 +2,18 @@
 
 Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Report](https://docs.google.com/document/d/1Pw5diOmac40Abc8_D1CG0_b3OrOHntq1BSzOv2H63dM/edit) (§16+ = execution campaign). This page mirrors it per iteration.
 
-## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — deployed; FULL acceptance met (absence-oracle verdict live-correct); Phase-1 sign-off entry next
+## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — **SIGNED OFF 2026-10-20 02:41 UTC** (two consecutive oracle-green live loops, iters 7–8); next: Phase 2 (thin import wrapper)
 
 ## Iteration log
+
+### Iteration 8 — 2026-10-20 02:37–03:05 UTC — Phase-1 SIGN-OFF: second consecutive oracle-green loop + full acceptance record ✅✅
+- **Unit: the sign-off itself.** Deployed tree md5-verified against repo HEAD (all 5 write-bridge files identical) before running anything; suite re-run on the synced OVH tree: **123 passed**. Ops note recorded: the tests image ENTRYPOINT is already `python -m pytest`, so plain `docker run … <img> tests/ -q` suffices.
+- **Sign-off run (iter8-a1, 02:41 UTC, deployed services):** `PHASE1_SERVICE_WRITE` `verified: true` (4.1 s, 7 deterministic handles); `PHASE2_METTA_VAR` fresh fact through the deployed read-proxy (1.27 s, `mode: metta`); **`PHASE3_CLEANUP_ORACLE` `absent: true` on the FIRST pass** (checks: 1, standby 0.0 s, 5.18 s total) — second consecutive first-pass-correct in-window absence verdict; `PHASE4` unique nodes deleted; `PHASE5` metta **0 answers**; mongo ground truth (02:44 UTC): canary links 0, unique nodes 0, shared symbols + E1 canary INTACT, totals **1864/3710 unchanged** → zero residue.
+- **Phase 1 SIGNED OFF** on: read-proxy MeTTa/structural paths live-green (iters 2–8); write lane with mandatory read-back verification on the deployed compose service (iters 5–8); canary write→verify→metta-read→cleanup green twice consecutively with oracle absence verdicts; links-only cleanup default + zero-residue unique-node step; 123-test suite on the pinned client. Residual upstream ask (fork-local draft): delete-apply ack (would remove the standby/backstop path need).
+- **Docs:** acceptance section added to `deploy/das/write-bridge/README.md` (phase-1 acceptance record with evidence pointers); campaign-plan Phase 0/1 boxes ticked; this entry; GDoc §16 sign-off entry.
+- **Evidence:** `memory/omega-das-bridge/evidence/iter8-probe/` (TRANSCRIPT, probe, groundtruth.js).
+- **Standing state:** Omega agent STOPPED (pause holding). Write-bridge service Up (oracle code); DAS stack + broker healthy.
+- **Next (iteration 9):** Phase 2 — thin import wrapper (segmentation → syntax gate → newline-escape fallback → provenance → db_loader), validated against a copy of real history.metta (target ≥99%).
 
 ### Iteration 1 — 2026-10-19 21:59–22:30 UTC — Bootstrap ✅
 - **Directive received** (Balázs, Discord voice, 21:59 UTC): execute Path B; this repo = bridge repo; clean it first; sync repos; OVH = dev environment; 30-min cron; Google Doc = main reporting interface; fork-only drafts; single branch.

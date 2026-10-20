@@ -223,3 +223,33 @@ Unit tests with the upstream client **stubbed** (no network, no docker):
 `python -m pytest tests/` from this directory (needs only pytest). The
 stubbed atoms mirror the pinned hashing formulas; expected handles/wire
 tokens embedded in the tests were computed with the real pinned client.
+
+## Phase-1 acceptance record (signed off 2026-10-20 02:41 UTC)
+
+Phase 1 of the omega-das-bridge campaign (bridge core, config-only, live on
+OVH) is complete. Acceptance evidence, all live on the deployed services:
+
+- **Read proxy** — MeTTa-mode (`use_metta_as_query_tokens` config wrapper,
+  no source fork) + structural queries, ground and variable forms,
+  live-verified iterations 2–8 through `omega-das-integration-read-proxy-1`.
+- **Write lane** — `POST /v1/write` with **mandatory read-back verification**
+  (variable-form template oracle; deterministic handles) on the deployed
+  compose service `omega-das-write-bridge-write-bridge-1` (iterations 5–8):
+  `verified: true` on every canary, 4.1–5.0 s end-to-end.
+- **Cleanup** — links-only default (shared-DB safety), explicit unique-node
+  zero-residue step, and the **absence oracle** (iteration 7): per-link
+  alternate-pattern verification + bounded query-free standby re-checks.
+  Live matrix: every polled grace window (30/90/300 s) false-alarmed while
+  deletions always landed (loop-coupled apply starvation, iters 3–6); the
+  oracle returned `absent: true` on the **first pass** in both consecutive
+  sign-off runs (iter7-a1 5.31 s, iter8-a1 5.18 s).
+- **Mongo ground truth** (db `das`) after every loop: canary links/nodes 0,
+  shared symbols + 2026-10-18 E1 canary intact, totals 1864/3710 unchanged.
+- **Unit suite** — 123 passed on the pinned upstream client (e12573cc).
+
+Evidence: `memory/omega-das-bridge/evidence/iter{2,3,4,5,6,7,8}-probe/`
+(gateway workspace) mirrored in the live Google Doc §16; iteration log in
+[`docs/status.md`](../../../docs/status.md).
+
+Residual upstream ask (fork-local draft only, not filed): a delete-apply
+ack on the bus would obsolete the oracle's standby/backstop path.
