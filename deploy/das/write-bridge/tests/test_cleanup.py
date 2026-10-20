@@ -29,6 +29,7 @@ class FakeCleanupRunner:
         self.delete_error = delete_error
         self.verify_error = verify_error
         self.deletions = []
+        self.verify_calls = 0
 
     def delete_atoms(self, handles, delete_link_targets=False):
         if self.delete_error is not None:
@@ -36,6 +37,7 @@ class FakeCleanupRunner:
         self.deletions.append((list(handles), delete_link_targets))
 
     def verify_handles(self, fact):
+        self.verify_calls += 1
         if self.verify_error is not None:
             raise self.verify_error
         return list(self.verify_missing)
@@ -45,7 +47,8 @@ class TestCleanup:
     def test_full_canary_cycle(self):
         # Default scope: ONLY the fact's Expression links. Symbol nodes are
         # shared across facts on a live DB (live-measured iteration 3) and
-        # must never be deleted by default.
+        # must never be deleted by default. Clean read-back on the first
+        # check: absent immediately, exactly one verification pass.
         runner = FakeCleanupRunner()
         result = run_cleanup(runner, X402)
         assert runner.deletions == [(LINK_HANDLES, False)]
@@ -53,6 +56,7 @@ class TestCleanup:
             "deleted": LINK_HANDLES,
             "absent": True,
             "still_present": [],
+            "attempts": 1,
         }
 
     def test_delete_nodes_deletes_every_fact_handle(self):
@@ -63,9 +67,10 @@ class TestCleanup:
 
     def test_still_present_links_reported(self):
         runner = FakeCleanupRunner(verify_missing=[TOP_HANDLE])
-        result = run_cleanup(runner, X402)
+        result = run_cleanup(runner, X402, grace_seconds=0)
         assert result["absent"] is False
         assert result["still_present"] == [TOP_HANDLE]
+        assert result["attempts"] == 1
 
     def test_explicit_handles_must_belong_to_fact(self):
         runner = FakeCleanupRunner()
@@ -74,7 +79,7 @@ class TestCleanup:
         # not covered by the link walk, so absence is reported as null.
         result = run_cleanup(runner, X402, handles=list(NODE_HANDLES))
         assert runner.deletions == [(NODE_HANDLES, False)]
-        assert result == {"deleted": NODE_HANDLES, "absent": None, "still_present": []}
+        assert result == {"deleted": NODE_HANDLES, "absent": None, "still_present": [], "attempts": 0}
         with pytest.raises(ValueError, match="do not belong"):
             run_cleanup(runner, X402, handles=["a" * 32])
         # The mismatched call deleted nothing.
@@ -88,7 +93,7 @@ class TestCleanup:
     def test_no_verify_reports_absent_null(self):
         runner = FakeCleanupRunner(verify_missing=[TOP_HANDLE])
         result = run_cleanup(runner, X402, verify=False)
-        assert result == {"deleted": LINK_HANDLES, "absent": None, "still_present": []}
+        assert result == {"deleted": LINK_HANDLES, "absent": None, "still_present": [], "attempts": 0}
         assert runner.deletions == [(LINK_HANDLES, False)]
 
     def test_parse_error_propagates_before_delete(self):
@@ -110,6 +115,81 @@ class TestCleanup:
             run_cleanup(runner, X402)
 
 
+class TestGraceWindow:
+    """Bounded retry for the eventual server-side delete apply.
+
+    Live-measured iteration 3: a read-back ~1 s after the delete command
+    can still match the deleted links (server-side apply is not
+    instantaneous), while ~1 s later the same query returns 0 answers.
+    The absence verification therefore re-checks inside a bounded grace
+    window instead of false-alarming on the first check.
+    """
+
+    class EventualDeleteRunner(FakeCleanupRunner):
+        """Server-side delete applies on the Nth read-back check."""
+
+        def __init__(self, absent_after):
+            super().__init__(verify_missing=[TOP_HANDLE])
+            self.absent_after = absent_after
+
+        def verify_handles(self, fact):
+            self.verify_calls += 1
+            if self.verify_calls > self.absent_after:
+                return []
+            return list(self.verify_missing)
+
+    def test_retries_until_absent(self, monkeypatch):
+        # Present on the first two checks (delete still applying), gone on
+        # the third: absent, three attempts, no early false alarm.
+        runner = self.EventualDeleteRunner(absent_after=2)
+        sleeps = []
+        monkeypatch.setattr(cleanup_module.time, "sleep", lambda s: sleeps.append(s))
+        result = run_cleanup(runner, X402, grace_seconds=30, poll_interval=0)
+        assert result == {
+            "deleted": LINK_HANDLES,
+            "absent": True,
+            "still_present": [],
+            "attempts": 3,
+        }
+        assert len(sleeps) == 2
+        assert runner.verify_calls == 3
+
+    def test_default_window_absorbs_observed_apply_latency(self, monkeypatch):
+        # The shipped default (30 s) must absorb the live-measured worst
+        # case (~10-13 s apply, iteration 4): a delete that lands on the
+        # third check resolves absent with the DEFAULTS, no flags.
+        runner = self.EventualDeleteRunner(absent_after=2)
+        sleeps = []
+        monkeypatch.setattr(cleanup_module.time, "sleep", lambda s: sleeps.append(s))
+        assert cleanup_module.DEFAULT_VERIFY_GRACE_SECONDS == 30.0
+        result = run_cleanup(runner, X402)  # default grace/poll
+        assert result["absent"] is True
+        assert result["attempts"] == 3
+        assert runner.verify_calls == 3
+
+    def test_window_expiry_reports_still_present(self, monkeypatch):
+        # Delete genuinely stuck: the window closes and the result reports
+        # what is still present (never loops forever). Zero and negative
+        # windows still perform exactly one check.
+        for grace in (0, -5):
+            runner = FakeCleanupRunner(verify_missing=LINK_HANDLES)
+            sleeps = []
+            monkeypatch.setattr(cleanup_module.time, "sleep", lambda s: sleeps.append(s))
+            result = run_cleanup(runner, X402, grace_seconds=grace, poll_interval=0)
+            assert result["absent"] is False
+            assert result["still_present"] == LINK_HANDLES
+            assert result["attempts"] == 1
+            assert sleeps == []
+
+    def test_verification_failure_fails_fast(self):
+        # A bus-level read-back failure is not evidence of eventual deletion:
+        # it raises immediately instead of being retried inside the window.
+        runner = FakeCleanupRunner(verify_error=WriteFailure("read-back query timed out"))
+        with pytest.raises(WriteFailure, match="deletion verification failed"):
+            run_cleanup(runner, X402, grace_seconds=30, poll_interval=0)
+        assert runner.verify_calls == 1
+
+
 class TestCli:
     def test_success_exit_code_and_json(self, capsys, monkeypatch):
         runner = FakeCleanupRunner()
@@ -121,7 +201,21 @@ class TestCli:
             "deleted": LINK_HANDLES,
             "absent": True,
             "still_present": [],
+            "attempts": 1,
         }
+
+    def test_grace_flags_accepted(self, capsys, monkeypatch):
+        # --grace-seconds / --poll-interval reach cleanup(): a stuck delete
+        # reports absent: false after exactly one check with a zero window.
+        runner = FakeCleanupRunner(verify_missing=[TOP_HANDLE])
+        monkeypatch.setattr(cleanup_module, "DasWriteRunner", lambda: runner)
+        code = cleanup_module.main(
+            ["--metta", X402, "--grace-seconds", "0", "--poll-interval", "0"]
+        )
+        assert code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["absent"] is False
+        assert payload["attempts"] == 1
 
     def test_handle_flags_accepted(self, capsys, monkeypatch):
         runner = FakeCleanupRunner()

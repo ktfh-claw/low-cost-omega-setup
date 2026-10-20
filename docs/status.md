@@ -2,7 +2,7 @@
 
 Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Report](https://docs.google.com/document/d/1Pw5diOmac40Abc8_D1CG0_b3OrOHntq1BSzOv2H63dM/edit) (§16+ = execution campaign). This page mirrors it per iteration.
 
-## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — canary loop DONE, sign-off pending
+## Current phase: Phase 1 — Bridge core (config-only, live on OVH) — canary loop DONE, grace-window hardening in, sign-off pending
 
 ## Iteration log
 
@@ -50,3 +50,12 @@ Main reporting interface: [Google Doc — Omega-DAS Integration Re-evaluation Re
   - **New wire reality — deletion is eventual:** read-back ~1 s after delete still matched the links (PHASE4 false `still_present`); 1 s later the same query = 0; mongo confirms gone. → next iteration: bounded retry/grace window in cleanup verification.
 - **Standing state:** Omega agent STOPPED (untouched this iteration). DAS stack healthy. Evidence: `memory/omega-das-bridge/evidence/iter3-probe/` (probe + TRANSCRIPT).
 - **Next (iteration 4):** cleanup-verify grace window (bounded retry) + test; then Phase-1 sign-off checklist (README runbook + acceptance entry in GDoc) and on to Phase 2 (thin import wrapper).
+
+### Iteration 4 — 2026-10-20 00:37–01:00 UTC — Grace-window cleanup verification: shipped, live-probed, default widened on measured latency 🛡️
+- **Unit shipped:** `cleanup.py` absence-verification now runs inside a **bounded grace window** (first check immediate; re-check every `--poll-interval` until absent or `--grace-seconds` elapses; exactly one check with a zero window; bus-level failures fail fast, never retried — a failed query is not evidence of eventual deletion). Result now reports `attempts`.
+- **Suite:** 109 → **114 passed on OVH** (5 new grace-window tests: retry-until-absent, window expiry, zero/negative window single-check, fail-fast on bus error, CLI flag plumbing + default-absorbs-worst-case).
+- **Live probe (iter4-probe, deployed read-proxy image, 00:42 UTC):** write+verify green again (4.4 s), metta-mode read of fresh fact green (1.3 s). Cleanup with the initial 10 s window: `absent: false` after 2 attempts (~12 s) — **false alarm: the server-side delete had simply not applied yet.**
+- **Root cause chase (both checks live):** fresh structural variable-form queries minutes later → **0 matches** (structural path NOT stale/cached); mongo ground truth: all canary links/nodes = 0, shared Symbols + E1 canary intact, totals unchanged 1864/3710. → **Delete apply latency is variable: ~1-2 s (iter 3) vs ≥10-13 s (iter 4)**; the 10 s default was too narrow. **Default widened to 30 s** (documented in code + README; verify passes cost ~1.5-2 s/link, so window sizing counts passes, not just seconds).
+- **Evidence:** `memory/omega-das-bridge/evidence/iter4-probe/` (probe + TRANSCRIPT with the decisive follow-up checks).
+- **Standing state:** Omega agent STOPPED (pause holding). DAS stack + broker healthy. Live re-validation of the widened default (expected `absent: true`) queued as iteration 5's first action, folded into the Phase-1 sign-off canary (which also deploys `compose.write-bridge.yaml` as a service).
+- **Next (iteration 5):** Phase-1 sign-off: deploy write-bridge as compose service + final canary with 30 s window → acceptance entry in GDoc → Phase 2 (thin import wrapper).

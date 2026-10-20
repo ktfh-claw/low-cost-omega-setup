@@ -151,6 +151,15 @@ lists with a trailing `delete_link_targets` flag; `--delete-link-targets`
 opts into recursive target deletion). Deletion is fire-and-forget too — the
 read-back absence check is what makes the result credible.
 
+Deletion is also **eventual** (live-measured iterations 3+4): the
+server-side apply ranged from ~1-2 s to >= 10-13 s from the delete command
+(and each verify pass itself costs seconds — one bus round-trip per link).
+`cleanup.py` therefore verifies absence inside a bounded grace window
+(defaults: `--grace-seconds 30`, `--poll-interval 1`; first check immediate,
+`attempts` reported in the result; bus failures fail fast, never retried).
+A persistent `absent: false` after the window means the delete genuinely
+did not land — re-run or investigate, do not ignore.
+
 ## Deployment
 
 - Image: `Dockerfile` reuses the read-proxy's pinned-digest builder pattern
