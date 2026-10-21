@@ -62,6 +62,13 @@ services:
       WRITE_HTTP_HOST: 0.0.0.0
       WRITE_HTTP_PORT: "8080"
       WRITE_MAX_METTA_CHARS: "2048"
+      # v2 provenance: URL source archive committed into a host-side git repo.
+      # The container (user 65532) needs write access to the host directory.
+      WRITE_PROVENANCE_REPO: /var/lib/omega-provenance
+    volumes:
+      # Host path is created by the deploy runbook; owner must be 65532:65532
+      # (the container's non-root user) so the store can commit.
+      - ${WRITE_PROVENANCE_HOST_DIR:-/home/ubuntu/omega-provenance}:/var/lib/omega-provenance
     networks: [client]
     labels: *task-labels
     restart: unless-stopped

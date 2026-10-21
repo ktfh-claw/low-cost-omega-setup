@@ -34,9 +34,14 @@ FROM python@${PYTHON_IMAGE_DIGEST}
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+# git is required in the FINAL stage: provenance_store.py commits fetched
+# source content into the bind-mounted provenance repo at runtime (v2).
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
-COPY app.py write_client.py metta_to_atoms.py cleanup.py ./
+COPY app.py write_client.py metta_to_atoms.py provenance_store.py cleanup.py ./
 USER 65532:65532
 # ENTRYPOINT stays "python" so operators can also run the canary cleanup:
 #   docker compose -f compose.write-bridge.yaml run --rm write-bridge \

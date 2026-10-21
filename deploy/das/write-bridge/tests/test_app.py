@@ -30,8 +30,8 @@ class FakeRunner:
         self.error = error
         self.calls = []
 
-    def write(self, metta, verify=True):
-        self.calls.append((metta, verify))
+    def write(self, metta, verify=True, provenance=None, tv=None):
+        self.calls.append((metta, verify, provenance, tv))
         if self.error is not None:
             raise self.error
         return self.result
@@ -43,14 +43,14 @@ class TestHandle:
         status, payload = WriteApplication(runner).handle({"metta": X402})
         assert status == 200
         assert payload == {"handles": EXPECTED_HANDLES, "verified": True, "missing": []}
-        assert runner.calls == [(X402, True)]
+        assert runner.calls == [(X402, True, None, None)]
 
     def test_verify_flag_passthrough(self):
         runner = FakeRunner(result={"written": ["h"], "verified": None, "missing": []})
         status, payload = WriteApplication(runner).handle({"metta": X402, "verify": False})
         assert status == 200
         assert payload == {"handles": ["h"], "verified": None, "missing": []}
-        assert runner.calls == [(X402, False)]
+        assert runner.calls == [(X402, False, None, None)]
 
     def test_unverified_missing_links_shape(self):
         runner = FakeRunner(
