@@ -269,6 +269,7 @@ def setup(args) -> int:
         print(f"  - install prompt.txt (backup existing)")
         print(f"  - write benchmark omega_state.md (backup existing)")
         print(f"  - copy history.metta -> history.pre-benchmark-{args.run_id}.metta")
+        print(f"  - chown -R 65534:65534 benchmark/ (agent runs as nobody:nogroup)")
         print(f"  - sudo systemctl restart omega-curiosity.service")
     else:
         try:
@@ -298,6 +299,10 @@ def setup(args) -> int:
             # 4. Copy history.metta
             _run(["sudo", "cp", str(vol / "history.metta"),
                   str(vol / f"history.pre-benchmark-{args.run_id}.metta")], timeout=60.0)
+            # 4b. The agent container runs as nobody:nogroup (uid/gid 65534);
+            # without this it cannot create answers.md inside the root-owned
+            # benchmark dir (EACCES observed live on 2026-10-21).
+            _run(["sudo", "chown", "-R", "65534:65534", str(bench)], timeout=30.0)
             # 5. Restart agent (systemd, NOT docker — start.sh trap rm -f's the container)
             _run(["sudo", "systemctl", "restart", "omega-curiosity.service"], timeout=120.0)
             print("[setup] agent restarted via systemctl")
