@@ -165,11 +165,16 @@ def preflight(args) -> int:
         except Exception as e:
             checks["provenance_repo"] = f"error: {e}"
 
-    # 6. Agent memory volume exists
+    # 6. Agent memory volume exists (root-owned: check via sudo, Path.exists()
+    #    raises PermissionError on the docker volume path)
     if args.dry_run:
         checks["memory_volume"] = "dry-run"
     else:
-        checks["memory_volume"] = "ok" if Path(args.memory_volume).exists() else "missing"
+        try:
+            r = _run(["sudo", "test", "-d", args.memory_volume], timeout=10.0)
+            checks["memory_volume"] = "ok" if r.returncode == 0 else "missing"
+        except Exception as e:
+            checks["memory_volume"] = f"error: {e}"
 
     # Report
     ok_values = {"ok", "running", "dry-run"}
