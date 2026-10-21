@@ -160,7 +160,10 @@ def preflight(args) -> int:
         checks["provenance_repo"] = "dry-run"
     else:
         try:
-            result = _run(["git", "-C", args.provenance_repo, "rev-parse", "--git-dir"])
+            # Repo is owned by container uid 65532 with restrictive perms —
+            # git as ubuntu cannot even enter the dir; check via sudo root.
+            result = _run(["sudo", "git", "-c", f"safe.directory={args.provenance_repo}",
+                           "-C", args.provenance_repo, "rev-parse", "--git-dir"])
             checks["provenance_repo"] = "ok" if result.returncode == 0 else "missing"
         except Exception as e:
             checks["provenance_repo"] = f"error: {e}"
