@@ -69,7 +69,6 @@ class TestProvenanceSuffix:
         assert "source=archived" in result[0]
         url, body = spy[0]
         assert body["provenance"] == {"url": URL, "git_commit": SHA}
-        assert body["tv"] is None if "tv" not in body else True
         assert "tv" not in body
 
     def test_full_suffix_with_stv(self, enabled, spy):

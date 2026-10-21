@@ -123,7 +123,12 @@ class TestWrite:
         atom_bus, query_bus = ScriptedAtomBus(), ScriptedQueryBus()
         runner = make_runner(atom_bus, query_bus)
         result = runner.write(X402, verify=False)
-        assert result == {"written": EXPECTED_HANDLES, "verified": None, "missing": []}
+        assert result == {
+            "written": EXPECTED_HANDLES,
+            "verified": None,
+            "missing": [],
+            "provenance_link": None,
+        }
         # One atomdb proxy, one add_atoms command with the pinned wire format.
         assert len(atom_bus.issued) == 1
         proxy = atom_bus.issued[0]
@@ -136,7 +141,12 @@ class TestWrite:
         query_bus = ScriptedQueryBus(ALL_LINKS_ANSWERS)
         runner = make_runner(atom_bus, query_bus)
         result = runner.write(X402, verify=True)
-        assert result == {"written": EXPECTED_HANDLES, "verified": True, "missing": []}
+        assert result == {
+            "written": EXPECTED_HANDLES,
+            "verified": True,
+            "missing": [],
+            "provenance_link": None,
+        }
         # One variable-form query per written link, bottom-up.
         assert [proxy.tokens for proxy in query_bus.issued] == [
             T_INNER_X402,

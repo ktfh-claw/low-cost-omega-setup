@@ -205,18 +205,22 @@ class TestSlicing:
     def test_unclosed_payload_fails(self, enabled, spy):
         result = intercept("(add-atom &persistent (Concept foo)")
         assert len(result) == 1
-        assert result[0] == STATUS_WRITE_FAILED + ": expected one balanced expression after &persistent"
+        # v2: the balanced expression exists; the add-atom closing paren is
+        # missing — the precise diagnosis (was the generic v1 message).
+        assert result[0] == STATUS_WRITE_FAILED + ": missing add-atom closing paren"
         assert spy.calls == []
 
     def test_trailing_garbage_fails(self, enabled, spy):
         result = intercept("(add-atom &persistent (Concept foo) extra)")
         assert len(result) == 1
-        assert result[0] == STATUS_WRITE_FAILED + ": expected one balanced expression after &persistent"
+        # v2: trailing content that is not a provenance suffix.
+        assert result[0] == STATUS_WRITE_FAILED + ": unexpected content after the provenance suffix"
 
     def test_two_expressions_fails(self, enabled, spy):
         result = intercept("(add-atom &persistent (Concept a) (Concept b))")
         assert len(result) == 1
-        assert result[0] == STATUS_WRITE_FAILED + ": expected one balanced expression after &persistent"
+        # v2: a second expression is not a valid provenance suffix.
+        assert result[0] == STATUS_WRITE_FAILED + ": unexpected content after the provenance suffix"
 
     def test_bare_symbol_payload_fails(self, enabled, spy):
         result = intercept("(add-atom &persistent symbol)")
