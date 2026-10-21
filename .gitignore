@@ -7,3 +7,4 @@ deploy/das/write-bridge/.env
 deploy/das/generated/
 __pycache__/
 *.pyc
+tests/reasoning-windowless-room/results/

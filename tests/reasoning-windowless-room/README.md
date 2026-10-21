@@ -28,6 +28,13 @@ This folder contains background knowledge files that describe the environment an
 - `background/meta-reasoning.md` — Meta-facts about reasoning in 3D worlds
 - `prompts/original-prompt.md` — The original test prompt
 - `prompts/expected-answer.md` — Expected answer and reasoning trace
+- `test-spec.md` — Authoritative test specification (phases, grading keys, provenance chain)
+- `facts.py` — Canonical predicate set (CANONICAL_FACTS), SOURCE_URLS, TEST_CASES
+- `grading.py` — Answer grading + two-layer trace verification logic
+- `history_parse.py` — history.metta trace extraction + run-window slicing
+- `agent_prompt_template.md` — Benchmark-mode prompt template for the live agent
+- `run_benchmark.py` — Orchestrator CLI (phases: preflight|setup|agent|grade|report|teardown|full)
+- `unit/` — Offline unit tests (pytest-compatible + stdlib shim runner)
 - `results/` — Will contain test results and reasoning traces
 
 ## Success Criteria
