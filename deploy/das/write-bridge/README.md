@@ -14,6 +14,25 @@ POST /v1/write {"metta": "(Inheritance (Concept \"x402\") (Concept \"payment-pro
     -> 200 {"handles": ["..."], "verified": true, "missing": []}
 ```
 
+### Provenance citation gate (v2.1, 2026-10-21)
+
+When a `/v1/write` payload carries a `provenance` object, the facade gates
+the citation **before anything reaches DAS** (live campaign failure mode:
+the agent inventing commit shas after `ARCHIVE-FAILED` fetches):
+
+- **(A) Commit existence** — the cited `git_commit` must resolve to a real
+  commit in the archive repo (`WRITE_PROVENANCE_REPO`).
+- **(B) URL cross-check** — the commit's subject must archive exactly the
+  cited `provenance.url` (catches right-sha-wrong-source swaps).
+
+Both failures return `400` with an actionable retry message
+(`run (archive-source "<url>") and use the sha from its ARCHIVE-OK return,
+then retry`); the agent-side plugin surfaces it verbatim as
+`BRIDGE-PERSIST-WRITE-FAILED`, which the campaign prompt's read-reason-fix
+rule turns into the re-archive-and-retry loop. Provenance writes without a
+configured archive are rejected with `503`. Gate implementation:
+`provenance_store.verify_commit()` (serialized like `archive()`, flock).
+
 - `metta_to_atoms.py` — client-side parse of ONE small parenthesized MeTTa
   fact into the pinned client's `Node`/`Link` atoms (data only, no
   operators/eval). Storage conventions match the live-verified deployment:

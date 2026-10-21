@@ -47,6 +47,17 @@ class WriteApplication:
         tv = payload.get("tv")
         if tv is not None and not isinstance(tv, dict):
             return 400, {"error": "tv must be an object"}
+        if provenance is not None:
+            if self.store is None:
+                return 503, {"error": "provenance writes require the configured source archive (WRITE_PROVENANCE_REPO unset)"}
+            # Provenance v2.1 citation gate (Options A+B): the cited commit
+            # must exist in the archive repo AND archive exactly the cited
+            # URL. Hallucinated or swapped citations are rejected with an
+            # actionable, retryable message before anything reaches DAS.
+            try:
+                self.store.verify_commit(provenance.get("git_commit"), provenance.get("url"))
+            except ArchiveError as exc:
+                return 400, {"error": str(exc)}
         try:
             result = self.runner.write(metta, verify=verify, provenance=provenance, tv=tv)
         except MettaParseError as exc:
