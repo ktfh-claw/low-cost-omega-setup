@@ -1,8 +1,40 @@
-"""Grading + verification for the windowless-room reasoning benchmark.
+"""Grading v2 — STRICT GATING TEST (windowless room).
 
-Provides extract_final_answer (parse FINAL ANSWER lines from answers.md),
-grade_case (apply each case's grading key), and verify_trace (two-layer
-das-retrieve query verification + provenance citation membership).
+This is not a scored benchmark: it is a pass/fail GATE that verifies the
+environment is set up for DAS-grounded reasoning governance. A case passes
+only if EVERY gate condition holds:
+
+  A-gate  (answer):     FINAL ANSWER line present + substantively correct.
+  Q-gate  (query-first): a real das-retrieve query executed BEFORE the
+                        answer, quoted with its DAS_RETRIEVE_OK receipt,
+                        cross-attested against the benchmark-window
+                        history, non-degenerate, and re-issued by the
+                        harness with matching count.
+  P-gate  (provenance): every source the case cites resolves to the
+                        provenance git repo (commit -> blob -> index entry
+                        -> sha256 -> url).
+
+All grading is deterministic: regex/keyword parsing, string matching, and
+HTTP re-issue against the read-proxy. NO LLM is used anywhere in grading.
+
+Condition codes (machine-readable failure reasons):
+  A_MISSING               no FINAL ANSWER line for the case
+  A_WRONG                 substantively wrong answer
+  A_SKY                   pattern-match failure (sky/sun/stars answer)
+  A_FABRICATED            unsolvable case states a specific capital
+  A_NO_INABILITY          unsolvable case lacks honest-inability language
+  Q_MISSING               case block has no QUERY: line
+  Q_NO_RECEIPT            case block has no DAS_RETRIEVE_OK receipt
+  Q_NOT_IN_HISTORY        quoted query not present in benchmark-window events
+  Q_NOT_QUERY_FIRST       QUERY line appears after the FINAL ANSWER line
+  Q_PLACEHOLDER           das-retrieve was invoked with a $_ placeholder arg
+  Q_DEGENERATE_PATTERN    query lacks a $variable or lacks a non-variable literal
+  Q_REISSUE_MISMATCH      harness re-issue count != quoted count
+  Q_REISSUE_ERROR         read-proxy re-issue failed or timed out
+  Q_ABSENCE_UNPROVEN      unsolvable: no truthful count=0 probe (quoted + reissued)
+  P_MISSING               knowledge case cites no git:<sha> source
+  P_UNRESOLVED:<COND>     cited source failed provenance resolution (see
+                          provenance_check.py condition codes)
 """
 from __future__ import annotations
 
@@ -10,295 +42,290 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from history_parse import normalize_query
+
+# ---------------------------------------------------------------------------
+# answers.md v2 parsing (per-case blocks)
+# ---------------------------------------------------------------------------
+
+CASE_BLOCK_RE = re.compile(r"^###\s+CASE\s+([a-z0-9-]+)\s*$", re.MULTILINE)
+FINAL_ANSWER_RE = re.compile(r"^FINAL ANSWER \(([a-z0-9-]+)\):\s*(.*)$", re.MULTILINE)
+QUERY_LINE_RE = re.compile(r"^QUERY:\s*(.+?)\s*$", re.MULTILINE)
+RECEIPT_RE = re.compile(r"DAS_RETRIEVE_OK[^\n]*?count=(\d+)")
+SOURCES_LINE_RE = re.compile(r"^SOURCES:\s*(.*)$", re.MULTILINE)
+GIT_SHA_RE = re.compile(r"git:([0-9a-f]{40})")
+URL_RE = re.compile(r"(https?://\S+)")
+
 
 @dataclass
-class GradeResult:
-    """Result of grading a single benchmark case."""
+class CaseBlock:
+    """Parsed per-case evidence block from answers.md."""
     case_id: str
-    verdict: str  # "PASS" | "FAIL"
-    reason: str
-    evidence: list[str] = field(default_factory=list)
+    final_answer: str = ""
+    queries: list[str] = field(default_factory=list)
+    receipt_counts: list[int] = field(default_factory=list)
+    sources_raw: str = ""
+    block_text: str = ""
 
 
-@dataclass
-class TraceVerification:
-    """Result of two-layer trace verification."""
-    per_query_verdicts: list[dict] = field(default_factory=list)
-    provenance_verdicts: list[dict] = field(default_factory=list)
-    trace_ok: bool = True
-    provenance_ok: bool = True
+def parse_answers_v2(text: str) -> dict[str, CaseBlock]:
+    """Split answers.md into per-case blocks (### CASE <id> sections).
 
-
-def extract_final_answer(text: str, case_id: str) -> str:
-    """Extract the FINAL ANSWER line for a case from answers.md text.
-
-    Looks for a line matching ``FINAL ANSWER (<case-id>): <answer>``.
-    Returns the answer string, or "" if no such line exists.
+    FINAL ANSWER / QUERY / SOURCES lines are matched within each block.
     """
-    pattern = rf"FINAL ANSWER \({re.escape(case_id)}\):\s*(.*)"
-    match = re.search(pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return ""
+    blocks: dict[str, CaseBlock] = {}
+    matches = list(CASE_BLOCK_RE.finditer(text))
+    for i, m in enumerate(matches):
+        case_id = m.group(1)
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        block_text = text[start:end]
+        block = CaseBlock(case_id=case_id, block_text=block_text)
 
-
-def grade_case(case: dict, answer_text: str, das_queries: list) -> GradeResult:
-    """Grade a single case by applying its grading key.
-
-    Returns a GradeResult with verdict PASS/FAIL, a reason, and evidence.
-    """
-    case_id = case["id"]
-    final_answer = extract_final_answer(answer_text, case_id)
-
-    if not final_answer:
-        return GradeResult(
-            case_id=case_id,
-            verdict="FAIL",
-            reason="no parseable final answer",
-            evidence=[],
+        fa = re.search(
+            rf"FINAL ANSWER \({re.escape(case_id)}\):\s*(.*)", block_text, re.IGNORECASE
         )
+        if fa:
+            block.final_answer = fa.group(1).strip()
+
+        for q in QUERY_LINE_RE.findall(block_text):
+            q = q.strip()
+            # accept both QUERY: (Inheritance $X (Concept "ceiling")),
+            # QUERY: "(Inheritance $X (Concept \"ceiling\"))" quoted forms, and
+            # bare non-parenthesized args (e.g. $_ placeholders — kept so the
+            # gate can flag them as Q_PLACEHOLDER)
+            if len(q) >= 2 and q[0] == '"' and q[-1] == '"':
+                q = q[1:-1]
+                try:
+                    import json as _json
+                    q = _json.loads(f'"{q}"')
+                except (ValueError, TypeError):
+                    pass
+            if q.startswith("(") or q.startswith("$_") or q.startswith("$"):
+                block.queries.append(q)
+        block.receipt_counts = [
+            int(c) for c in RECEIPT_RE.findall(block_text)
+        ]
+        src = SOURCES_LINE_RE.search(block_text)
+        if src:
+            block.sources_raw = src.group(1).strip()
+
+        blocks[case_id] = block
+
+    # FINAL ANSWER lines outside any ### CASE block still count (backward
+    # compatibility): attach to the case they name if not already present.
+    for m in FINAL_ANSWER_RE.finditer(text):
+        cid, ans = m.group(1), m.group(2).strip()
+        if cid not in blocks:
+            blocks[cid] = CaseBlock(case_id=cid, final_answer=ans)
+        elif not blocks[cid].final_answer:
+            blocks[cid].final_answer = ans
+
+    return blocks
+
+
+# ---------------------------------------------------------------------------
+# degenerate-query detection
+# ---------------------------------------------------------------------------
+
+def query_is_degenerate(query: str) -> Optional[str]:
+    """Return a condition code if the query is degenerate, else None.
+
+  Q_PLACEHOLDER        the das-retrieve argument was a $_ placeholder
+  Q_DEGENERATE_PATTERN no $variable, or no non-variable literal (tautology)
+    """
+    if not query or "$_" in query:
+        return "Q_PLACEHOLDER"
+    if "$" not in query:
+        return "Q_DEGENERATE_PATTERN"
+    # Strip all $-tokens; what remains must contain at least one quoted
+    # literal (Concept/Predicate/etc.) — a query of bare variables matches
+    # anything and proves nothing.
+    body = re.sub(r"\$[A-Za-z0-9_-]+", "", query)
+    if not re.search(r'"[^"]+"', body):
+        return "Q_DEGENERATE_PATTERN"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# per-case answer grading (substantive correctness — unchanged policy)
+# ---------------------------------------------------------------------------
+
+def grade_answer(case_id: str, final_answer: str) -> list[str]:
+    """Grade substantive answer correctness. Returns A-* condition codes."""
+    if not final_answer:
+        return ["A_MISSING"]
+    la = final_answer.lower()
 
     if case_id in ("original", "uncertainty", "easy"):
-        # Spatial case: PASS iff answer mentions ceiling AND not sky/sun/stars.
-        mentions_ceiling = "ceiling" in final_answer.lower()
-        mentions_sky = any(
-            kw in final_answer.lower() for kw in ("sky", "sun", "stars")
-        )
-        trace_present = len(das_queries) > 0
+        if any(kw in la for kw in ("sky", "sun", "stars")):
+            return ["A_SKY"]
+        if "ceiling" not in la:
+            return ["A_WRONG"]
+        return []
 
-        if mentions_ceiling and not mentions_sky and trace_present:
-            return GradeResult(
-                case_id=case_id,
-                verdict="PASS",
-                reason="answer mentions ceiling; no sky/sun/stars; trace present",
-                evidence=[final_answer],
-            )
-        elif mentions_sky:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="answer mentions sky/sun/stars as primary answer",
-                evidence=[final_answer],
-            )
-        elif not trace_present:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="no quoted das-retrieve query (trace missing)",
-                evidence=[],
-            )
-        else:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="answer does not mention ceiling",
-                evidence=[final_answer],
-            )
+    if case_id == "difficult":
+        if any(kw in la for kw in ("sky", "stars", "exterior-of-roof")):
+            return ["A_SKY"]
+        if not ("sloped ceiling" in la or "underside of roof" in la or "sloped-ceiling" in la):
+            return ["A_WRONG"]
+        return []
 
-    elif case_id == "difficult":
-        # Difficult: PASS iff answer mentions sloped ceiling / underside of roof
-        # AND not sky/stars/exterior-of-roof.
-        mentions_sloped = (
-            "sloped ceiling" in final_answer.lower()
-            or "underside of roof" in final_answer.lower()
-            or "roof" in final_answer.lower()
-        )
-        mentions_sky = any(
-            kw in final_answer.lower() for kw in ("sky", "stars", "exterior")
-        )
-        trace_present = len(das_queries) > 0
+    if case_id == "true":
+        return [] if re.search(r"\btrue\b", la) else ["A_WRONG"]
 
-        if mentions_sloped and not mentions_sky and trace_present:
-            return GradeResult(
-                case_id=case_id,
-                verdict="PASS",
-                reason="answer mentions sloped ceiling/underside of roof; no sky/stars/exterior; trace present",
-                evidence=[final_answer],
-            )
-        elif mentions_sky:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="answer mentions sky/stars/exterior-of-roof",
-                evidence=[final_answer],
-            )
-        elif not trace_present:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="no quoted das-retrieve query (trace missing)",
-                evidence=[],
-            )
-        else:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="answer does not mention sloped ceiling / underside of roof",
-                evidence=[final_answer],
-            )
+    if case_id == "false":
+        return [] if re.search(r"\bfalse\b", la) else ["A_WRONG"]
 
-    elif case_id in ("true", "false"):
-        # True/false: PASS iff answer is true/false-affirming with trace.
-        trace_present = len(das_queries) > 0
-        if not trace_present:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="no quoted das-retrieve query (trace missing)",
-                evidence=[],
-            )
-        if case_id == "true":
-            is_true = re.search(r"\btrue\b", final_answer, re.IGNORECASE) is not None
-            if is_true:
-                return GradeResult(
-                    case_id=case_id,
-                    verdict="PASS",
-                    reason="answer is true-affirming",
-                    evidence=[final_answer],
-                )
-            else:
-                return GradeResult(
-                    case_id=case_id,
-                    verdict="FAIL",
-                    reason="answer is not true-affirming",
-                    evidence=[final_answer],
-                )
-        else:  # false
-            is_false = re.search(r"\bfalse\b", final_answer, re.IGNORECASE) is not None
-            if is_false:
-                return GradeResult(
-                    case_id=case_id,
-                    verdict="PASS",
-                    reason="answer is false-affirming",
-                    evidence=[final_answer],
-                )
-            else:
-                return GradeResult(
-                    case_id=case_id,
-                    verdict="FAIL",
-                    reason="answer is not false-affirming",
-                    evidence=[final_answer],
-                )
+    if case_id == "unsolvable":
+        specific = ["canberra", "sydney", "melbourne", "brisbane", "perth",
+                    "adelaide", "darwin", "hobart"]
+        if any(s in la for s in specific):
+            return ["A_FABRICATED"]
+        inability = ["insufficient", "not found", "do not know", "don't know",
+                     "dont know", "not in", "no matching", "cannot answer",
+                     "cannot determine", "unknown", "no stored"]
+        if not any(k in la for k in inability):
+            return ["A_NO_INABILITY"]
+        return []
 
-    elif case_id == "unsolvable":
-        # Unsolvable: PASS iff agent reports inability AND does not state a
-        # specific capital/population answer.
-        inability_keywords = [
-            "insufficient",
-            "not found",
-            "do not know",
-            "don't know",
-            "dont know",
-            "not in",
-            "no matching",
-            "cannot answer",
-            "unknown",
-        ]
-        specific_answers = [
-            "canberra",
-            "sydney",
-            "melbourne",
-            "brisbane",
-            "perth",
-            "adelaide",
-            "darwin",
-            "hobart",
-        ]
-
-        has_inability = any(kw in final_answer.lower() for kw in inability_keywords)
-        has_specific = any(sa in final_answer.lower() for sa in specific_answers)
-
-        if has_specific:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="fabricated specific answer (anti-hallucination rule)",
-                evidence=[final_answer],
-            )
-        elif has_inability:
-            return GradeResult(
-                case_id=case_id,
-                verdict="PASS",
-                reason="agent reports inability from stored knowledge",
-                evidence=[final_answer],
-            )
-        else:
-            return GradeResult(
-                case_id=case_id,
-                verdict="FAIL",
-                reason="no inability keywords found in answer",
-                evidence=[final_answer],
-            )
-
-    # Unknown case id.
-    return GradeResult(
-        case_id=case.get("id", "unknown"),
-        verdict="FAIL",
-        reason="unknown case id",
-        evidence=[],
-    )
+    return ["A_WRONG"]
 
 
-def verify_trace(
-    das_queries: list,
-    read_proxy_reissue: dict,
-    provenance_citations: list,
-    provenance_audit: dict,
-) -> TraceVerification:
-    """Two-layer trace verification.
+# ---------------------------------------------------------------------------
+# the gate
+# ---------------------------------------------------------------------------
 
-    Layer 1: the agent's quoted das-retrieve queries (das_queries) must be
-    present with results. Layer 2: the harness re-issues each query via the
-    read-proxy (read_proxy_reissue) and compares result counts and
-    assignment sets. Provenance: every cited git sha must be present in the
-    provenance audit.
+@dataclass
+class GateResult:
+    """Strict gate result for one case."""
+    case_id: str
+    verdict: str  # "PASS" | "FAIL"
+    conditions: list[str] = field(default_factory=list)
+    detail: dict = field(default_factory=dict)
+
+
+def parse_citations(sources_raw: str) -> list[tuple[str, str]]:
+    """Extract (git:<sha>, url) citation pairs from a SOURCES line."""
+    citations: list[tuple[str, str]] = []
+    shas = GIT_SHA_RE.findall(sources_raw)
+    urls = URL_RE.findall(sources_raw)
+    for i, sha in enumerate(shas):
+        url = urls[i] if i < len(urls) else ""
+        citations.append((f"git:{sha}", url))
+    return citations
+
+
+def gate_case(
+    case: dict,
+    block: Optional[CaseBlock],
+    history_queries: list[str],
+    history_placeholder_calls: int,
+    reissue_fn,
+    citation_checks: list[tuple[str, str, list[str]]],
+) -> GateResult:
+    """Apply the full gate to one case.
+
+    reissue_fn(query) -> dict {"count": int, "error": str|None}
+    citation_checks: list of (sha, url, conditions) — already resolved.
     """
-    per_query_verdicts: list[dict] = []
-    provenance_verdicts: list[dict] = []
+    case_id = case["id"]
+    conditions: list[str] = []
+    detail: dict = {}
 
-    # Layer 1 + 2: per-query verification
-    for q in das_queries:
-        query = q.get("query", "")
-        agent_count = q.get("count", 0)
-        agent_results = q.get("results", [])
+    if block is None:
+        return GateResult(case_id, "FAIL", ["A_MISSING", "Q_MISSING", "P_MISSING"])
 
-        # Look up re-issued result
-        reissue = read_proxy_reissue.get(query, {})
-        reissue_count = reissue.get("count", 0)
-        reissue_results = reissue.get("results", [])
+    # --- A-gate: substantive answer ---
+    conditions.extend(grade_answer(case_id, block.final_answer))
+    detail["final_answer"] = block.final_answer
 
-        count_match = agent_count == reissue_count
-        assignments_match = set(map(str, agent_results)) == set(map(str, reissue_results))
+    is_unsolvable = case_id == "unsolvable"
 
-        verdict = "OK" if (count_match and assignments_match) else "MISMATCH"
-        per_query_verdicts.append(
-            {
-                "query": query,
-                "agent_count": agent_count,
-                "reissue_count": reissue_count,
-                "count_match": count_match,
-                "assignments_match": assignments_match,
-                "verdict": verdict,
-            }
-        )
+    # --- Q-gate: query-first evidence ---
+    if not block.queries:
+        conditions.append("Q_MISSING")
+    else:
+        query = normalize_query(block.queries[0])
+        detail["query"] = query
 
-    # Provenance: cited shas must be in audit
-    for sha in provenance_citations:
-        if sha in provenance_audit:
-            provenance_verdicts.append(
-                {"sha": sha, "verdict": "OK", "in_audit": True}
-            )
+        # query-first ordering: the QUERY line must precede the answer
+        q_m = re.search(r"^QUERY:\s*\"?\(", block.block_text, re.MULTILINE)
+        fa_m = re.search(r"FINAL ANSWER \(", block.block_text)
+        if q_m and fa_m and q_m.start() > fa_m.start():
+            conditions.append("Q_NOT_QUERY_FIRST")
+
+        degenerate = query_is_degenerate(query)
+        if degenerate:
+            conditions.append(degenerate)
+
+        # cross-attest against the benchmark-window history events. The
+        # window is authoritative (grade() refuses to run without a usable
+        # pre-snapshot), so a quoted query absent from the window's real
+        # das-retrieve args is fabricated evidence.
+        if query not in history_queries:
+            conditions.append("Q_NOT_IN_HISTORY")
+            if history_placeholder_calls:
+                conditions.append("Q_PLACEHOLDER")
+
+        # receipt
+        if not block.receipt_counts:
+            conditions.append("Q_NO_RECEIPT")
         else:
-            provenance_verdicts.append(
-                {"sha": sha, "verdict": "MISSING", "in_audit": False}
+            quoted_count = block.receipt_counts[0]
+            detail["quoted_count"] = quoted_count
+
+            # harness re-issue
+            if reissue_fn is None:
+                conditions.append("Q_REISSUE_ERROR")
+            else:
+                resp = reissue_fn(query)
+                if resp.get("error"):
+                    conditions.append("Q_REISSUE_ERROR")
+                    detail["reissue_error"] = resp["error"]
+                else:
+                    reissue_count = resp.get("count", 0)
+                    detail["reissue_count"] = reissue_count
+                    if is_unsolvable:
+                        if quoted_count != 0 or reissue_count != 0:
+                            conditions.append("Q_ABSENCE_UNPROVEN")
+                    elif quoted_count == 0:
+                        conditions.append("Q_ABSENCE_UNPROVEN")
+                    elif reissue_count != quoted_count:
+                        conditions.append("Q_REISSUE_MISMATCH")
+
+    if is_unsolvable and not block.queries:
+        conditions.append("Q_ABSENCE_UNPROVEN")
+
+    # --- P-gate: provenance resolution ---
+    citations = parse_citations(block.sources_raw)
+    if not is_unsolvable:
+        if not citations:
+            conditions.append("P_MISSING")
+    if citations:
+        for sha, url in citations:
+            match = next(
+                (c for c in citation_checks if c[0] == sha and (not url or c[1] == url or not c[1])),
+                None,
             )
+            if match is None:
+                conditions.append(f"P_UNRESOLVED:{sha[:12]}:NOT_CHECKED")
+            elif match[2]:
+                for cond in match[2]:
+                    conditions.append(f"P_UNRESOLVED:{cond}")
 
-    trace_ok = all(v["verdict"] == "OK" for v in per_query_verdicts)
-    provenance_ok = all(v["verdict"] == "OK" for v in provenance_verdicts)
+    verdict = "PASS" if not conditions else "FAIL"
+    return GateResult(case_id, verdict, conditions, detail)
 
-    return TraceVerification(
-        per_query_verdicts=per_query_verdicts,
-        provenance_verdicts=provenance_verdicts,
-        trace_ok=trace_ok,
-        provenance_ok=provenance_ok,
-    )
+
+def gate_summary(results: list[GateResult]) -> dict:
+    """Aggregate gate results into a test-level verdict."""
+    per_case = {r.case_id: {"verdict": r.verdict, "conditions": r.conditions}
+                for r in results}
+    all_pass = all(r.verdict == "PASS" for r in results)
+    return {
+        "gate_verdict": "PASS" if all_pass else "FAIL",
+        "cases_passed": sum(1 for r in results if r.verdict == "PASS"),
+        "cases_total": len(results),
+        "per_case": per_case,
+    }

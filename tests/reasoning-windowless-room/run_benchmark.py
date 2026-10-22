@@ -1,9 +1,31 @@
 #!/usr/bin/env python3
-"""Orchestrator CLI for the windowless-room reasoning benchmark.
+"""Orchestrator CLI for the windowless-room GATING TEST (v2).
 
 Runs ON the OVH host (operator: ``ssh -p 9022 ubuntu@100.84.81.96``) from the
 synced repo directory (``tests/reasoning-windowless-room/``). Phases:
 preflight, setup, agent, grade, report, teardown, full.
+
+This is a strict pass/fail GATE, not a scored benchmark. A case passes only
+if ALL gate conditions hold:
+
+  A-gate  the FINAL ANSWER line exists and is substantively correct.
+  Q-gate  the case was answered QUERY-FIRST: a real das-retrieve call in the
+          benchmark window (history suffix between the pre/post snapshots),
+          quoted in the answers file with its DAS_RETRIEVE_OK receipt,
+          non-degenerate (has a $variable AND a non-variable literal, no
+          $_ placeholder), and re-issued by the harness via the read-proxy
+          with a matching count (count=0 for the unsolvable case, proven
+          again by re-issue).
+  P-gate  every git:<sha> source citation resolves against the provenance
+          git repo: commit exists, adds one sources/ blob + index.jsonl,
+          index entry at that commit matches the blob path, sha256(blob)
+          matches the index entry, and the entry url matches the citation.
+
+Grading is fully deterministic (regex/keyword parsing, string matching, HTTP
+re-issue, git reads). NO LLM is used anywhere in the harness.
+
+Exit codes (grade/report/full): 0 = gate PASS, 2 = gate FAIL (the expected
+negative signal — the gate did its job), 1 = harness/environment error.
 
 Restart invariant: the agent is restarted via
 ``sudo systemctl restart omega-curiosity.service`` — NOT ``docker restart`` —
@@ -34,6 +56,8 @@ DEFAULT_READ_PROXY = "http://172.20.0.3:8080"
 CONTAINER_WRITE_BRIDGE = "omega-das-write-bridge-write-bridge-1"
 CONTAINER_READ_PROXY = "omega-das-integration-read-proxy-1"
 CONTAINER_AGENT = "omega-curiosity"
+
+GATE_PASS, GATE_FAIL, GATE_ERROR = 0, 2, 1
 
 
 def _http_post(url: str, body: dict, timeout: float = 30.0) -> dict:
@@ -71,6 +95,17 @@ def _run_id() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _sudo_read(path: Path, timeout: float = 60.0) -> str | None:
+    """Read a (possibly root-owned) file via sudo; None on failure."""
+    r = _run(["sudo", "cat", str(path)], timeout=timeout)
+    return r.stdout if r.returncode == 0 else None
+
+
+def _sudo_exists(path: Path) -> bool:
+    r = _run(["sudo", "test", "-f", str(path)], timeout=10.0)
+    return r.returncode == 0
+
+
 def _container_ip(container: str) -> str:
     """Resolve a container's IP via docker inspect (do NOT hardcode)."""
     try:
@@ -84,16 +119,23 @@ def _container_ip(container: str) -> str:
         return ""
 
 
-def preflight(args) -> int:
-    """Preflight phase: verify environment is ready for the benchmark."""
-    # Resolve write-bridge / read-proxy IPs dynamically at run start;
-    # the CLI defaults are fallbacks only.
+def _resolve_endpoints(args) -> None:
+    """Resolve write-bridge / read-proxy URLs dynamically (in-place on args)."""
     wb_ip = _container_ip(CONTAINER_WRITE_BRIDGE)
     rp_ip = _container_ip(CONTAINER_READ_PROXY)
     if wb_ip:
         args.write_bridge = f"http://{wb_ip}:8080"
     if rp_ip:
         args.read_proxy = f"http://{rp_ip}:8080"
+
+
+# ---------------------------------------------------------------------------
+# preflight
+# ---------------------------------------------------------------------------
+
+def preflight(args) -> int:
+    """Preflight phase: verify environment is ready for the benchmark."""
+    _resolve_endpoints(args)
     print(f"[preflight] write_bridge={args.write_bridge} read_proxy={args.read_proxy}")
 
     print("[preflight] checking environment...")
@@ -168,8 +210,7 @@ def preflight(args) -> int:
         except Exception as e:
             checks["provenance_repo"] = f"error: {e}"
 
-    # 6. Agent memory volume exists (root-owned: check via sudo, Path.exists()
-    #    raises PermissionError on the docker volume path)
+    # 6. Agent memory volume exists (root-owned: check via sudo)
     if args.dry_run:
         checks["memory_volume"] = "dry-run"
     else:
@@ -196,6 +237,10 @@ def preflight(args) -> int:
     print("[preflight] FAIL")
     return 1
 
+
+# ---------------------------------------------------------------------------
+# setup
+# ---------------------------------------------------------------------------
 
 def _render_prompts_txt(here: Path) -> str:
     """Build benchmark prompts.txt content from facts.TEST_CASES.
@@ -227,7 +272,6 @@ def _render_prompts_txt(here: Path) -> str:
 def setup(args) -> int:
     """Setup phase: archive sources, write benchmark files, install prompt, restart agent."""
     print("[setup] starting setup...")
-    facts_mod = None
     sys.path.insert(0, str(HERE))
     import facts as facts_mod
 
@@ -315,7 +359,7 @@ def setup(args) -> int:
                 ["sudo", "tee", str(vol / "omega_state.md")],
                 input=state, capture_output=True, text=True, timeout=30.0,
             )
-            # 4. Copy history.metta
+            # 4. Copy history.metta (pre-run snapshot: defines the window start)
             _run(["sudo", "cp", str(vol / "history.metta"),
                   str(vol / f"history.pre-benchmark-{args.run_id}.metta")], timeout=60.0)
             # 4b. The agent container runs as nobody:nogroup (uid/gid 65534);
@@ -350,6 +394,10 @@ def setup(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# agent
+# ---------------------------------------------------------------------------
+
 def agent(args) -> int:
     """Agent phase: poll for completion (answers file with all 7 FINAL ANSWER lines)."""
     sys.path.insert(0, str(HERE))
@@ -365,14 +413,10 @@ def agent(args) -> int:
         print(f"[agent] [dry-run] would poll for {answers_path} with all 7 FINAL ANSWER lines")
         return 0
 
-    def _sudo_read(path: Path) -> str | None:
-        try:
-            r = _run(["sudo", "cat", str(path)], timeout=30.0)
-            if r.returncode == 0:
-                return r.stdout
-        except Exception:
-            pass
-        return None
+    def _snapshot_post(vol: Path) -> bool:
+        snap = _run(["sudo", "cp", str(vol / "history.metta"),
+                     str(vol / f"history.post-benchmark-{args.run_id}.metta")], timeout=60.0)
+        return snap.returncode == 0
 
     while time.time() - start < timeout_s:
         content = _sudo_read(answers_path)
@@ -382,120 +426,242 @@ def agent(args) -> int:
             print(f"[agent] {found}/{len(case_ids)} answers present ({elapsed}m elapsed)")
             if found == len(case_ids):
                 print("[agent] COMPLETE — all answers present")
+                ok = _snapshot_post(Path(args.memory_volume))
                 _write_json(RESULTS_DIR / args.run_id / "agent.json", {
                     "status": "complete", "answers_found": found,
+                    "post_snapshot": ok,
                 })
                 return 0
         time.sleep(60)
 
     print("[agent] TIMEOUT — recording partial state")
-    _write_json(RESULTS_DIR / args.run_id / "agent.json", {"status": "timeout"})
+    ok = _snapshot_post(Path(args.memory_volume))
+    _write_json(RESULTS_DIR / args.run_id / "agent.json", {
+        "status": "timeout", "post_snapshot": ok,
+    })
     return 1
 
 
+# ---------------------------------------------------------------------------
+# grade (v2: strict deterministic gate)
+# ---------------------------------------------------------------------------
+
 def grade(args) -> int:
-    """Grade phase: parse answers, grade each case, verify traces + provenance."""
+    """Grade phase: apply the strict gate (answer + query-first + provenance).
+
+    Deterministic only — no LLM. Exit 0 = gate PASS, 2 = gate FAIL,
+    1 = harness error.
+    """
     sys.path.insert(0, str(HERE))
     import facts as facts_mod
     import grading as grading_mod
+    import history_parse
+    import provenance_check
 
-    answers_path = Path(args.memory_volume) / "benchmark" / "answers.md"
     if args.dry_run:
-        print(f"[grade] [dry-run] would grade answers from {answers_path}")
+        print("[grade] [dry-run] would apply the strict gate (A/Q/P) to answers.md")
         return 0
-    read_r = _run(["sudo", "cat", str(answers_path)], timeout=30.0)
-    if read_r.returncode != 0:
+
+    _resolve_endpoints(args)
+
+    def _read_input(explicit: str | None, default: Path) -> str | None:
+        """Read an input file: explicit path (plain read, sudo fallback) or default (sudo)."""
+        if explicit:
+            try:
+                return Path(explicit).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return _sudo_read(Path(explicit))
+        return _sudo_read(default)
+
+    vol = Path(args.memory_volume)
+    answers_path = Path(getattr(args, "answers_override", "") or (vol / "benchmark" / "answers.md"))
+    content = _read_input(getattr(args, "answers_override", "") or None,
+                          vol / "benchmark" / "answers.md")
+    if content is None:
         print(f"[grade] ERROR: answers file not readable at {answers_path}")
-        return 1
-    content = read_r.stdout
+        _write_json(RESULTS_DIR / args.run_id / "grade.json",
+                    {"error": "answers file not readable"})
+        return GATE_ERROR
 
-    # Per-case trace check: the agent must quote real das-retrieve evidence
-    # in the answers file (DAS_RETRIEVE_OK ... count=<digits>). Absence of
-    # quoted evidence fails every case that requires a trace.
-    has_retrieve_evidence = re.search(
-        r"DAS_RETRIEVE_OK.*?count=\d+", content) is not None
+    # --- benchmark window from snapshots ---
+    history = _read_input(getattr(args, "history_override", "") or None,
+                          vol / "history.metta") or ""
+    pre_snap = _read_input(getattr(args, "pre_snapshot_override", "") or None,
+                           vol / f"history.pre-benchmark-{args.run_id}.metta")
+    post_snap = _read_input(getattr(args, "post_snapshot_override", "") or None,
+                            vol / f"history.post-benchmark-{args.run_id}.metta")
+    window_text, window_mode = history_parse.window_from_texts(history, pre_snap, post_snap)
 
-    results = {}
+    if window_mode == "full":
+        print("[grade] ERROR: no usable pre-benchmark history snapshot — cannot define")
+        print("[grade]        the benchmark window; refusing to grade (pass --pre-snapshot-override")
+        print("[grade]        for offline re-grades)")
+        _write_json(RESULTS_DIR / args.run_id / "grade.json",
+                    {"error": "no pre-benchmark history snapshot; window undefined"})
+        return GATE_ERROR
+
+    history_queries = history_parse.extract_retrieve_args(window_text)
+    placeholder_calls = history_parse.count_placeholder_retrieves(window_text)
+    persist_receipts = history_parse.extract_persist_receipts(window_text)
+    archive_receipts = history_parse.extract_archive_receipts(window_text)
+    add_atom_shas = history_parse.extract_add_atom_shas(window_text)
+
+    # --- parse answers into per-case blocks ---
+    blocks = grading_mod.parse_answers_v2(content)
+
+    # --- resolve every cited source against the provenance repo ---
+    citation_inputs: list[provenance_check.Citation] = []
+    seen: set[tuple[str, str]] = set()
     for case in facts_mod.TEST_CASES:
-        das_queries = []
-        if has_retrieve_evidence:
-            das_queries = [{"query": "(present in answers)", "count": 1}]
-        result = grading_mod.grade_case(case, content, das_queries)
-        results[case["id"]] = {
-            "verdict": result.verdict, "reason": result.reason, "evidence": result.evidence,
-        }
+        block = blocks.get(case["id"])
+        if block is None:
+            continue
+        for sha, url in grading_mod.parse_citations(block.sources_raw):
+            if (sha, url) not in seen:
+                seen.add((sha, url))
+                citation_inputs.append(provenance_check.Citation(sha=sha, url=url))
+    # also resolve shas the agent persisted via add-atom (window evidence)
+    for sha in add_atom_shas:
+        if (sha, "") not in seen:
+            seen.add((sha, ""))
+            citation_inputs.append(provenance_check.Citation(sha=sha, url=""))
 
-    # Two-layer verification (simplified — re-issue queries via read-proxy)
-    trace_verification = None
-    if not args.dry_run:
+    citation_checks: list[tuple[str, str, list[str]]] = []
+    for c in citation_inputs:
+        check = provenance_check.resolve_citation(
+            args.provenance_repo, c.sha, c.url, sudo=True)
+        citation_checks.append((c.sha, c.url, check.conditions))
+
+    # --- re-issue closure (deterministic HTTP re-query) ---
+    def reissue(query: str) -> dict:
         try:
-            reissue = {}
-            for case in facts_mod.TEST_CASES:
-                q = "(Inheritance $X $Y)"
-                resp = _http_post(args.read_proxy + "/v1/query", {
-                    "metta": q, "max_answers": 10,
-                }, timeout=30.0)
-                reissue[q] = {"count": resp.get("count", 0), "results": resp.get("answers", [])}
-            tv = grading_mod.verify_trace(
-                [{"query": "(Inheritance $X $Y)", "count": 1, "results": []}],
-                reissue, [], {},
-            )
-            trace_verification = {
-                "trace_ok": tv.trace_ok, "provenance_ok": tv.provenance_ok,
-            }
+            resp = _http_post(args.read_proxy + "/v1/query", {
+                "metta": query, "max_answers": 10,
+            }, timeout=30.0)
+            return {"count": int(resp.get("count", 0))}
         except Exception as e:
-            trace_verification = {"error": str(e)}
+            return {"error": str(e)}
+
+    # --- gate every case ---
+    results = []
+    for case in facts_mod.TEST_CASES:
+        r = grading_mod.gate_case(
+            case,
+            blocks.get(case["id"]),
+            history_queries,
+            placeholder_calls,
+            reissue,
+            citation_checks,
+        )
+        results.append(r)
+
+    summary = grading_mod.gate_summary(results)
 
     grade_data = {
         "run_id": args.run_id,
-        "per_case": results,
-        "trace_evidence_present": has_retrieve_evidence,
-        "trace_verification": trace_verification,
+        "gate_verdict": summary["gate_verdict"],
+        "cases_passed": summary["cases_passed"],
+        "cases_total": summary["cases_total"],
+        "per_case": {
+            r.case_id: {
+                "verdict": r.verdict,
+                "conditions": r.conditions,
+                "detail": r.detail,
+            } for r in results
+        },
+        "history_window": {
+            "mode": window_mode,
+            "retrieve_calls": len(history_queries),
+            "retrieve_args": history_queries[:20],
+            "placeholder_calls": placeholder_calls,
+            "persist_receipts": len(persist_receipts),
+            "archive_receipts": len(archive_receipts),
+            "add_atom_shas": add_atom_shas[:20],
+        },
+        "citation_checks": [
+            {"sha": s, "url": u, "conditions": conds}
+            for s, u, conds in citation_checks
+        ],
         "timestamp": datetime.now().isoformat(),
     }
     _write_json(RESULTS_DIR / args.run_id / "grade.json", grade_data)
-    print(f"[grade] grade.json written to results/{args.run_id}/grade.json")
-    return 0
 
+    print(f"[grade] GATE {summary['gate_verdict']} — "
+          f"{summary['cases_passed']}/{summary['cases_total']} cases passed")
+    for r in results:
+        conds = ", ".join(r.conditions) if r.conditions else "-"
+        print(f"[grade]   {r.case_id}: {r.verdict} ({conds})")
+
+    return GATE_PASS if summary["gate_verdict"] == "PASS" else GATE_FAIL
+
+
+# ---------------------------------------------------------------------------
+# report (v2: gate report + signal)
+# ---------------------------------------------------------------------------
 
 def report(args) -> int:
-    """Report phase: assemble report.json + report.md, print to stdout."""
+    """Report phase: assemble report.json + report.md from grade.json; signal verdict."""
     if args.dry_run:
         print(f"[report] [dry-run] would assemble results/{args.run_id}/report.json + report.md")
         return 0
     rd = RESULTS_DIR / args.run_id
     setup = _load_json(rd / "setup.json") or {}
     grade = _load_json(rd / "grade.json") or {}
+    agent_data = _load_json(rd / "agent.json") or {}
+
+    if not grade or "gate_verdict" not in grade:
+        print(f"[report] ERROR: no gate verdict in {rd/'grade.json'} — run grade first")
+        return GATE_ERROR
 
     report = {
         "run_id": args.run_id,
         "setup": setup,
+        "agent": agent_data,
         "grade": grade,
         "timestamp": datetime.now().isoformat(),
     }
     _write_json(rd / "report.json", report)
 
-    # Human-readable report.md
-    lines = [f"# Windowless Room Benchmark Report — {args.run_id}", ""]
-    lines.append("## Per-case results")
+    # Human-readable gate report
+    lines = [f"# Windowless Room Gating Test Report — {args.run_id}", ""]
+    verdict = grade.get("gate_verdict", "FAIL")
+    lines.append(f"## GATE {verdict} — {grade.get('cases_passed', 0)}/{grade.get('cases_total', 0)} cases passed")
     lines.append("")
-    lines.append("| Case | Verdict | Reason |")
-    lines.append("|------|---------|--------|")
+    lines.append("| Case | Verdict | Conditions |")
+    lines.append("|------|---------|------------|")
     for cid, r in (grade.get("per_case") or {}).items():
-        lines.append(f"| {cid} | {r.get('verdict', '?')} | {r.get('reason', '')} |")
+        conds = ", ".join(r.get("conditions", [])) or "-"
+        lines.append(f"| {cid} | {r.get('verdict', '?')} | {conds} |")
+    lines.append("")
+    hw = grade.get("history_window") or {}
+    lines.append(f"History window mode: {hw.get('mode', '?')} — "
+                 f"das-retrieve calls in window: {hw.get('retrieve_calls', 0)} "
+                 f"(placeholder calls: {hw.get('placeholder_calls', 0)})")
+    lines.append("")
+    lines.append("Condition code reference:")
+    lines.append("")
+    lines.append("- `A_*` — answer gate (missing / wrong / sky pattern-match / fabricated)")
+    lines.append("- `Q_*` — query-first gate (no query, no receipt, not in history,")
+    lines.append("  placeholder arg, degenerate pattern, reissue mismatch, absence unproven)")
+    lines.append("- `P_*` — provenance gate (citation missing / unresolved vs git repo)")
     lines.append("")
     report_md = "\n".join(lines)
     (rd / "report.md").write_text(report_md, encoding="utf-8")
     print(report_md)
-    return 0
 
+    return GATE_PASS if verdict == "PASS" else GATE_FAIL
+
+
+# ---------------------------------------------------------------------------
+# teardown
+# ---------------------------------------------------------------------------
 
 def teardown(args) -> int:
-    """Teardown phase: restore agent to standby."""
+    """Teardown phase: restore agent to standby (with backup contamination guard)."""
     vol = Path(args.memory_volume)
-    actions = []
     if args.dry_run:
         print(f"[teardown] [dry-run] planned actions:")
+        print(f"  - verify backup prompt is NOT a benchmark prompt (contamination guard)")
         print(f"  - restore prompt.txt from backup")
         print(f"  - restore omega_state.md from backup")
         print(f"  - append 'benchmark complete' line")
@@ -505,8 +671,23 @@ def teardown(args) -> int:
         return 0
 
     try:
+        # Contamination guard: the standby backup must not itself be a
+        # benchmark prompt (this exact failure shipped with the wr-20261021
+        # run: the *.bak-pre-benchmark* copies had captured run-1 content).
+        backup_prompt = vol / f"prompt.txt.bak-pre-benchmark-{args.run_id}"
+        backup_text = _sudo_read(backup_prompt) or ""
+        if "BENCHMARK MODE" in backup_text and not getattr(args, "allow_dirty_backup", False):
+            print("[teardown] ABORT: backup prompt still contains BENCHMARK MODE content —")
+            print(f"[teardown]         {backup_prompt} is contaminated; refusing to restore it.")
+            print("[teardown]         Fix the standby backup first or pass --allow-dirty-backup.")
+            _write_json(RESULTS_DIR / args.run_id / "teardown.json", {
+                "error": "backup prompt contaminated with benchmark content",
+                "aborted": True,
+            })
+            return 1
+
         # Restore original prompt + omega_state.md
-        _run(["sudo", "cp", str(vol / f"prompt.txt.bak-pre-benchmark-{args.run_id}"),
+        _run(["sudo", "cp", str(backup_prompt),
               str(vol / "prompt.txt")], timeout=30.0)
         _run(["sudo", "cp", str(vol / f"omega_state.md.bak-pre-benchmark-{args.run_id}"),
               str(vol / "omega_state.md")], timeout=30.0)
@@ -521,7 +702,6 @@ def teardown(args) -> int:
         # Optional cleanup (links-only; NEVER --delete-nodes)
         if getattr(args, "cleanup", False):
             print("[teardown] cleanup requested — removing benchmark DAS atoms (links-only)")
-            # Each fact via cleanup.py --metta "<expr>" links-only default
             sys.path.insert(0, str(HERE))
             import facts as facts_mod
             for fact in facts_mod.CANONICAL_FACTS:
@@ -542,8 +722,16 @@ def teardown(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# full
+# ---------------------------------------------------------------------------
+
 def full(args) -> int:
-    """Full: preflight -> setup -> agent -> grade -> report (teardown included)."""
+    """Full: preflight -> setup -> agent -> grade -> report -> teardown.
+
+    Teardown ALWAYS runs (even when the gate FAILs) so the agent returns to
+    standby. Exit code = gate verdict: 0 PASS, 2 FAIL, 1 harness error.
+    """
     phases = [
         ("preflight", preflight),
         ("setup", setup),
@@ -551,26 +739,47 @@ def full(args) -> int:
         ("grade", grade),
         ("report", report),
     ]
+    gate_exit = GATE_PASS
+    harness_error = False
+
     for name, fn in phases:
         print(f"\n[full] === {name} ===")
         # Crash-resumable: skip if output JSON exists unless --force
         out = RESULTS_DIR / args.run_id / f"{name}.json"
         if out.exists() and not getattr(args, "force", False):
             print(f"[full] {name}.json exists — skipping (use --force to re-run)")
+            if name == "grade":
+                g = _load_json(out) or {}
+                gate_exit = GATE_PASS if g.get("gate_verdict") == "PASS" else GATE_FAIL
             continue
         rc = fn(args)
-        if rc != 0:
+        if name in ("grade", "report"):
+            if rc == GATE_ERROR:
+                harness_error = True
+            else:
+                gate_exit = rc
+        elif rc != 0:
             print(f"[full] {name} FAILED (exit {rc})")
-            return rc
-    # Teardown included in full
+            harness_error = True
+            break
+
+    # Teardown included in full — ALWAYS runs (even on gate FAIL)
     print(f"\n[full] === teardown ===")
-    rc = teardown(args)
-    return rc
+    td_rc = teardown(args)
+    if td_rc != 0:
+        print(f"[full] teardown FAILED (exit {td_rc}) — agent may still be in benchmark mode")
+        harness_error = True
+
+    if harness_error:
+        print("\n[full] HARNESS ERROR — see logs above")
+        return GATE_ERROR
+    print(f"\n[full] GATE SIGNAL: {'PASS (0)' if gate_exit == GATE_PASS else 'FAIL (2)'}")
+    return gate_exit
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Windowless-room reasoning benchmark orchestrator"
+        description="Windowless-room GATING TEST orchestrator (strict, deterministic, no LLM)"
     )
     subparsers = parser.add_subparsers(dest="phase")
 
@@ -593,13 +802,24 @@ def main() -> int:
     ap = add_common(subparsers.add_parser("agent"))
     ap.add_argument("--timeout-minutes", type=int, default=60)
     add_common(subparsers.add_parser("grade"))
+    gp = subparsers.choices["grade"]
+    for opt, help_ in [
+        ("--answers-override", "read answers from this path instead of the volume"),
+        ("--history-override", "read history.metta from this path"),
+        ("--pre-snapshot-override", "use this file as the pre-benchmark snapshot"),
+        ("--post-snapshot-override", "use this file as the post-benchmark snapshot"),
+    ]:
+        gp.add_argument(opt, default="", help=help_)
     add_common(subparsers.add_parser("report"))
     tp = add_common(subparsers.add_parser("teardown"))
     tp.add_argument("--cleanup", action="store_true")
+    tp.add_argument("--allow-dirty-backup", action="store_true",
+                    help="restore standby prompt even if the backup is contaminated")
     fp = add_common(subparsers.add_parser("full"))
     fp.add_argument("--seed-canonical", action="store_true")
     fp.add_argument("--cleanup", action="store_true")
     fp.add_argument("--timeout-minutes", type=int, default=60)
+    fp.add_argument("--allow-dirty-backup", action="store_true")
 
     args = parser.parse_args()
 

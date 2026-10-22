@@ -1,72 +1,76 @@
-"""Unit tests for history_parse.py — history.metta trace extraction."""
+"""Unit tests for history_parse.py v2 — benchmark window + retrieval extraction."""
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from history_parse import load_history, slice_window, summarize, HistoryEvent
+from history_parse import (
+    window_from_texts,
+    extract_retrieve_args,
+    count_placeholder_retrieves,
+    extract_add_atom_shas,
+    normalize_query,
+)
 
 
-FIXTURE = """(2026-10-21 12:00:00
-  (das-retrieve (metta "(Inheritance (Concept \\"room\\") $X)")))
-(2026-10-21 12:01:00
-  (add-atom &persistent (Inheritance (Concept \\"ceiling\\") (Concept \\"opaque-surface\\")) "https://example.com" "git:abc123"))
-(2026-10-21 12:02:00
-  (archive-source "https://example.com"))
-(2026-10-21 12:03:00
-  (das-retrieve (metta "(Evaluation (Predicate \\"has-part\\") (Concept \\"room\\") $_131542))"))
-(2026-10-21 12:04:00
-  (add-atom &persistent (Inheritance (Concept \\"attic\\") (Concept \\"room\\")) "https://example.com" "git:def456"))
-"""
+PRE = '''(2026-10-21 12:00:00 (das-retrieve (metta "(Inheritance $X $Y)")))
+(2026-10-21 12:01:00 (add-atom &persistent (Inheritance (Concept "room") $X) "https://example.com"))
+'''
+
+WINDOW = '''(2026-10-21 23:36:00 (das-retrieve "(Inheritance $X (Concept \\"ceiling\\"))"))
+(2026-10-21 23:37:00 (das-retrieve (metta "(Inheritance (Concept \\"attic\\") $X)")))
+(2026-10-21 23:38:00 (das-retrieve (metta "(Evaluation (Predicate \\"has-part\\") (Concept \\"room\\") $_131542))"))
+(2026-10-21 23:39:00 (add-atom &persistent (Inheritance (Concept "ceiling") (Concept "opaque-surface")) "https://raw.githubusercontent.com/x/y" "git:8ffa0b35049c1b9545b08700c0594dc5eb68043e")
+'''
 
 
-def test_load_history_extracts_events():
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".metta", delete=False) as f:
-        f.write(FIXTURE)
-        f.flush()
-        events = load_history(f.name)
-    assert len(events) >= 2
-    kinds = set(e.kind for e in events)
-    assert "das_retrieve" in kinds
-    assert "add_atom" in kinds
+def test_window_pre_post_suffix():
+    full = PRE + WINDOW
+    window, mode = window_from_texts(full, PRE, full)
+    assert mode == "pre+post"
+    assert window == full[len(PRE):]
+    assert "ceiling" in window
 
 
-def test_load_history_tolerates_malformed():
-    malformed = "(unbalanced\n(((garbage\n(das-retrieve (metta \"(Inheritance $X $Y)\")))"
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".metta", delete=False) as f:
-        f.write(malformed)
-        f.flush()
-        events = load_history(f.name)
-    assert isinstance(events, list)
+def test_window_pre_only_when_no_post():
+    full = PRE + WINDOW
+    window, mode = window_from_texts(full, PRE, None)
+    assert mode == "pre-only"
+    assert window.startswith("(2026-10-21 23:36")
 
 
-def test_slice_window_filters_by_time():
-    events = [
-        HistoryEvent(kind="das_retrieve", query="q1", timestamp="2026-10-21T12:00:00"),
-        HistoryEvent(kind="das_retrieve", query="q2", timestamp="2026-10-21T13:00:00"),
-    ]
-    windowed = slice_window(events, "2026-10-21T12:00:00", "2026-10-21T12:30:00")
-    assert len(windowed) == 1
+def test_window_full_when_no_pre():
+    _, mode = window_from_texts(PRE + WINDOW, None, None)
+    assert mode == "full"
 
 
-def test_summarize_counts_by_kind():
-    events = [
-        HistoryEvent(kind="das_retrieve", query="q1"),
-        HistoryEvent(kind="add_atom", expression="(Inheritance a b)"),
-        HistoryEvent(kind="archive_source", url="https://example.com"),
-    ]
-    summary = summarize(events)
-    assert summary["counts"]["das_retrieve"] == 1
-    assert summary["counts"]["add_atom"] == 1
-    assert summary["counts"]["archive_source"] == 1
+def test_window_full_when_pre_not_prefix():
+    # history rewritten/truncated: pre no longer a prefix -> reduced-strength
+    _, mode = window_from_texts("garbage", PRE, None)
+    assert mode == "full"
 
 
-def test_variable_ref_shape():
-    """$_NNNN variable refs are resolvable / skipped."""
-    fixture = '(das-retrieve (metta "(Evaluation (Predicate \\"has-part\\") (Concept \\"room\\") $_131542))"))'
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".metta", delete=False) as f:
-        f.write(fixture)
-        f.flush()
-        events = load_history(f.name)
-    assert len(events) >= 0  # should not crash
+def test_extract_retrieve_args_normalizes():
+    args = extract_retrieve_args(WINDOW)
+    assert "(Inheritance $X (Concept \"ceiling\"))" in args
+    assert "(Inheritance (Concept \"attic\") $X)" in args
+
+
+def test_extract_retrieve_args_json_payload():
+    text = '(das-retrieve "{\\"query\\":\\"(Inheritance $X $Y)\\",\\"tokens\\":8,\\"max_answers\\":3}")'
+    args = extract_retrieve_args(text)
+    assert args == ["(Inheritance $X $Y)"]
+
+
+def test_count_placeholder_retrieves():
+    assert count_placeholder_retrieves(WINDOW) == 1
+    assert count_placeholder_retrieves(PRE) == 0
+
+
+def test_extract_add_atom_shas():
+    shas = extract_add_atom_shas(WINDOW)
+    assert shas == ["git:8ffa0b35049c1b9545b08700c0594dc5eb68043e"]
+
+
+def test_normalize_query_passthrough():
+    assert normalize_query("  (Inheritance $X $Y) ") == "(Inheritance $X $Y)"
