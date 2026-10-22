@@ -1,0 +1,80 @@
+{
+  "run_id": "wr-20261021-2355",
+  "setup": {
+    "run_id": "wr-20261021-2355",
+    "archived": {
+      "failure-modes.md": {
+        "commit": "6149e5973acce682eafb5661d12f9adaeb527750",
+        "deduped": true
+      },
+      "lighting.md": {
+        "commit": "64779eb6d20abe89b8831f1fefb2063e2d8b49b2",
+        "deduped": true
+      },
+      "meta-reasoning.md": {
+        "commit": "2e115f9d32ef8b7247456bd5d5bdcdcd2d1b1f2b",
+        "deduped": true
+      },
+      "perspective.md": {
+        "commit": "3443aff999b31e12be7c78bd9a476fce9b707242",
+        "deduped": true
+      },
+      "spatial-knowledge.md": {
+        "commit": "8ffa0b35049c1b9545b08700c0594dc5eb68043e",
+        "deduped": true
+      }
+    },
+    "files": {},
+    "prompt_installed": true,
+    "timestamp": "2026-10-22T01:36:40.874220"
+  },
+  "grade": {
+    "run_id": "wr-20261021-2355",
+    "per_case": {
+      "original": {
+        "verdict": "FAIL",
+        "reason": "no quoted das-retrieve query (trace missing)",
+        "evidence": []
+      },
+      "uncertainty": {
+        "verdict": "FAIL",
+        "reason": "no quoted das-retrieve query (trace missing)",
+        "evidence": []
+      },
+      "unsolvable": {
+        "verdict": "PASS",
+        "reason": "agent reports inability from stored knowledge",
+        "evidence": [
+          "cannot answer from stored knowledge"
+        ]
+      },
+      "true": {
+        "verdict": "FAIL",
+        "reason": "no quoted das-retrieve query (trace missing)",
+        "evidence": []
+      },
+      "false": {
+        "verdict": "FAIL",
+        "reason": "no quoted das-retrieve query (trace missing)",
+        "evidence": []
+      },
+      "easy": {
+        "verdict": "FAIL",
+        "reason": "no quoted das-retrieve query (trace missing)",
+        "evidence": []
+      },
+      "difficult": {
+        "verdict": "FAIL",
+        "reason": "no quoted das-retrieve query (trace missing)",
+        "evidence": []
+      }
+    },
+    "trace_evidence_present": false,
+    "trace_verification": {
+      "trace_ok": false,
+      "provenance_ok": true
+    },
+    "timestamp": "2026-10-22T01:52:08.787966"
+  },
+  "timestamp": "2026-10-22T01:52:08.885210"
+}

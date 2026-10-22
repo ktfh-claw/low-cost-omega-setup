@@ -1,0 +1,15 @@
+{
+  "checks": {
+    "container_omega-das-write-bridge-write-bridge-1": "running",
+    "container_omega-das-integration-read-proxy-1": "running",
+    "container_omega-curiosity": "running",
+    "write_bridge_ip": "172.20.0.5",
+    "read_proxy_ip": "172.20.0.3",
+    "write_bridge_smoke": "ok",
+    "write_bridge_smoke_cleanup": "ok",
+    "read_proxy_query": "ok",
+    "provenance_repo": "ok",
+    "memory_volume": "ok"
+  },
+  "all_ok": true
+}

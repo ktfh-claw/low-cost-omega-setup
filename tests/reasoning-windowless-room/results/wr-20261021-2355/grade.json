@@ -1,0 +1,48 @@
+{
+  "run_id": "wr-20261021-2355",
+  "per_case": {
+    "original": {
+      "verdict": "FAIL",
+      "reason": "no quoted das-retrieve query (trace missing)",
+      "evidence": []
+    },
+    "uncertainty": {
+      "verdict": "FAIL",
+      "reason": "no quoted das-retrieve query (trace missing)",
+      "evidence": []
+    },
+    "unsolvable": {
+      "verdict": "PASS",
+      "reason": "agent reports inability from stored knowledge",
+      "evidence": [
+        "cannot answer from stored knowledge"
+      ]
+    },
+    "true": {
+      "verdict": "FAIL",
+      "reason": "no quoted das-retrieve query (trace missing)",
+      "evidence": []
+    },
+    "false": {
+      "verdict": "FAIL",
+      "reason": "no quoted das-retrieve query (trace missing)",
+      "evidence": []
+    },
+    "easy": {
+      "verdict": "FAIL",
+      "reason": "no quoted das-retrieve query (trace missing)",
+      "evidence": []
+    },
+    "difficult": {
+      "verdict": "FAIL",
+      "reason": "no quoted das-retrieve query (trace missing)",
+      "evidence": []
+    }
+  },
+  "trace_evidence_present": false,
+  "trace_verification": {
+    "trace_ok": false,
+    "provenance_ok": true
+  },
+  "timestamp": "2026-10-22T01:52:08.787966"
+}
