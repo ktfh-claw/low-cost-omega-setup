@@ -1,0 +1,95 @@
+{
+  "run_id": "gate-demo-wr-20261021-2355",
+  "setup": {},
+  "agent": {},
+  "grade": {
+    "run_id": "gate-demo-wr-20261021-2355",
+    "gate_verdict": "FAIL",
+    "cases_passed": 0,
+    "cases_total": 7,
+    "per_case": {
+      "original": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_MISSING",
+          "P_MISSING"
+        ],
+        "detail": {
+          "final_answer": "the ceiling"
+        }
+      },
+      "uncertainty": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_MISSING",
+          "P_MISSING"
+        ],
+        "detail": {
+          "final_answer": "the ceiling"
+        }
+      },
+      "unsolvable": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_MISSING",
+          "Q_ABSENCE_UNPROVEN"
+        ],
+        "detail": {
+          "final_answer": "cannot answer from stored knowledge"
+        }
+      },
+      "true": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_MISSING",
+          "P_MISSING"
+        ],
+        "detail": {
+          "final_answer": "true"
+        }
+      },
+      "false": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_MISSING",
+          "P_MISSING"
+        ],
+        "detail": {
+          "final_answer": "false"
+        }
+      },
+      "easy": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_MISSING",
+          "P_MISSING"
+        ],
+        "detail": {
+          "final_answer": "the ceiling"
+        }
+      },
+      "difficult": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_MISSING",
+          "P_MISSING"
+        ],
+        "detail": {
+          "final_answer": "the sloped ceiling (underside of the roof)"
+        }
+      }
+    },
+    "history_window": {
+      "mode": "pre-only",
+      "retrieve_calls": 0,
+      "retrieve_args": [],
+      "placeholder_calls": 0,
+      "persist_receipts": 0,
+      "archive_receipts": 0,
+      "add_atom_shas": []
+    },
+    "citation_checks": [],
+    "timestamp": "2026-10-22T07:58:35.089484"
+  },
+  "timestamp": "2026-10-22T07:58:35.163729"
+}
