@@ -197,6 +197,33 @@ def preflight(args) -> int:
     return 1
 
 
+def _render_prompts_txt(here: Path) -> str:
+    """Build benchmark prompts.txt content from facts.TEST_CASES.
+
+    Each case block: header, full prompt text, FINAL ANSWER format line.
+    NOTE: case["prompt_file"] is already repo-relative ("prompts/<name>.md")
+    and must NOT be re-prefixed with here/"prompts" — that double-join
+    shipped prompts.txt with EMPTY case bodies in live run
+    wr-20261021-2355 (agent ran the benchmark blind for ~95 min).
+    Fails fast (FileNotFoundError) on a missing/empty prompt file instead
+    of silently rendering a blank benchmark.
+    """
+    sys.path.insert(0, str(here))
+    import facts as facts_mod
+    lines: list[str] = []
+    for case in facts_mod.TEST_CASES:
+        pf = here / case["prompt_file"]
+        text = pf.read_text(encoding="utf-8") if pf.exists() else ""
+        if not text.strip():
+            raise FileNotFoundError(
+                f"prompt file empty or missing: {pf} (case {case['id']})")
+        lines.append(f"=== CASE: {case['id']} ===")
+        lines.append(text)
+        lines.append(f"ANSWER FORMAT: FINAL ANSWER ({case['id']}): <answer>")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def setup(args) -> int:
     """Setup phase: archive sources, write benchmark files, install prompt, restart agent."""
     print("[setup] starting setup...")
@@ -242,15 +269,7 @@ def setup(args) -> int:
     # urls.txt
     urls_content = "\n".join(facts_mod.SOURCE_URLS.values()) + "\n"
     # prompts.txt (7 cases with the answer-format contract)
-    prompts_lines = []
-    for case in facts_mod.TEST_CASES:
-        pf = HERE / "prompts" / case["prompt_file"]
-        text = pf.read_text(encoding="utf-8") if pf.exists() else ""
-        prompts_lines.append(f"=== CASE: {case['id']} ===")
-        prompts_lines.append(text)
-        prompts_lines.append(f"ANSWER FORMAT: FINAL ANSWER ({case['id']}): <answer>")
-        prompts_lines.append("")
-    prompts_content = "\n".join(prompts_lines)
+    prompts_content = _render_prompts_txt(HERE)
 
     # 3. Render agent_prompt_template.md -> prompt.txt
     template = (HERE / "agent_prompt_template.md").read_text(encoding="utf-8")
