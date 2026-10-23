@@ -1,0 +1,399 @@
+"""Unit tests for the v3 gates: E-gate (extraction), attestation lane,
+facts-index parsing, blob reconstruction, and sequential-mode helpers.
+
+Deterministic only — no LLM, no network. Attestation/facade-lane tests
+exercise grading.gate_case logic with synthetic attestation dicts.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from facts import TEST_CASES
+from grading import (
+    CaseBlock,
+    gate_case,
+    normalize_expression,
+    parse_answers_v2,
+    parse_facts_index,
+    parse_facts_line,
+    index_literals,
+    query_literals,
+    gate_summary,
+)
+from provenance_check import reconstruct_citation_blob
+
+
+def _case(case_id):
+    for c in TEST_CASES:
+        if c["id"] == case_id:
+            return c
+    return None
+
+
+def _ok_reissue(query):
+    return {"count": 1}
+
+
+# the fake sha the test blocks cite; resolved-OK citation check for the P-gate
+FAKE_SHA = "git:" + "a" * 40
+FAKE_URL = "https://example.com/spatial-knowledge.md"
+OK_CITATIONS = [(FAKE_SHA, FAKE_URL, [])]
+
+
+FACTS_INDEX = """# Extraction record
+
+(Inheritance (Concept "room") (Concept "enclosed-space"))
+(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))
+(Evaluation (Predicate "visible-when-looking-up") (Concept "observer-inside-room") (Concept "ceiling"))
+"""
+
+INDEX = parse_facts_index(FACTS_INDEX)
+assert len(INDEX) == 3, INDEX
+
+
+def _block(case_id, query, facts, sources=None, count=1):
+    src = sources or ("git:" + "a" * 40 + " https://example.com/spatial-knowledge.md")
+    text = f"""### CASE {case_id}
+
+QUERY: {query}
+DAS_RETRIEVE_OK untrusted=true count={count} truncated=false results=[...]
+FACTS: {facts}
+REASONING: scene -> answer.
+FINAL ANSWER ({case_id}): the ceiling
+SOURCES: {src}
+"""
+    blocks = parse_answers_v2(text)
+    return blocks[case_id]
+
+
+# ---------------------------------------------------------------------------
+# facts-index parsing
+# ---------------------------------------------------------------------------
+
+def test_parse_facts_index_plain_and_bullets():
+    text = '# Extraction record\n(Inheritance (Concept "room") $X)\n- (Evaluation (Predicate "p") $Y $Z)\nnot an expression\n'
+    exprs = parse_facts_index(text)
+    assert exprs == ['(Inheritance (Concept "room") $X)',
+                     '(Evaluation (Predicate "p") $Y $Z)']
+
+
+def test_parse_facts_index_normalizes_whitespace():
+    text = '(Inheritance    (Concept "room")   (Concept "enclosed-space"))\n'
+    exprs = parse_facts_index(text)
+    assert exprs == ['(Inheritance (Concept "room") (Concept "enclosed-space"))']
+
+
+def test_index_and_query_literals():
+    assert index_literals(INDEX) == {
+        "room", "enclosed-space", "has-part", "ceiling",
+        "visible-when-looking-up", "observer-inside-room",
+    }
+    assert query_literals('(Inheritance $X (Concept "ceiling"))') == ["ceiling"]
+
+
+def test_parse_facts_line():
+    facts = parse_facts_line(
+        '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); (Inheritance (Concept "room") (Concept "enclosed-space"))'
+    )
+    assert facts == [
+        '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+        '(Inheritance (Concept "room") (Concept "enclosed-space"))',
+    ]
+    assert parse_facts_line("") == []
+
+
+# ---------------------------------------------------------------------------
+# E-gate
+# ---------------------------------------------------------------------------
+
+def _gate(case_id, block, **kw):
+    kw.setdefault("citation_checks", OK_CITATIONS)
+    return gate_case(
+        _case(case_id), block,
+        history_queries=[normalize_expression(block.queries[0])] if block and block.queries else [],
+        history_placeholder_calls=0,
+        reissue_fn=_ok_reissue,
+        **kw,
+    )
+
+
+def test_e_gate_empty_index_fails_every_case():
+    r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
+                                 '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=[])
+    assert r.verdict == "FAIL"
+    assert "E_NO_EXTRACTION" in r.conditions
+
+
+def test_e_gate_none_index_skips_e_gate():
+    r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
+                                 '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=None)
+    assert r.verdict == "PASS"
+    assert not any(c.startswith("E_") for c in r.conditions)
+
+
+def test_e_gate_good_extraction_passes():
+    r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
+                                 '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "PASS", r.conditions
+
+
+def test_e_gate_missing_facts_line_fails():
+    block = _block("easy", '(Inheritance $X (Concept "ceiling"))', "")
+    r = _gate("easy", block, facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "FAIL"
+    assert "E_NO_FACTS" in r.conditions
+
+
+def test_e_gate_facts_not_in_index_fails():
+    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                             '(Inheritance (Concept "made-up") $X)'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "FAIL"
+    assert "E_FACTS_NOT_IN_INDEX" in r.conditions
+
+
+def test_e_gate_foreign_query_literal_fails():
+    # query reformulates the extracted vocabulary -> mechanical-trap rule
+    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "roome"))',
+                             '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "FAIL"
+    assert "E_LITERAL_NOT_EXTRACTED" in r.conditions
+    assert r.detail.get("foreign_literals") == ["roome"]
+
+
+def test_e_gate_reused_literal_passes():
+    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                             '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "PASS", r.conditions
+
+
+def test_e_gate_no_ingest_first_case_fails_without_receipts():
+    r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
+                                 '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=0, window_archive_receipts=0)
+    assert r.verdict == "FAIL"
+    assert "E_NO_INGEST" in r.conditions
+
+
+def test_e_gate_later_case_ingest_not_required():
+    # "easy" is not the first case: no fresh ingest required
+    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                             '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=0, window_archive_receipts=0)
+    assert r.verdict == "PASS", r.conditions
+
+
+def test_e_gate_unsolvable_exempt_from_facts_line():
+    text = """### CASE unsolvable
+
+QUERY: (Inheritance (Concept "australia") $X)
+DAS_RETRIEVE_OK untrusted=true count=0 truncated=false results=[]
+REASONING: absence proven.
+FINAL ANSWER (unsolvable): cannot answer from stored knowledge
+SOURCES: none (absence case)
+"""
+    blocks = parse_answers_v2(text)
+    r = gate_case(
+        _case("unsolvable"), blocks["unsolvable"],
+        history_queries=['(Inheritance (Concept "australia") $X)'],
+        history_placeholder_calls=0,
+        reissue_fn=lambda q: {"count": 0},
+        citation_checks=[],
+        facts_index=INDEX,
+        window_persist_receipts=1, window_archive_receipts=1,
+    )
+    assert r.verdict == "PASS", r.conditions
+
+
+# ---------------------------------------------------------------------------
+# attestation lane (Q_ATTESTED_VIA_ACCESS_LOG is informational)
+# ---------------------------------------------------------------------------
+
+def test_attested_query_passes_with_informational_condition():
+    # query NOT in the (lossy) history, but attested by both log lanes
+    r = gate_case(
+        _case("original"),
+        _block("original", '(Inheritance $X (Concept "ceiling"))',
+               '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+        history_queries=[],  # history collapsed the tuple
+        history_placeholder_calls=0,
+        reissue_fn=_ok_reissue,
+        citation_checks=OK_CITATIONS,
+        facts_index=INDEX,
+        window_persist_receipts=1, window_archive_receipts=1,
+        attestation={"qe_pattern_match": True, "access_count": 2,
+                     "write_count": 1, "archive_count": 1},
+    )
+    assert r.verdict == "PASS", r.conditions
+    assert "Q_ATTESTED_VIA_ACCESS_LOG" in r.conditions
+
+
+def test_unattested_missing_history_still_fails():
+    r = gate_case(
+        _case("original"),
+        _block("original", '(Inheritance $X (Concept "ceiling"))',
+               '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+        history_queries=[],
+        history_placeholder_calls=0,
+        reissue_fn=_ok_reissue,
+        citation_checks=OK_CITATIONS,
+        facts_index=INDEX,
+        window_persist_receipts=1, window_archive_receipts=1,
+        attestation={"qe_pattern_match": False, "access_count": 0},
+    )
+    assert r.verdict == "FAIL"
+    assert "Q_NOT_IN_HISTORY" in r.conditions
+    assert "Q_ATTESTED_VIA_ACCESS_LOG" not in r.conditions
+
+
+def test_attestation_requires_both_lanes():
+    # access log shows posts but QE never logged the exact pattern -> not attested
+    r = gate_case(
+        _case("original"),
+        _block("original", '(Inheritance $X (Concept "ceiling"))',
+               '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+        history_queries=[],
+        history_placeholder_calls=0,
+        reissue_fn=_ok_reissue,
+        citation_checks=OK_CITATIONS,
+        facts_index=INDEX,
+        window_persist_receipts=1, window_archive_receipts=1,
+        attestation={"qe_pattern_match": False, "access_count": 5},
+    )
+    assert "Q_NOT_IN_HISTORY" in r.conditions
+    assert r.verdict == "FAIL"
+
+
+def test_e_ingest_attested_via_facade_log_is_informational():
+    r = gate_case(
+        _case("original"),
+        _block("original", '(Inheritance $X (Concept "ceiling"))',
+               '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+        history_queries=['(Inheritance $X (Concept "ceiling"))'],
+        history_placeholder_calls=0,
+        reissue_fn=_ok_reissue,
+        citation_checks=OK_CITATIONS,
+        facts_index=INDEX,
+        window_persist_receipts=0, window_archive_receipts=0,  # history collapsed
+        attestation={"qe_pattern_match": True, "access_count": 1,
+                     "write_count": 2, "archive_count": 1},
+    )
+    assert r.verdict == "PASS", r.conditions
+    assert "E_INGEST_ATTESTED_VIA_FACADE_LOG" in r.conditions
+
+
+def test_e_ingest_unattested_still_fails():
+    r = gate_case(
+        _case("original"),
+        _block("original", '(Inheritance $X (Concept "ceiling"))',
+               '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+        history_queries=['(Inheritance $X (Concept "ceiling"))'],
+        history_placeholder_calls=0,
+        reissue_fn=_ok_reissue,
+        citation_checks=OK_CITATIONS,
+        facts_index=INDEX,
+        window_persist_receipts=0, window_archive_receipts=0,
+        attestation={"qe_pattern_match": True, "access_count": 1,
+                     "write_count": 0, "archive_count": 0},
+    )
+    assert "E_NO_INGEST" in r.conditions
+    assert r.verdict == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# blob reconstruction
+# ---------------------------------------------------------------------------
+
+def test_reconstruct_citation_blob_matches_content():
+    import hashlib
+    import json
+    import subprocess
+    import tempfile
+
+    content = "# spatial knowledge\n\nthe ceiling is above.\n"
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "prov")
+        os.makedirs(repo)
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+
+        def git(*a):
+            subprocess.run(["git", "-C", repo, *a], check=True, env=env,
+                           capture_output=True, text=True)
+
+        git("init", "-q")
+        blob_sha = hashlib.sha256(content.encode()).hexdigest()
+        path = f"sources/2026/10/{blob_sha}.md"
+        os.makedirs(os.path.dirname(os.path.join(repo, path)), exist_ok=True)
+        with open(os.path.join(repo, path), "w") as f:
+            f.write(content)
+        entry = {"url": "https://x/y.md", "blob_sha256": blob_sha, "path": path,
+                 "content_type": "text/markdown", "archived_at": "t"}
+        with open(os.path.join(repo, "index.jsonl"), "w") as f:
+            f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        git("add", "-A")
+        git("commit", "-q", "-m", "archive")
+        r = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                           capture_output=True, text=True, env=env)
+        commit = r.stdout.strip()
+
+        blob_path, blob_content = reconstruct_citation_blob(
+            repo, f"git:{commit}", sudo=False)
+        assert blob_path == path
+        assert blob_content == content
+
+
+def test_reconstruct_missing_commit_raises():
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "prov")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q", repo], check=True,
+                      capture_output=True)
+        try:
+            reconstruct_citation_blob(repo, "git:" + "f" * 40, sudo=False)
+            raise AssertionError("expected RuntimeError")
+        except RuntimeError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# sequential-case helpers (facts.py questions)
+# ---------------------------------------------------------------------------
+
+def test_every_case_has_standalone_question():
+    for c in TEST_CASES:
+        q = c.get("question", "")
+        assert isinstance(q, str) and len(q.strip()) > 20, c["id"]
+
+
+def test_case_questions_no_answer_leak_words():
+    # the standalone question itself must not name the expected answer
+    banned = {"ceiling", "sky"}
+    for c in TEST_CASES:
+        if c["id"] == "unsolvable":
+            continue
+        q = c["question"].lower()
+        # note: true/false cases legitimately quote a statement that mentions
+        # ceiling/sky — the statement IS the question there. The difficult
+        # case names the sloped ceiling as SCENE DESCRIPTION ("windowless
+        # attic with a sloped ceiling") — the answer still requires deriving
+        # that the gaze intersects it (plus the lamp/why chain), so it is not
+        # a guidance leak. Only the free-form cases are checked.
+        if c["id"] in ("original", "uncertainty", "easy"):
+            for b in banned:
+                assert b not in q, (c["id"], b)
