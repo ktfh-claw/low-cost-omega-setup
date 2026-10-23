@@ -1,4 +1,4 @@
-# Windowless Room Gating Test (v2)
+# Windowless Room Gating Test (v3)
 
 ## Purpose
 
@@ -30,7 +30,7 @@ Failure reasons are machine-readable condition codes (`A_MISSING`, `Q_NOT_IN_HIS
 - `provenance_check.py` — citation → git repo resolution chain (mirrors the bridge's write-time verify_commit, read-only)
 - `agent_prompt_template.md` — benchmark-mode prompt with the exact answers.md block format the gate parses
 - `run_benchmark.py` — orchestrator CLI (phases: preflight|setup|agent|grade|report|teardown|full)
-- `unit/` — 62 offline unit tests (stdlib shim runner: `python3 unit/run_tests.py`)
+- `unit/` — 85 offline unit tests (stdlib shim runner: `python3 unit/run_tests.py`)
 - `results/<run-id>/` — per-run artifacts (preflight/setup/agent/grade/report/teardown JSON + report.md)
 
 ## Exit Codes (the signal)
