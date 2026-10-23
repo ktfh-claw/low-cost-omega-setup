@@ -1,31 +1,50 @@
 #!/usr/bin/env python3
-"""Orchestrator CLI for the windowless-room GATING TEST (v2).
+"""Orchestrator CLI for the windowless-room GATING TEST (v3).
 
 Runs ON the OVH host (operator: ``ssh -p 9022 ubuntu@100.84.81.96``) from the
-synced repo directory (``tests/reasoning-windowless-room/``). Phases:
-preflight, setup, agent, grade, report, teardown, full.
+synced repo directory (``tests/reasoning-windowless-room/``).
+
+v3 (2026-10-23, Balazs directive): SEQUENTIAL STANDALONE QUESTION MODE —
+one prompt, one question, graded independently, then the next question.
+No example queries or per-case guidance in the agent prompt (the query
+grammar lives in the das-retrieve skill description), an E-gate on clause
+extraction, a DAS-cleanup phase before the run, a harness-side attestation
+lane for the lossy history channel, and blob reconstruction back to the
+source markdown files.
+
+Phases: preflight, cleanup-das, setup-case, agent-case, grade-case,
+full (sequential; --batch keeps the v2 all-at-once flow), grade, report,
+teardown.
 
 This is a strict pass/fail GATE, not a scored benchmark. A case passes only
-if ALL gate conditions hold:
+if ALL gate conditions hold (no relaxation vs v2):
 
   A-gate  the FINAL ANSWER line exists and is substantively correct.
   Q-gate  the case was answered QUERY-FIRST: a real das-retrieve call in the
-          benchmark window (history suffix between the pre/post snapshots),
-          quoted in the answers file with its DAS_RETRIEVE_OK receipt,
-          non-degenerate (has a $variable AND a non-variable literal, no
-          $_ placeholder), and re-issued by the harness via the read-proxy
-          with a matching count (count=0 for the unsolvable case, proven
-          again by re-issue).
+          case window, quoted in answers.md with its DAS_RETRIEVE_OK receipt,
+          non-degenerate, re-issued by the harness with a matching count.
+          If the (known-lossy) history channel collapsed the tuple, the
+          harness-side attestation lane (query-engine pattern log +
+          read-proxy access log) may attest the call instead — recorded as
+          the informational condition Q_ATTESTED_VIA_ACCESS_LOG; the
+          evidence standard is unchanged, the channel is not.
+  E-gate  extraction: the facts index is non-empty, the first case shows a
+          real ingest (ARCHIVE-OK + BRIDGE-PERSIST-OK in its window), the
+          case's FACTS line resolves against the index, and every quoted
+          literal of the query comes from the extracted vocabulary.
   P-gate  every git:<sha> source citation resolves against the provenance
           git repo: commit exists, adds one sources/ blob + index.jsonl,
           index entry at that commit matches the blob path, sha256(blob)
-          matches the index entry, and the entry url matches the citation.
+          matches the index entry, entry url matches the citation; the
+          blob is reconstructed and byte-compared against the repo's
+          background markdown the reasoning was extracted from.
 
 Grading is fully deterministic (regex/keyword parsing, string matching, HTTP
-re-issue, git reads). NO LLM is used anywhere in the harness.
+re-issue, git reads, docker-log reads). NO LLM is used anywhere in the
+harness.
 
-Exit codes (grade/report/full): 0 = gate PASS, 2 = gate FAIL (the expected
-negative signal — the gate did its job), 1 = harness/environment error.
+Exit codes (grade*/report/full): 0 = gate PASS, 2 = gate FAIL (the
+expected negative signal), 1 = harness/environment error.
 
 Restart invariant: the agent is restarted via
 ``sudo systemctl restart omega-curiosity.service`` — NOT ``docker restart`` —
@@ -35,14 +54,16 @@ restart would destroy the container).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -55,9 +76,17 @@ DEFAULT_READ_PROXY = "http://172.20.0.3:8080"
 
 CONTAINER_WRITE_BRIDGE = "omega-das-write-bridge-write-bridge-1"
 CONTAINER_READ_PROXY = "omega-das-integration-read-proxy-1"
+CONTAINER_QUERY_ENGINE = "omega-das-integration-query-engine-1"
+CONTAINER_MONGODB = "omega-das-integration-mongodb-1"
 CONTAINER_AGENT = "omega-curiosity"
 
 GATE_PASS, GATE_FAIL, GATE_ERROR = 0, 2, 1
+
+# benchmark dir inside the memory volume
+BENCH_REL = "benchmark"
+ANSWERS_REL = f"{BENCH_REL}/answers.md"
+FACTS_INDEX_REL = f"{BENCH_REL}/facts-index.md"
+URLS_REL = f"{BENCH_REL}/urls.txt"
 
 
 def _http_post(url: str, body: dict, timeout: float = 30.0) -> dict:
@@ -76,7 +105,6 @@ def _run(cmd: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
 
 
 def _load_json(path: Path) -> dict | None:
-    """Load a JSON file; return None on failure."""
     try:
         with open(path) as f:
             return json.load(f)
@@ -85,7 +113,6 @@ def _load_json(path: Path) -> dict | None:
 
 
 def _write_json(path: Path, data: dict) -> None:
-    """Write a JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
@@ -95,19 +122,28 @@ def _run_id() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _sudo_read(path: Path, timeout: float = 60.0) -> str | None:
     """Read a (possibly root-owned) file via sudo; None on failure."""
     r = _run(["sudo", "cat", str(path)], timeout=timeout)
     return r.stdout if r.returncode == 0 else None
 
 
-def _sudo_exists(path: Path) -> bool:
-    r = _run(["sudo", "test", "-f", str(path)], timeout=10.0)
+def _sudo_write(path: Path, content: str, timeout: float = 60.0) -> bool:
+    """Write/replace a (possibly root-owned) file via sudo tee."""
+    r = subprocess.run(["sudo", "tee", str(path)], input=content,
+                       capture_output=True, text=True, timeout=timeout)
     return r.returncode == 0
 
 
+def _sudo_run(cmd: list[str], timeout: float = 60.0) -> subprocess.CompletedProcess:
+    return _run(["sudo", *cmd], timeout=timeout)
+
+
 def _container_ip(container: str) -> str:
-    """Resolve a container's IP via docker inspect (do NOT hardcode)."""
     try:
         result = _run([
             "docker", "inspect", "--format",
@@ -120,13 +156,107 @@ def _container_ip(container: str) -> str:
 
 
 def _resolve_endpoints(args) -> None:
-    """Resolve write-bridge / read-proxy URLs dynamically (in-place on args)."""
     wb_ip = _container_ip(CONTAINER_WRITE_BRIDGE)
     rp_ip = _container_ip(CONTAINER_READ_PROXY)
     if wb_ip:
         args.write_bridge = f"http://{wb_ip}:8080"
     if rp_ip:
         args.read_proxy = f"http://{rp_ip}:8080"
+
+
+def _facts_mod():
+    sys.path.insert(0, str(HERE))
+    import facts as facts_mod
+    return facts_mod
+
+
+def _case_by_id(case_id: str) -> dict | None:
+    for c in _facts_mod().TEST_CASES:
+        if c["id"] == case_id:
+            return c
+    return None
+
+
+def _bench_paths(args) -> dict[str, Path]:
+    vol = Path(args.memory_volume)
+    return {
+        "vol": vol,
+        "bench": vol / BENCH_REL,
+        "answers": vol / ANSWERS_REL,
+        "facts_index": vol / FACTS_INDEX_REL,
+        "urls": vol / URLS_REL,
+        "prompt": vol / "prompt.txt",
+        "state": vol / "omega_state.md",
+        "history": vol / "history.metta",
+    }
+
+
+# ---------------------------------------------------------------------------
+# docker-log attestation lane (harness-side; the history channel is lossy)
+# ---------------------------------------------------------------------------
+
+def _docker_logs_since(container: str, since_iso: str, until_iso: str) -> str:
+    """Read docker logs in [since, until] (both ISO-8601 UTC)."""
+    r = _run(["docker", "logs", "--since", since_iso, "--until", until_iso,
+              "--timestamps", container], timeout=60.0)
+    return r.stdout + r.stderr
+
+
+def _agent_query_count_in_window(since_iso: str, until_iso: str, agent_ip: str) -> int:
+    """Count real POST /v1/query 200s from the agent IP in the window."""
+    logs = _docker_logs_since(CONTAINER_READ_PROXY, since_iso, until_iso)
+    pat = re.compile(
+        rf"http {re.escape(agent_ip)} \"POST /v1/query HTTP/1\\.1\" 2\\d\\d"
+    )
+    return len(pat.findall(logs))
+
+
+def _qe_pattern_in_window(since_iso: str, until_iso: str, query: str) -> bool:
+    """Did the query-engine log carry this exact pattern in the window?
+
+    QE logs print ``tokens: [(Inheritance (Concept "Fetch.ai") $X)]`` — the
+    pattern with normalized spacing. We compare space-stripped forms to be
+    robust to spacing differences.
+    """
+    logs = _docker_logs_since(CONTAINER_QUERY_ENGINE, since_iso, until_iso)
+    stripped_query = re.sub(r"\s+", "", query)
+    for m in re.finditer(r"tokens: \[([^\]]+)\]", logs):
+        if re.sub(r"\s+", "", m.group(1)) == stripped_query:
+            return True
+    return False
+
+
+def _posts_in_window(container: str, since_iso: str, until_iso: str,
+                     path: str, agent_ip: str) -> int:
+    """Count 2xx POSTs to a facade path from the agent IP in the window."""
+    logs = _docker_logs_since(container, since_iso, until_iso)
+    pat = re.compile(
+        rf"http {re.escape(agent_ip)} \"POST {re.escape(path)} HTTP/1\.1\" 2\d\d"
+    )
+    return len(pat.findall(logs))
+
+
+def collect_attestation(args, case_id: str, since_iso: str, until_iso: str,
+                        query: str) -> dict:
+    """Harness-side attestation for one case window + query.
+
+    Covers the known history-channel observability gap (PeTTa superpose/
+    collapse collapses tool tuples to $_): the read-proxy/QE logs attest
+    das-retrieve calls; the write-bridge facade logs attest real write and
+    archive calls (E_NO_INGEST evidence when history receipts collapsed).
+    """
+    agent_ip = _container_ip(CONTAINER_AGENT)
+    return {
+        "case_id": case_id,
+        "agent_ip": agent_ip,
+        "access_count": _agent_query_count_in_window(since_iso, until_iso, agent_ip),
+        "qe_pattern_match": _qe_pattern_in_window(since_iso, until_iso, query),
+        "write_count": _posts_in_window(CONTAINER_WRITE_BRIDGE, since_iso,
+                                         until_iso, "/v1/write", agent_ip),
+        "archive_count": _posts_in_window(CONTAINER_WRITE_BRIDGE, since_iso,
+                                           until_iso, "/v1/archive", agent_ip),
+        "window": [since_iso, until_iso],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -138,11 +268,10 @@ def preflight(args) -> int:
     _resolve_endpoints(args)
     print(f"[preflight] write_bridge={args.write_bridge} read_proxy={args.read_proxy}")
 
-    print("[preflight] checking environment...")
     checks: dict[str, str] = {}
 
-    # 1. Docker containers running
-    for container in [CONTAINER_WRITE_BRIDGE, CONTAINER_READ_PROXY, CONTAINER_AGENT]:
+    for container in [CONTAINER_WRITE_BRIDGE, CONTAINER_READ_PROXY,
+                      CONTAINER_QUERY_ENGINE, CONTAINER_MONGODB, CONTAINER_AGENT]:
         if args.dry_run:
             checks[f"container_{container}"] = "dry-run"
         else:
@@ -152,17 +281,13 @@ def preflight(args) -> int:
             except Exception as e:
                 checks[f"container_{container}"] = f"error: {e}"
 
-    # 2. Resolve container IPs dynamically
     ips = {}
-    for name, container in [("write_bridge", CONTAINER_WRITE_BRIDGE), ("read_proxy", CONTAINER_READ_PROXY)]:
-        if args.dry_run:
-            ips[name] = "dry-run"
-        else:
-            ips[name] = _container_ip(container)
-    checks["write_bridge_ip"] = ips.get("write_bridge", "")
-    checks["read_proxy_ip"] = ips.get("read_proxy", "")
+    for name, container in [("write_bridge", CONTAINER_WRITE_BRIDGE),
+                            ("read_proxy", CONTAINER_READ_PROXY),
+                            ("agent", CONTAINER_AGENT)]:
+        ips[name] = "dry-run" if args.dry_run else _container_ip(container)
+        checks[f"{name}_ip"] = ips.get(name, "")
 
-    # 3. Write-bridge smoke test (POST /v1/write with verify:true)
     if not args.dry_run:
         try:
             smoke = f'(BenchmarkPreflight (Concept "{args.run_id}"))'
@@ -170,8 +295,6 @@ def preflight(args) -> int:
                 "metta": smoke, "verify": True,
             }, timeout=30.0)
             checks["write_bridge_smoke"] = "ok"
-            # Smoke fact is benchmark residue: remove it (links-only) so the
-            # KB stays clean before the run starts.
             try:
                 _run(["docker", "exec", "-w", "/app", CONTAINER_WRITE_BRIDGE,
                       "python", "cleanup.py", "--metta", smoke], timeout=180.0)
@@ -180,11 +303,7 @@ def preflight(args) -> int:
                 checks["write_bridge_smoke_cleanup"] = f"warn: {e}"
         except Exception as e:
             checks["write_bridge_smoke"] = f"error: {e}"
-    else:
-        checks["write_bridge_smoke"] = "dry-run (planned: POST /v1/write smoke fact)"
 
-    # 4. Read-proxy metta query test
-    if not args.dry_run:
         try:
             resp = _http_post(args.read_proxy + "/v1/query", {
                 "metta": "(Inheritance $X $Y)", "max_answers": 10,
@@ -194,37 +313,66 @@ def preflight(args) -> int:
             checks["read_proxy_query"] = "ok"
         except Exception as e:
             checks["read_proxy_query"] = f"error: {e}"
-    else:
-        checks["read_proxy_query"] = "dry-run (planned: POST /v1/query variable-form test)"
 
-    # 5. Provenance repo exists and is a git repo
-    if args.dry_run:
-        checks["provenance_repo"] = "dry-run"
-    else:
         try:
-            # Repo is owned by container uid 65532 with restrictive perms —
-            # git as ubuntu cannot even enter the dir; check via sudo root.
-            result = _run(["sudo", "git", "-c", f"safe.directory={args.provenance_repo}",
-                           "-C", args.provenance_repo, "rev-parse", "--git-dir"])
+            result = _sudo_run(["git", "-c", f"safe.directory={args.provenance_repo}",
+                                "-C", args.provenance_repo, "rev-parse", "--git-dir"])
             checks["provenance_repo"] = "ok" if result.returncode == 0 else "missing"
         except Exception as e:
             checks["provenance_repo"] = f"error: {e}"
 
-    # 6. Agent memory volume exists (root-owned: check via sudo)
-    if args.dry_run:
-        checks["memory_volume"] = "dry-run"
-    else:
         try:
-            r = _run(["sudo", "test", "-d", args.memory_volume], timeout=10.0)
+            r = _sudo_run(["test", "-d", args.memory_volume])
             checks["memory_volume"] = "ok" if r.returncode == 0 else "missing"
         except Exception as e:
             checks["memory_volume"] = f"error: {e}"
 
-    # Report
+        # v3: the per-run prompt backup must not pre-exist (fresh run-id rule)
+        bp = Path(args.memory_volume) / f"prompt.txt.bak-pre-benchmark-{args.run_id}"
+        checks["prompt_backup_fresh"] = "ok" if not _sudo_run(["test", "-f", str(bp)]).returncode == 0 else "EXISTS"
+
+        # v3: skill-description upgrade deployed? (das-retrieve description
+        # in the mounted plugin must carry the WHY/WHEN/HOW contract)
+        try:
+            plugin_path = "/home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-read/das-read.metta"
+            r = _run(["grep", "-c", "WHY: DAS is your persistent knowledge store", plugin_path])
+            checks["skill_description_upgraded"] = "ok" if r.returncode == 0 and r.stdout.strip() != "0" else "MISSING"
+        except Exception as e:
+            checks["skill_description_upgraded"] = f"error: {e}"
+
+        # v3: Omega's native embedding memory (remember/query skills) needs
+        # the chroma_db target dir to exist in the volume; the image's
+        # /PeTTa/chroma_db symlink dangles otherwise and EVERY boot logs
+        # Knowledge init failed (live evidence wr3-20261023).
+        try:
+            chroma_dir = Path(args.memory_volume) / "chroma_db"
+            r = _sudo_run(["test", "-d", str(chroma_dir)])
+            checks["chroma_memory_dir"] = "ok" if r.returncode == 0 else "missing (create: sudo mkdir -p <vol>/chroma_db && sudo chown 65534:65534 <vol>/chroma_db)"
+        except Exception as e:
+            checks["chroma_memory_dir"] = f"error: {e}"
+
+        # v3: canary fact must resolve BEFORE the run (campaign atoms intact)
+        try:
+            resp = _http_post(args.read_proxy + "/v1/query", {
+                "metta": '(Inheritance (Concept "Fetch.ai") $X)', "max_answers": 10,
+            }, timeout=30.0)
+            checks["canary_fetch_ai"] = f"count={resp.get('count', '?')}"
+        except Exception as e:
+            checks["canary_fetch_ai"] = f"error: {e}"
+    else:
+        checks["write_bridge_smoke"] = "dry-run"
+        checks["read_proxy_query"] = "dry-run"
+        checks["provenance_repo"] = "dry-run"
+        checks["memory_volume"] = "dry-run"
+        checks["prompt_backup_fresh"] = "dry-run"
+        checks["skill_description_upgraded"] = "dry-run"
+        checks["canary_fetch_ai"] = "dry-run"
+
     ok_values = {"ok", "running", "dry-run"}
     all_ok = all(
         v in ok_values or v.startswith("dry-run")
         or v.startswith("172.") or v.startswith("10.") or v.startswith("192.168.")
+        or (v.startswith("count=") and v != "count=0")
         for v in checks.values()
     )
 
@@ -239,22 +387,198 @@ def preflight(args) -> int:
 
 
 # ---------------------------------------------------------------------------
-# setup
+# cleanup-das (v3): remove previous-run predicates from DAS, keep the rest
+# ---------------------------------------------------------------------------
+
+def _mongo_eval(js: str, timeout: float = 60.0) -> str:
+    """Run a mongosh eval in the mongo container (root creds via container env)."""
+    r = _run(["docker", "exec", CONTAINER_MONGODB, "sh", "-c",
+              'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" '
+              '--authenticationDatabase admin --quiet das --eval ' + shlex.quote(js)],
+             timeout=timeout)
+    return r.stdout
+
+
+def _discover_benchmark_expressions() -> list[str]:
+    """Discover benchmark-residue fact expressions in the DAS mongo store.
+
+    Two nets (union), both read-only:
+      N1: links whose custom_attributes.provenance_url contains the
+          benchmark source URL base — every benchmark add-atom write is
+          provenance-decorated by the facade (provenance v2.1), so this
+          catches all agent-written benchmark facts, old and new.
+      N2: links whose custom_attributes.metta_expression contains a
+          high-confidence benchmark-ONLY literal (windowless-room,
+          sloped-ceiling, observer-inside-room, ...) — catches undecorated
+          residue (e.g. smoke facts or writes that skipped provenance).
+          Literals that campaign/canary atoms might also use (generic words
+          like room, ceiling, answer, requires) are deliberately NOT in
+          this net.
+    Campaign atoms, canaries, and x402/fetch facts match NEITHER net.
+    """
+    facts = _facts_mod()
+    url_base = facts.SOURCE_URL_BASE
+
+    js_n1 = (
+        'const out = db.links.find({"custom_attributes.provenance_url": '
+        '{$regex: ' + json.dumps(url_base) + '}}).toArray();'
+        'print(JSON.stringify(out.map(d => d.custom_attributes.metta_expression)));'
+    )
+    n1_raw = _mongo_eval(js_n1)
+    try:
+        n1 = json.loads(n1_raw.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        n1 = []
+
+    benchmark_only_literals = [
+        "windowless-room", "sloped-ceiling", "observer-inside-room",
+        "observer-inside-windowless-room", "observer-outdoors",
+        "visible-when-looking-up", "blocks-view-of", "has-no-openings",
+        "look-up-to-sky-association", "pattern-matching-failure",
+        "phrase-association-without-scene-simulation", "scene-simulation",
+        "nearest-surface-in-gaze", "room-interior", "room-surfaces",
+        "exterior-light", "BenchmarkPreflight",
+        # Expanded set (2026-10-23, live-validated against the campaign corpus:
+        # a legacy undecorated fact — (Inheritance (Concept "sky") (Concept
+        # "look-up-default")) — escaped the narrow net and was only caught by
+        # a manual broad sweep. The expansion below matched ZERO campaign
+        # atoms on the live DB. Generic meta-reasoning spellings
+        # (reasoning-trace, reasoning-step, state-change) are deliberately
+        # EXCLUDED: plausible AI-research vocabulary; undecorated future
+        # writes are impossible anyway (the facade always decorates).
+        "look-up-default", "room-part", "enclosed-space", "opaque-surface",
+        "artificial-light-source", "dark-room", "light-source-type",
+        "illuminates", "makes-visible", "propagates-through",
+        "scene-construction", "visibility-query", "looking-up-inside",
+    ]
+    alt = "|".join(re.escape(l) for l in benchmark_only_literals)
+    js_n2 = (
+        'const out = db.links.find({"custom_attributes.metta_expression": '
+        '{$regex: ' + json.dumps(alt) + '}}).toArray();'
+        'print(JSON.stringify(out.map(d => d.custom_attributes.metta_expression)));'
+    )
+    n2_raw = _mongo_eval(js_n2)
+    try:
+        n2 = json.loads(n2_raw.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        n2 = []
+
+    exprs = []
+    seen = set()
+    for e in list(n1) + list(n2):
+        e = (e or "").strip()
+        if e and e not in seen:
+            seen.add(e)
+            exprs.append(e)
+    return exprs
+
+
+def _read_proxy_origin() -> str:
+    """Resolve the read-proxy origin from the live container IP."""
+    ip = _container_ip(CONTAINER_READ_PROXY)
+    return f"http://{ip}:8080" if ip else DEFAULT_READ_PROXY
+
+
+def _canary_counts() -> dict:
+    """Resolvable campaign facts that must be untouched by cleanup.
+
+    (Inheritance (Concept "Fetch.ai") $X) is a live campaign atom, queried
+    by the curiosity loop today — NOT benchmark vocabulary. Benchmark
+    vocabulary like has-part must NOT be used as a canary (the cleanup is
+    supposed to change those counts).
+    """
+    out = {}
+    try:
+        resp = _http_post(_read_proxy_origin() + "/v1/query",
+                          {"metta": '(Inheritance (Concept "Fetch.ai") $X)',
+                           "max_answers": 10}, timeout=30.0)
+        out["fetch_ai_inheritance"] = resp.get("count", -1)
+    except Exception as e:
+        out["fetch_ai_inheritance"] = f"error: {e}"
+    return out
+
+
+def cleanup_das(args) -> int:
+    """cleanup-das phase: delete previous-run benchmark predicates from DAS.
+
+    Uses the bridge's cleanup.py (links-only deletion, alternate-pattern
+    absence oracle, bounded standby — validated tooling) per discovered
+    expression. Canaries + campaign atoms must be untouched (verified
+    before/after). The delete apply is EVENTUAL; the oracle handles it.
+    """
+    _resolve_endpoints(args)
+    print("[cleanup-das] discovering benchmark-residue expressions in mongo...")
+
+    if args.dry_run:
+        print("[cleanup-das] [dry-run] would: discover expressions, cleanup.py each "
+              "(links-only), verify absence, verify canaries untouched")
+        return 0
+
+    data: dict = {"started": _now_iso()}
+
+    data["mongo_counts_before"] = _mongo_eval(
+        'print(JSON.stringify({nodes: db.nodes.countDocuments({}), links: db.links.countDocuments({})}));'
+    ).strip()
+    data["canaries_before"] = _canary_counts()
+
+    exprs = _discover_benchmark_expressions()
+    data["discovered_expressions"] = exprs
+    data["discovered_count"] = len(exprs)
+    print(f"[cleanup-das] discovered {len(exprs)} expressions")
+
+    results = []
+    for i, expr in enumerate(exprs):
+        print(f"[cleanup-das] ({i + 1}/{len(exprs)}) cleanup: {expr}")
+        r = _run(["docker", "exec", "-w", "/app", CONTAINER_WRITE_BRIDGE,
+                  "python", "cleanup.py", "--metta", expr], timeout=600.0)
+        entry = {"metta": expr, "returncode": r.returncode,
+                 "stdout": r.stdout.strip()[-2000:], "stderr": r.stderr.strip()[-2000:]}
+        results.append(entry)
+        if r.returncode != 0:
+            print(f"[cleanup-das]   FAILED rc={r.returncode}: {r.stderr.strip()[:200]}")
+
+    data["cleanup_results"] = results
+
+    data["mongo_counts_after"] = _mongo_eval(
+        'print(JSON.stringify({nodes: db.nodes.countDocuments({}), links: db.links.countDocuments({})}));'
+    ).strip()
+    data["canaries_after"] = _canary_counts()
+
+    # residue check: the discovery nets must come back empty now
+    remaining = _discover_benchmark_expressions()
+    data["remaining_expressions"] = remaining
+    data["remaining_count"] = len(remaining)
+
+    data["canaries_intact"] = (
+        data["canaries_before"] == data["canaries_after"]
+        and all(isinstance(v, int) and v >= 1 for v in data["canaries_after"].values())
+    )
+    data["finished"] = _now_iso()
+
+    _write_json(RESULTS_DIR / args.run_id / "cleanup-das.json", data)
+    print(f"[cleanup-das] done: {len(exprs)} cleaned, {len(remaining)} remaining, "
+          f"canaries_intact={data['canaries_intact']}")
+
+    if remaining:
+        print("[cleanup-das] WARNING: residue still discoverable — inspect cleanup-das.json")
+        return 1
+    if not data["canaries_intact"]:
+        print("[cleanup-das] WARNING: canary counts changed — campaign atoms may be damaged")
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# setup (batch, v2 semantics) — kept for --batch mode
 # ---------------------------------------------------------------------------
 
 def _render_prompts_txt(here: Path) -> str:
-    """Build benchmark prompts.txt content from facts.TEST_CASES.
+    """Build benchmark prompts.txt content from facts.TEST_CASES (batch mode).
 
-    Each case block: header, full prompt text, FINAL ANSWER format line.
-    NOTE: case["prompt_file"] is already repo-relative ("prompts/<name>.md")
-    and must NOT be re-prefixed with here/"prompts" — that double-join
-    shipped prompts.txt with EMPTY case bodies in live run
-    wr-20261021-2355 (agent ran the benchmark blind for ~95 min).
-    Fails fast (FileNotFoundError) on a missing/empty prompt file instead
-    of silently rendering a blank benchmark.
+    NOTE: case["prompt_file"] is repo-relative ("prompts/<name>.md") and must
+    NOT be re-prefixed — the double-join shipped empty bodies live once.
     """
-    sys.path.insert(0, str(here))
-    import facts as facts_mod
+    facts_mod = _facts_mod()
     lines: list[str] = []
     for case in facts_mod.TEST_CASES:
         pf = here / case["prompt_file"]
@@ -269,203 +593,479 @@ def _render_prompts_txt(here: Path) -> str:
     return "\n".join(lines)
 
 
-def setup(args) -> int:
-    """Setup phase: archive sources, write benchmark files, install prompt, restart agent."""
-    print("[setup] starting setup...")
-    sys.path.insert(0, str(HERE))
-    import facts as facts_mod
-
-    setup_data: dict = {"run_id": args.run_id, "archived": {}, "files": {}}
-
-    # 1. Archive the background sources
-    bg_dir = HERE / "background"
-    for fname in sorted(bg_dir.glob("*.md")):
-        url = facts_mod.SOURCE_URLS.get(fname.name)
-        if not url:
-            continue
-        if args.dry_run:
-            print(f"[setup] [dry-run] would archive {fname.name} -> {url}")
-            setup_data["archived"][fname.name] = "dry-run"
-        else:
-            try:
-                content = fname.read_text(encoding="utf-8")
-                resp = _http_post(args.write_bridge + "/v1/archive", {
-                    "url": url, "content": content, "content_type": "text/markdown",
-                }, timeout=60.0)
-                setup_data["archived"][fname.name] = {
-                    "commit": resp.get("commit", ""),
-                    "deduped": resp.get("deduped", False),
-                }
-                print(f"[setup] archived {fname.name} -> {resp.get('commit', '???')}")
-            except Exception as e:
-                print(f"[setup] ERROR archiving {fname.name}: {e}")
-                setup_data["archived"][fname.name] = f"error: {e}"
-
-    # 2. Write benchmark files to memory volume (needs sudo)
-    vol = Path(args.memory_volume)
-    bench = vol / "benchmark"
-    bg_files = sorted((HERE / "background").glob("*.md"))
-    actions = [
-        ["sudo", "mkdir", "-p", str(bench / "background")],
-    ]
-    for f in bg_files:
-        actions.append(["sudo", "cp", str(f), str(bench / "background" / f.name)])
-    # urls.txt
-    urls_content = "\n".join(facts_mod.SOURCE_URLS.values()) + "\n"
-    # prompts.txt (7 cases with the answer-format contract)
-    prompts_content = _render_prompts_txt(HERE)
-
-    # 3. Render agent_prompt_template.md -> prompt.txt
+def _render_case_prompt(args, case: dict) -> str:
+    """Render agent_prompt_template.md for ONE standalone case question."""
+    paths = _bench_paths(args)
     template = (HERE / "agent_prompt_template.md").read_text(encoding="utf-8")
-    rendered = (template
-                .replace("{{RUN_ID}}", args.run_id)
-                .replace("{{URL_LIST_PATH}}", "benchmark/urls.txt")
-                .replace("{{PROMPTS_PATH}}", "benchmark/prompts.txt")
-                .replace("{{ANSWERS_PATH}}", "benchmark/answers.md"))
+    return (template
+            .replace("{{RUN_ID}}", args.run_id)
+            .replace("{{CASE_ID}}", case["id"])
+            .replace("{{QUESTION}}", case["question"])
+            .replace("{{URL_LIST_PATH}}", URLS_REL)
+            .replace("{{ANSWERS_PATH}}", ANSWERS_REL)
+            .replace("{{FACTS_INDEX_PATH}}", FACTS_INDEX_REL))
+
+
+def _agent_restart() -> bool:
+    r = _sudo_run(["systemctl", "restart", "omega-curiosity.service"], timeout=180.0)
+    return r.returncode == 0
+
+
+def _prepare_benchmark_dir(args) -> None:
+    """Idempotent benchmark dir: background files, urls.txt, answers.md,
+    facts-index.md (fresh at run start)."""
+    paths = _bench_paths(args)
+    facts_mod = _facts_mod()
+    _sudo_run(["mkdir", "-p", str(paths["bench"] / "background")])
+    for f in sorted((HERE / "background").glob("*.md")):
+        _sudo_run(["cp", str(f), str(paths["bench"] / "background" / f.name)])
+    _sudo_write(paths["urls"], "\n".join(facts_mod.SOURCE_URLS.values()) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# sequential per-case phases (v3 default)
+# ---------------------------------------------------------------------------
+
+def setup_case(args) -> int:
+    """Install ONE case's standalone question prompt; restart the agent."""
+    case = _case_by_id(args.case)
+    if case is None:
+        print(f"[setup-case] ERROR: unknown case id {args.case}")
+        return GATE_ERROR
+    paths = _bench_paths(args)
+    facts_mod = _facts_mod()
 
     if args.dry_run:
-        print(f"[setup] [dry-run] planned actions:")
-        for a in actions:
-            print(f"  - {a}")
-        print(f"  - write {bench}/urls.txt")
-        print(f"  - write {bench}/prompts.txt")
-        print(f"  - install prompt.txt (backup existing)")
-        print(f"  - write benchmark omega_state.md (backup existing)")
-        print(f"  - copy history.metta -> history.pre-benchmark-{args.run_id}.metta")
-        print(f"  - chown -R 65534:65534 benchmark/ (agent runs as nobody:nogroup)")
-        print(f"  - sudo systemctl restart omega-curiosity.service")
-    else:
-        try:
-            for a in actions:
-                _run(a, timeout=60.0)
-            # urls.txt + prompts.txt via sudo tee (single live subprocess each)
-            for rel, content in [("urls.txt", urls_content), ("prompts.txt", prompts_content)]:
-                subprocess.run(
-                    ["sudo", "tee", str(bench / rel)],
-                    input=content, capture_output=True, text=True, timeout=30.0,
-                )
-            # Install prompt.txt (backup existing)
-            _run(["sudo", "cp", str(vol / "prompt.txt"),
-                  str(vol / f"prompt.txt.bak-pre-benchmark-{args.run_id}")], timeout=30.0)
-            subprocess.run(
-                ["sudo", "tee", str(vol / "prompt.txt")],
-                input=rendered, capture_output=True, text=True, timeout=30.0,
-            )
-            # Backup + write omega_state.md
-            _run(["sudo", "cp", str(vol / "omega_state.md"),
-                  str(vol / f"omega_state.md.bak-pre-benchmark-{args.run_id}")], timeout=30.0)
-            state = f"BENCHMARK MODE ACTIVE — run {args.run_id}\n"
-            subprocess.run(
-                ["sudo", "tee", str(vol / "omega_state.md")],
-                input=state, capture_output=True, text=True, timeout=30.0,
-            )
-            # 4. Copy history.metta (pre-run snapshot: defines the window start)
-            _run(["sudo", "cp", str(vol / "history.metta"),
-                  str(vol / f"history.pre-benchmark-{args.run_id}.metta")], timeout=60.0)
-            # 4b. The agent container runs as nobody:nogroup (uid/gid 65534);
-            # without this it cannot create answers.md inside the root-owned
-            # benchmark dir (EACCES observed live on 2026-10-21).
-            _run(["sudo", "chown", "-R", "65534:65534", str(bench)], timeout=30.0)
-            # 5. Restart agent (systemd, NOT docker — start.sh trap rm -f's the container)
-            _run(["sudo", "systemctl", "restart", "omega-curiosity.service"], timeout=120.0)
-            print("[setup] agent restarted via systemctl")
-        except Exception as e:
-            print(f"[setup] ERROR: {e}")
-            _write_json(RESULTS_DIR / args.run_id / "setup.json", {**setup_data, "error": str(e)})
-            return 1
+        print(f"[setup-case] [dry-run] case {args.case}: prepare benchmark dir, "
+              "backup prompt/state (first case), snapshot history, install "
+              "rendered case prompt, restart agent")
+        return 0
 
-    if args.seed_canonical:
-        print("[setup] --seed-canonical: seeding canonical facts (grading-oracle mode; NOT the default test mode)")
-        for fact in facts_mod.CANONICAL_FACTS:
-            try:
-                _http_post(args.write_bridge + "/v1/write", {
-                    "metta": fact["metta"], "verify": True,
-                    "tv": {"strength": fact["stv"][0], "confidence": fact["stv"][1]},
-                }, timeout=30.0)
-            except Exception as e:
-                print(f"[setup] seed ERROR {fact['id']}: {e}")
-                return 1
-        print(f"[setup] seeded {len(facts_mod.CANONICAL_FACTS)} canonical facts")
+    first = args.case == facts_mod.TEST_CASES[0]["id"]
+    _prepare_benchmark_dir(args)
 
-    setup_data["prompt_installed"] = True
-    setup_data["timestamp"] = datetime.now().isoformat()
-    _write_json(RESULTS_DIR / args.run_id / "setup.json", setup_data)
-    print(f"[setup] setup.json written to results/{args.run_id}/setup.json")
+    if first:
+        # fresh answers.md + facts-index.md at run start
+        _sudo_write(paths["answers"],
+                    f"# Benchmark answers — {args.run_id} (sequential standalone questions)\n")
+        _sudo_write(paths["facts_index"],
+                    f"# Extraction record — {args.run_id}\n"
+                    "# One persisted predicate expression per line (append after each add-atom).\n")
+        # one-time run backups
+        _sudo_run(["cp", str(paths["prompt"]),
+                   str(paths["vol"] / f"prompt.txt.bak-pre-benchmark-{args.run_id}")])
+        _sudo_run(["cp", str(paths["state"]),
+                   str(paths["vol"] / f"omega_state.md.bak-pre-benchmark-{args.run_id}")])
+        # benchmark dir must be writable by the agent (nobody:nogroup)
+        _sudo_run(["chown", "-R", "65534:65534", str(paths["bench"])])
+
+    # per-case history snapshot (defines this case's window start)
+    snap = paths["vol"] / f"history.pre-case-{args.run_id}-{args.case}.metta"
+    _sudo_run(["cp", str(paths["history"]), str(snap)])
+
+    rendered = _render_case_prompt(args, case)
+    if not _sudo_write(paths["prompt"], rendered):
+        print(f"[setup-case] ERROR: could not write prompt for case {args.case}")
+        return GATE_ERROR
+    if not _sudo_write(paths["state"],
+                       f"BENCHMARK MODE ACTIVE — run {args.run_id}, case {args.case}\n"):
+        print(f"[setup-case] ERROR: could not write omega_state.md")
+        return GATE_ERROR
+
+    if not _agent_restart():
+        print(f"[setup-case] ERROR: agent restart failed (case {args.case})")
+        return GATE_ERROR
+
+    _write_json(RESULTS_DIR / args.run_id / f"setup-case-{args.case}.json", {
+        "case_id": args.case, "prompt_installed": True,
+        "window_start_snapshot": str(snap), "restarted_at": _now_iso(),
+    })
+    print(f"[setup-case] case {args.case} prompt installed; agent restarted")
     return 0
 
 
-# ---------------------------------------------------------------------------
-# agent
-# ---------------------------------------------------------------------------
-
-def agent(args) -> int:
-    """Agent phase: poll for completion (answers file with all 7 FINAL ANSWER lines)."""
-    sys.path.insert(0, str(HERE))
-    import facts as facts_mod
-    case_ids = [c["id"] for c in facts_mod.TEST_CASES]
-
-    answers_path = Path(args.memory_volume) / "benchmark" / "answers.md"
+def agent_case(args) -> int:
+    """Wait for THIS case's FINAL ANSWER line in answers.md."""
+    case = _case_by_id(args.case)
+    if case is None:
+        return GATE_ERROR
+    paths = _bench_paths(args)
+    marker = f"FINAL ANSWER ({args.case}):"
     timeout_s = args.timeout_minutes * 60
     start = time.time()
-    print(f"[agent] polling for {answers_path} (timeout {args.timeout_minutes}m)...")
+    print(f"[agent-case] waiting for '{marker}' (timeout {args.timeout_minutes}m)")
 
     if args.dry_run:
-        print(f"[agent] [dry-run] would poll for {answers_path} with all 7 FINAL ANSWER lines")
+        print(f"[agent-case] [dry-run] would poll answers.md for the marker")
         return 0
 
-    def _snapshot_post(vol: Path) -> bool:
-        snap = _run(["sudo", "cp", str(vol / "history.metta"),
-                     str(vol / f"history.post-benchmark-{args.run_id}.metta")], timeout=60.0)
-        return snap.returncode == 0
-
     while time.time() - start < timeout_s:
-        content = _sudo_read(answers_path)
-        if content is not None:
-            found = sum(1 for cid in case_ids if f"FINAL ANSWER ({cid}):" in content)
-            elapsed = int((time.time() - start) / 60)
-            print(f"[agent] {found}/{len(case_ids)} answers present ({elapsed}m elapsed)")
-            if found == len(case_ids):
-                print("[agent] COMPLETE — all answers present")
-                ok = _snapshot_post(Path(args.memory_volume))
-                _write_json(RESULTS_DIR / args.run_id / "agent.json", {
-                    "status": "complete", "answers_found": found,
-                    "post_snapshot": ok,
-                })
-                return 0
-        time.sleep(60)
+        content = _sudo_read(paths["answers"])
+        if content is not None and marker in content:
+            # post snapshot bounds this case's window
+            post = paths["vol"] / f"history.post-case-{args.run_id}-{args.case}.metta"
+            _sudo_run(["cp", str(paths["history"]), str(post)])
+            elapsed = int(time.time() - start)
+            print(f"[agent-case] case {args.case} answered after {elapsed}s")
+            _write_json(RESULTS_DIR / args.run_id / f"agent-case-{args.case}.json", {
+                "case_id": args.case, "status": "complete", "elapsed_s": elapsed,
+                "post_snapshot": str(post),
+            })
+            return 0
+        time.sleep(30)
 
-    print("[agent] TIMEOUT — recording partial state")
-    ok = _snapshot_post(Path(args.memory_volume))
-    _write_json(RESULTS_DIR / args.run_id / "agent.json", {
-        "status": "timeout", "post_snapshot": ok,
+    post = paths["vol"] / f"history.post-case-{args.run_id}-{args.case}.metta"
+    _sudo_run(["cp", str(paths["history"]), str(post)])
+    print(f"[agent-case] TIMEOUT on case {args.case}")
+    _write_json(RESULTS_DIR / args.run_id / f"agent-case-{args.case}.json", {
+        "case_id": args.case, "status": "timeout", "post_snapshot": str(post),
     })
     return 1
 
 
+def _read_facts_index(args) -> str:
+    paths = _bench_paths(args)
+    override = getattr(args, "facts_index_override", "") or ""
+    if override:
+        try:
+            return Path(override).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return _sudo_read(Path(override)) or ""
+    return _sudo_read(paths["facts_index"]) or ""
+
+
+def grade_case(args) -> int:
+    """Grade ONE case independently (deterministic A/Q/E/P gate)."""
+    sys.path.insert(0, str(HERE))
+    import grading as grading_mod
+    import history_parse
+    import provenance_check
+
+    case = _case_by_id(args.case)
+    if case is None:
+        return GATE_ERROR
+    _resolve_endpoints(args)
+    paths = _bench_paths(args)
+    rd = RESULTS_DIR / args.run_id
+
+    if args.dry_run:
+        print(f"[grade-case] [dry-run] would gate case {args.case} (A/Q/E/P)")
+        return 0
+
+    answers = _sudo_read(paths["answers"]) or ""
+    history = _sudo_read(paths["history"]) or ""
+    pre_snap = _sudo_read(paths["vol"] / f"history.pre-case-{args.run_id}-{args.case}.metta")
+    post_snap = _sudo_read(paths["vol"] / f"history.post-case-{args.run_id}-{args.case}.metta")
+    if pre_snap is None:
+        print(f"[grade-case] ERROR: no pre-case snapshot for {args.case}")
+        _write_json(rd / f"grade-case-{args.case}.json", {"error": "no pre-case snapshot"})
+        return GATE_ERROR
+
+    window_text, window_mode = history_parse.window_from_texts(history, pre_snap, post_snap)
+    history_queries = history_parse.extract_retrieve_args(window_text)
+    placeholder_calls = history_parse.count_placeholder_retrieves(window_text)
+    persist_receipts = history_parse.extract_persist_receipts(window_text)
+    archive_receipts = history_parse.extract_archive_receipts(window_text)
+    add_atom_shas = history_parse.extract_add_atom_shas(window_text)
+
+    facts_index_text = _read_facts_index(args)
+    facts_index = grading_mod.parse_facts_index(facts_index_text)
+
+    # parse this case's block from answers.md
+    blocks = grading_mod.parse_answers_v2(answers)
+    block = blocks.get(args.case)
+
+    # citations: from the case block + any shas the agent persisted in-window
+    citation_inputs: list[provenance_check.Citation] = []
+    seen: set[tuple[str, str]] = set()
+    if block is not None:
+        for sha, url in grading_mod.parse_citations(block.sources_raw):
+            if (sha, url) not in seen:
+                seen.add((sha, url))
+                citation_inputs.append(provenance_check.Citation(sha=sha, url=url))
+    for sha in add_atom_shas:
+        if (sha, "") not in seen:
+            seen.add((sha, ""))
+            citation_inputs.append(provenance_check.Citation(sha=sha, url=""))
+
+    citation_checks = []
+    for c in citation_inputs:
+        check = provenance_check.resolve_citation(args.provenance_repo, c.sha, c.url, sudo=True)
+        citation_checks.append((c.sha, c.url, check.conditions))
+
+    def reissue(query: str) -> dict:
+        try:
+            resp = _http_post(args.read_proxy + "/v1/query",
+                              {"metta": query, "max_answers": 10}, timeout=30.0)
+            return {"count": int(resp.get("count", 0))}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # attestation lane: window = [setup restart, now]
+    since_iso = None
+    setup_json = _load_json(rd / f"setup-case-{args.case}.json") or {}
+    since_iso = setup_json.get("restarted_at") or _now_iso()
+    attestation = None
+    if block is not None and block.queries:
+        attestation = collect_attestation(
+            args, args.case, since_iso, _now_iso(),
+            history_parse.normalize_query(block.queries[0]))
+
+    r = grading_mod.gate_case(
+        case, block, history_queries, placeholder_calls, reissue,
+        citation_checks,
+        facts_index=facts_index,
+        window_persist_receipts=len(persist_receipts),
+        window_archive_receipts=len(archive_receipts),
+        attestation=attestation,
+    )
+
+    # blob reconstruction lane: arrive back at the source markdown bytes
+    reconstruction = []
+    if block is not None:
+        recon_dir = rd / "reconstructed"
+        recon_dir.mkdir(parents=True, exist_ok=True)
+        for sha, url in grading_mod.parse_citations(block.sources_raw):
+            try:
+                blob_path, blob_content = provenance_check.reconstruct_citation_blob(
+                    args.provenance_repo, sha)
+                entry = {"sha": sha, "url": url, "blob_path": blob_path, "reconstructed": True}
+                # byte-compare against the repo background file the URL names
+                fname = url.rsplit("/", 1)[-1] if url else ""
+                repo_file = HERE / "background" / fname
+                if fname and repo_file.exists():
+                    repo_bytes = repo_file.read_bytes()
+                    blob_bytes = blob_content.encode("utf-8")
+                    entry["repo_file"] = str(repo_file)
+                    entry["matches_repo_file"] = (repo_bytes == blob_bytes)
+                    if not entry["matches_repo_file"]:
+                        entry["repo_sha256"] = hashlib.sha256(repo_bytes).hexdigest()
+                        entry["blob_sha256"] = hashlib.sha256(blob_bytes).hexdigest()
+                # persist the reconstructed bytes as a run artifact
+                out = recon_dir / f"{sha[4:]}-{fname or 'blob.md'}"
+                out.write_text(blob_content, encoding="utf-8")
+                entry["saved_to"] = str(out)
+                reconstruction.append(entry)
+            except RuntimeError as e:
+                reconstruction.append({"sha": sha, "url": url,
+                                        "reconstructed": False, "error": str(e)})
+
+    grade_data = {
+        "run_id": args.run_id,
+        "case_id": args.case,
+        "verdict": r.verdict,
+        "conditions": r.conditions,
+        "detail": r.detail,
+        "history_window": {
+            "mode": window_mode,
+            "retrieve_calls": len(history_queries),
+            "retrieve_args": history_queries[:20],
+            "placeholder_calls": placeholder_calls,
+            "persist_receipts": len(persist_receipts),
+            "archive_receipts": len(archive_receipts),
+            "add_atom_shas": add_atom_shas[:20],
+        },
+        "facts_index_size": len(facts_index),
+        "attestation": attestation,
+        "citations": [{"sha": s, "url": u, "conditions": c}
+                      for s, u, c in citation_checks],
+        "reconstruction": reconstruction,
+        "timestamp": _now_iso(),
+    }
+    _write_json(rd / f"grade-case-{args.case}.json", grade_data)
+    conds = ", ".join(r.conditions) or "-"
+    print(f"[grade-case] {args.case}: {r.verdict} ({conds})")
+    return GATE_PASS if r.verdict == "PASS" else GATE_FAIL
+
+
+def teardown(args) -> int:
+    """Teardown phase: restore agent to standby (contamination guard kept)."""
+    paths = _bench_paths(args)
+    if args.dry_run:
+        print(f"[teardown] [dry-run] contamination guard, restore prompt/state, "
+              "restart, optionally remove per-case volume snapshots")
+        return 0
+
+    try:
+        backup_prompt = paths["vol"] / f"prompt.txt.bak-pre-benchmark-{args.run_id}"
+        # no backup => benchmark mode was never installed (early harness
+        # failure): nothing to restore, agent is still on standby
+        if _sudo_run(["test", "-f", str(backup_prompt)]).returncode != 0:
+            print("[teardown] no backup prompt (setup never ran) — nothing to restore")
+            _write_json(RESULTS_DIR / args.run_id / "teardown.json", {
+                "restored": False, "skipped_reason": "no backup (setup never ran)",
+                "timestamp": _now_iso(),
+            })
+            return 0
+        backup_text = _sudo_read(backup_prompt) or ""
+        if "BENCHMARK MODE" in backup_text and not getattr(args, "allow_dirty_backup", False):
+            print("[teardown] ABORT: backup prompt contaminated — refusing to restore it")
+            _write_json(RESULTS_DIR / args.run_id / "teardown.json", {
+                "error": "backup prompt contaminated with benchmark content",
+                "aborted": True,
+            })
+            return 1
+
+        _sudo_run(["cp", str(backup_prompt), str(paths["prompt"])])
+        _sudo_run(["cp", str(paths["vol"] / f"omega_state.md.bak-pre-benchmark-{args.run_id}"),
+                   str(paths["state"])])
+        subprocess.run(
+            ["sudo", "tee", "-a", str(paths["state"])],
+            input=f"\nbenchmark complete ({args.run_id}), returned to standby\n",
+            capture_output=True, text=True, timeout=30.0,
+        )
+        if not _agent_restart():
+            print("[teardown] ERROR: agent restart failed")
+            return 1
+
+        # per-case snapshots were copied into results at grade time; remove
+        # the volume copies to keep the memory volume bounded. NOTE: the
+        # volume dir is root-owned (drwx-----x) — glob as ubuntu fails with
+        # EACCES (live wr3-20261023), so list via sudo instead.
+        if not getattr(args, "keep_snapshots", False):
+            r = _sudo_run(["sh", "-c",
+                           rf"ls -1 '{paths['vol']}' | grep -E '^history\.(pre|post)-case-{re.escape(args.run_id)}-'"],
+                          timeout=30.0)
+            for name in (r.stdout or "").split():
+                _sudo_run(["rm", "-f", str(paths["vol"] / name)])
+    except Exception as e:
+        print(f"[teardown] ERROR: {e}")
+        _write_json(RESULTS_DIR / args.run_id / "teardown.json", {"error": str(e)})
+        return 1
+
+    _write_json(RESULTS_DIR / args.run_id / "teardown.json", {
+        "restored": True, "timestamp": _now_iso(),
+    })
+    print("[teardown] agent restored to standby")
+    return 0
+
+
 # ---------------------------------------------------------------------------
-# grade (v2: strict deterministic gate)
+# full (v3 sequential default; --batch keeps the v2 all-at-once flow)
+# ---------------------------------------------------------------------------
+
+def _copy_window_artifacts(args, case_id: str) -> None:
+    """Copy the per-case volume snapshots into results/ before teardown
+    removes them (grade_case reads them live; report reads the copies)."""
+    paths = _bench_paths(args)
+    rd = RESULTS_DIR / args.run_id / "windows" / case_id
+    rd.mkdir(parents=True, exist_ok=True)
+    for kind in ("pre", "post"):
+        src = paths["vol"] / f"history.{kind}-case-{args.run_id}-{case_id}.metta"
+        if _sudo_run(["test", "-f", str(src)]).returncode == 0:
+            _sudo_run(["cp", str(src), str(rd / f"{kind}.metta")])
+
+
+def full_sequential(args) -> int:
+    """v3 default: preflight -> cleanup-das -> per case (setup/agent/grade,
+    independent) -> report -> teardown (always).
+
+    --cases limits the sequence to a subset (e.g. "original,uncertainty") —
+    the iteration mode: relaunch only the cases under test.
+    """
+    facts_mod = _facts_mod()
+    all_ids = [c["id"] for c in facts_mod.TEST_CASES]
+    if getattr(args, "cases", ""):
+        wanted = [c.strip() for c in args.cases.split(",") if c.strip()]
+        unknown = [c for c in wanted if c not in all_ids]
+        if unknown:
+            print(f"[full] ERROR: unknown case ids in --cases: {unknown} (valid: {all_ids})")
+            return GATE_ERROR
+        case_ids = [c for c in all_ids if c in set(wanted)]
+        print(f"[full] --cases filter active: running {case_ids}")
+    else:
+        case_ids = list(all_ids)
+    gate_exit = GATE_PASS
+    harness_error = False
+
+    phases = [("preflight", preflight), ("cleanup-das", cleanup_das)]
+    for name, fn in phases:
+        print(f"\n[full] === {name} ===")
+        out = RESULTS_DIR / args.run_id / f"{name}.json"
+        if out.exists() and not args.force:
+            print(f"[full] {name}.json exists — skipping (--force re-runs)")
+            continue
+        rc = fn(args)
+        if rc != 0:
+            print(f"[full] {name} FAILED (exit {rc})")
+            harness_error = True
+            break
+
+    per_case = {}
+    if not harness_error:
+        for case_id in case_ids:
+            print(f"\n[full] === CASE {case_id} ===")
+            args.case = case_id  # per-case phases read args.case
+            rc = setup_case(args)
+            if rc != 0:
+                harness_error = True
+                per_case[case_id] = {"verdict": "ERROR", "phase": "setup"}
+                continue
+            rc = agent_case(args)
+            if rc != 0:
+                # timeout is a case failure, not a harness error
+                print(f"[full] case {case_id}: agent timeout — grading anyway")
+            rc = grade_case(args)
+            _copy_window_artifacts(args, case_id)
+            g = _load_json(RESULTS_DIR / args.run_id / f"grade-case-{case_id}.json") or {}
+            per_case[case_id] = {
+                "verdict": g.get("verdict", "FAIL"),
+                "conditions": g.get("conditions", []),
+            }
+            if rc == GATE_ERROR:
+                harness_error = True
+            elif rc == GATE_FAIL:
+                gate_exit = GATE_FAIL
+            # every case graded independently; continue to the next regardless
+
+    cases_passed = sum(1 for v in per_case.values() if v.get("verdict") == "PASS")
+    summary = {
+        "run_id": args.run_id,
+        "mode": "sequential",
+        "gate_verdict": "PASS" if (cases_passed == len(case_ids) and not harness_error) else "FAIL",
+        "cases_passed": cases_passed,
+        "cases_total": len(case_ids),
+        "per_case": per_case,
+        "timestamp": _now_iso(),
+    }
+    _write_json(RESULTS_DIR / args.run_id / "grade.json", summary)
+
+    if not args.skip_report:
+        print("\n[full] === report ===")
+        report(args)
+
+    print("\n[full] === teardown ===")
+    td_rc = teardown(args)
+    if td_rc != 0:
+        harness_error = True
+
+    if harness_error:
+        print("\n[full] HARNESS ERROR — see logs above")
+        return GATE_ERROR
+    print(f"\n[full] GATE SIGNAL: {'PASS (0)' if gate_exit == GATE_PASS else 'FAIL (2)'}")
+    return gate_exit
+
+
+# ---------------------------------------------------------------------------
+# batch grade (offline re-grade of a whole answers.md; v2 semantics + E/P)
 # ---------------------------------------------------------------------------
 
 def grade(args) -> int:
-    """Grade phase: apply the strict gate (answer + query-first + provenance).
-
-    Deterministic only — no LLM. Exit 0 = gate PASS, 2 = gate FAIL,
-    1 = harness error.
-    """
+    """Batch grade: gate every case in answers.md (offline re-grades OK)."""
     sys.path.insert(0, str(HERE))
-    import facts as facts_mod
     import grading as grading_mod
     import history_parse
     import provenance_check
 
     if args.dry_run:
-        print("[grade] [dry-run] would apply the strict gate (A/Q/P) to answers.md")
+        print("[grade] [dry-run] would apply the strict gate (A/Q/E/P) to answers.md")
         return 0
 
     _resolve_endpoints(args)
+    facts_mod = _facts_mod()
+    paths = _bench_paths(args)
 
     def _read_input(explicit: str | None, default: Path) -> str | None:
-        """Read an input file: explicit path (plain read, sudo fallback) or default (sudo)."""
         if explicit:
             try:
                 return Path(explicit).read_text(encoding="utf-8", errors="replace")
@@ -473,32 +1073,21 @@ def grade(args) -> int:
                 return _sudo_read(Path(explicit))
         return _sudo_read(default)
 
-    vol = Path(args.memory_volume)
-    answers_path = Path(getattr(args, "answers_override", "") or (vol / "benchmark" / "answers.md"))
     content = _read_input(getattr(args, "answers_override", "") or None,
-                          vol / "benchmark" / "answers.md")
+                          paths["answers"])
     if content is None:
-        print(f"[grade] ERROR: answers file not readable at {answers_path}")
+        print("[grade] ERROR: answers file not readable")
         _write_json(RESULTS_DIR / args.run_id / "grade.json",
                     {"error": "answers file not readable"})
         return GATE_ERROR
 
-    # --- benchmark window from snapshots ---
     history = _read_input(getattr(args, "history_override", "") or None,
-                          vol / "history.metta") or ""
+                          paths["history"]) or ""
     pre_snap = _read_input(getattr(args, "pre_snapshot_override", "") or None,
-                           vol / f"history.pre-benchmark-{args.run_id}.metta")
+                           paths["vol"] / f"history.pre-benchmark-{args.run_id}.metta")
     post_snap = _read_input(getattr(args, "post_snapshot_override", "") or None,
-                            vol / f"history.post-benchmark-{args.run_id}.metta")
+                            paths["vol"] / f"history.post-benchmark-{args.run_id}.metta")
     window_text, window_mode = history_parse.window_from_texts(history, pre_snap, post_snap)
-
-    if window_mode == "full":
-        print("[grade] ERROR: no usable pre-benchmark history snapshot — cannot define")
-        print("[grade]        the benchmark window; refusing to grade (pass --pre-snapshot-override")
-        print("[grade]        for offline re-grades)")
-        _write_json(RESULTS_DIR / args.run_id / "grade.json",
-                    {"error": "no pre-benchmark history snapshot; window undefined"})
-        return GATE_ERROR
 
     history_queries = history_parse.extract_retrieve_args(window_text)
     placeholder_calls = history_parse.count_placeholder_retrieves(window_text)
@@ -506,10 +1095,11 @@ def grade(args) -> int:
     archive_receipts = history_parse.extract_archive_receipts(window_text)
     add_atom_shas = history_parse.extract_add_atom_shas(window_text)
 
-    # --- parse answers into per-case blocks ---
+    facts_index_text = _read_facts_index(args)
+    facts_index = grading_mod.parse_facts_index(facts_index_text)
+
     blocks = grading_mod.parse_answers_v2(content)
 
-    # --- resolve every cited source against the provenance repo ---
     citation_inputs: list[provenance_check.Citation] = []
     seen: set[tuple[str, str]] = set()
     for case in facts_mod.TEST_CASES:
@@ -520,38 +1110,33 @@ def grade(args) -> int:
             if (sha, url) not in seen:
                 seen.add((sha, url))
                 citation_inputs.append(provenance_check.Citation(sha=sha, url=url))
-    # also resolve shas the agent persisted via add-atom (window evidence)
     for sha in add_atom_shas:
         if (sha, "") not in seen:
             seen.add((sha, ""))
             citation_inputs.append(provenance_check.Citation(sha=sha, url=""))
 
-    citation_checks: list[tuple[str, str, list[str]]] = []
+    citation_checks = []
     for c in citation_inputs:
         check = provenance_check.resolve_citation(
             args.provenance_repo, c.sha, c.url, sudo=True)
         citation_checks.append((c.sha, c.url, check.conditions))
 
-    # --- re-issue closure (deterministic HTTP re-query) ---
     def reissue(query: str) -> dict:
         try:
-            resp = _http_post(args.read_proxy + "/v1/query", {
-                "metta": query, "max_answers": 10,
-            }, timeout=30.0)
+            resp = _http_post(args.read_proxy + "/v1/query",
+                              {"metta": query, "max_answers": 10}, timeout=30.0)
             return {"count": int(resp.get("count", 0))}
         except Exception as e:
             return {"error": str(e)}
 
-    # --- gate every case ---
     results = []
     for case in facts_mod.TEST_CASES:
         r = grading_mod.gate_case(
-            case,
-            blocks.get(case["id"]),
-            history_queries,
-            placeholder_calls,
-            reissue,
-            citation_checks,
+            case, blocks.get(case["id"]), history_queries, placeholder_calls,
+            reissue, citation_checks,
+            facts_index=facts_index,
+            window_persist_receipts=len(persist_receipts),
+            window_archive_receipts=len(archive_receipts),
         )
         results.append(r)
 
@@ -559,15 +1144,14 @@ def grade(args) -> int:
 
     grade_data = {
         "run_id": args.run_id,
+        "mode": "batch",
         "gate_verdict": summary["gate_verdict"],
         "cases_passed": summary["cases_passed"],
         "cases_total": summary["cases_total"],
         "per_case": {
-            r.case_id: {
-                "verdict": r.verdict,
-                "conditions": r.conditions,
-                "detail": r.detail,
-            } for r in results
+            r.case_id: {"verdict": r.verdict, "conditions": r.conditions,
+                        "detail": r.detail}
+            for r in results
         },
         "history_window": {
             "mode": window_mode,
@@ -578,11 +1162,10 @@ def grade(args) -> int:
             "archive_receipts": len(archive_receipts),
             "add_atom_shas": add_atom_shas[:20],
         },
-        "citation_checks": [
-            {"sha": s, "url": u, "conditions": conds}
-            for s, u, conds in citation_checks
-        ],
-        "timestamp": datetime.now().isoformat(),
+        "facts_index_size": len(facts_index),
+        "citation_checks": [{"sha": s, "url": u, "conditions": conds}
+                             for s, u, conds in citation_checks],
+        "timestamp": _now_iso(),
     }
     _write_json(RESULTS_DIR / args.run_id / "grade.json", grade_data)
 
@@ -596,55 +1179,63 @@ def grade(args) -> int:
 
 
 # ---------------------------------------------------------------------------
-# report (v2: gate report + signal)
+# report
 # ---------------------------------------------------------------------------
 
 def report(args) -> int:
-    """Report phase: assemble report.json + report.md from grade.json; signal verdict."""
+    """Assemble report.json + report.md from grade*.json; signal verdict."""
     if args.dry_run:
-        print(f"[report] [dry-run] would assemble results/{args.run_id}/report.json + report.md")
+        print(f"[report] [dry-run] would assemble results/{args.run_id}/report.*")
         return 0
     rd = RESULTS_DIR / args.run_id
-    setup = _load_json(rd / "setup.json") or {}
     grade = _load_json(rd / "grade.json") or {}
-    agent_data = _load_json(rd / "agent.json") or {}
 
     if not grade or "gate_verdict" not in grade:
-        print(f"[report] ERROR: no gate verdict in {rd/'grade.json'} — run grade first")
+        print(f"[report] ERROR: no gate verdict in {rd / 'grade.json'}")
         return GATE_ERROR
+
+    # collect per-case grade-case files (sequential mode) for rich detail
+    case_files = {}
+    for p in sorted(rd.glob("grade-case-*.json")):
+        g = _load_json(p) or {}
+        cid = g.get("case_id") or p.stem.replace("grade-case-", "")
+        case_files[cid] = g
 
     report = {
         "run_id": args.run_id,
-        "setup": setup,
-        "agent": agent_data,
         "grade": grade,
-        "timestamp": datetime.now().isoformat(),
+        "cases": case_files,
+        "cleanup": _load_json(rd / "cleanup-das.json") or {},
+        "timestamp": _now_iso(),
     }
     _write_json(rd / "report.json", report)
 
-    # Human-readable gate report
     lines = [f"# Windowless Room Gating Test Report — {args.run_id}", ""]
     verdict = grade.get("gate_verdict", "FAIL")
     lines.append(f"## GATE {verdict} — {grade.get('cases_passed', 0)}/{grade.get('cases_total', 0)} cases passed")
     lines.append("")
-    lines.append("| Case | Verdict | Conditions |")
-    lines.append("|------|---------|------------|")
+    lines.append("| Case | Verdict | Conditions | Attested | Reconstruction |")
+    lines.append("|------|---------|------------|----------|----------------|")
     for cid, r in (grade.get("per_case") or {}).items():
         conds = ", ".join(r.get("conditions", [])) or "-"
-        lines.append(f"| {cid} | {r.get('verdict', '?')} | {conds} |")
+        cf = case_files.get(cid, {})
+        att = cf.get("attestation") or {}
+        att_str = (f"QE+access ({att.get('access_count', '?')} posts)"
+                   if att.get("qe_pattern_match") else "-")
+        recon = cf.get("reconstruction") or []
+        recon_str = (f"{sum(1 for x in recon if x.get('matches_repo_file'))}/{len(recon)} match repo bytes"
+                     if recon else "-")
+        lines.append(f"| {cid} | {r.get('verdict', '?')} | {conds} | {att_str} | {recon_str} |")
     lines.append("")
-    hw = grade.get("history_window") or {}
-    lines.append(f"History window mode: {hw.get('mode', '?')} — "
-                 f"das-retrieve calls in window: {hw.get('retrieve_calls', 0)} "
-                 f"(placeholder calls: {hw.get('placeholder_calls', 0)})")
+
+    cleanup = report["cleanup"]
+    if cleanup:
+        lines.append(f"DAS cleanup before run: {cleanup.get('discovered_count', '?')} expressions removed, "
+                     f"canaries intact: {cleanup.get('canaries_intact', '?')}")
+
     lines.append("")
-    lines.append("Condition code reference:")
-    lines.append("")
-    lines.append("- `A_*` — answer gate (missing / wrong / sky pattern-match / fabricated)")
-    lines.append("- `Q_*` — query-first gate (no query, no receipt, not in history,")
-    lines.append("  placeholder arg, degenerate pattern, reissue mismatch, absence unproven)")
-    lines.append("- `P_*` — provenance gate (citation missing / unresolved vs git repo)")
-    lines.append("")
+    lines.append("Condition codes: A_* answer, Q_* query-first (Q_ATTESTED_VIA_ACCESS_LOG "
+                 "is informational), E_* extraction, P_* provenance.")
     report_md = "\n".join(lines)
     (rd / "report.md").write_text(report_md, encoding="utf-8")
     print(report_md)
@@ -653,105 +1244,117 @@ def report(args) -> int:
 
 
 # ---------------------------------------------------------------------------
-# teardown
+# batch setup/agent/full (v2 flow, kept via --batch)
 # ---------------------------------------------------------------------------
 
-def teardown(args) -> int:
-    """Teardown phase: restore agent to standby (with backup contamination guard)."""
-    vol = Path(args.memory_volume)
+def setup(args) -> int:
+    """Batch setup: archive sources, prompts.txt (all cases), install, restart."""
+    print("[setup] batch setup (v2 flow)...")
+    paths = _bench_paths(args)
+    facts_mod = _facts_mod()
+
+    setup_data: dict = {"run_id": args.run_id, "archived": {}}
+
+    bg_dir = HERE / "background"
+    for fname in sorted(bg_dir.glob("*.md")):
+        url = facts_mod.SOURCE_URLS.get(fname.name)
+        if not url:
+            continue
+        if args.dry_run:
+            setup_data["archived"][fname.name] = "dry-run"
+        else:
+            try:
+                content = fname.read_text(encoding="utf-8")
+                resp = _http_post(args.write_bridge + "/v1/archive", {
+                    "url": url, "content": content, "content_type": "text/markdown",
+                }, timeout=60.0)
+                setup_data["archived"][fname.name] = {
+                    "commit": resp.get("commit", ""), "deduped": resp.get("deduped", False),
+                }
+            except Exception as e:
+                setup_data["archived"][fname.name] = f"error: {e}"
+
     if args.dry_run:
-        print(f"[teardown] [dry-run] planned actions:")
-        print(f"  - verify backup prompt is NOT a benchmark prompt (contamination guard)")
-        print(f"  - restore prompt.txt from backup")
-        print(f"  - restore omega_state.md from backup")
-        print(f"  - append 'benchmark complete' line")
-        print(f"  - sudo systemctl restart omega-curiosity.service")
-        if getattr(args, "cleanup", False):
-            print(f"  - [cleanup] remove benchmark DAS atoms via cleanup.py (links-only)")
+        print("[setup] [dry-run] would write benchmark files + install prompt + restart")
+        setup_data["prompt_installed"] = "dry-run"
+        _write_json(RESULTS_DIR / args.run_id / "setup.json", setup_data)
         return 0
 
-    try:
-        # Contamination guard: the standby backup must not itself be a
-        # benchmark prompt (this exact failure shipped with the wr-20261021
-        # run: the *.bak-pre-benchmark* copies had captured run-1 content).
-        backup_prompt = vol / f"prompt.txt.bak-pre-benchmark-{args.run_id}"
-        backup_text = _sudo_read(backup_prompt) or ""
-        if "BENCHMARK MODE" in backup_text and not getattr(args, "allow_dirty_backup", False):
-            print("[teardown] ABORT: backup prompt still contains BENCHMARK MODE content —")
-            print(f"[teardown]         {backup_prompt} is contaminated; refusing to restore it.")
-            print("[teardown]         Fix the standby backup first or pass --allow-dirty-backup.")
-            _write_json(RESULTS_DIR / args.run_id / "teardown.json", {
-                "error": "backup prompt contaminated with benchmark content",
-                "aborted": True,
-            })
-            return 1
+    _prepare_benchmark_dir(args)
+    prompts_content = _render_prompts_txt(HERE)
+    _sudo_write(paths["vol"] / f"{BENCH_REL}/prompts.txt", prompts_content)
 
-        # Restore original prompt + omega_state.md
-        _run(["sudo", "cp", str(backup_prompt),
-              str(vol / "prompt.txt")], timeout=30.0)
-        _run(["sudo", "cp", str(vol / f"omega_state.md.bak-pre-benchmark-{args.run_id}"),
-              str(vol / "omega_state.md")], timeout=30.0)
-        # Append truthful line
-        subprocess.run(
-            ["sudo", "tee", "-a", str(vol / "omega_state.md")],
-            input=f"\nbenchmark complete ({args.run_id}), returned to standby\n",
-            capture_output=True, text=True, timeout=30.0,
-        )
-        # Restart service (systemd, NOT docker)
-        _run(["sudo", "systemctl", "restart", "omega-curiosity.service"], timeout=120.0)
-        # Optional cleanup (links-only; NEVER --delete-nodes)
-        if getattr(args, "cleanup", False):
-            print("[teardown] cleanup requested — removing benchmark DAS atoms (links-only)")
-            sys.path.insert(0, str(HERE))
-            import facts as facts_mod
-            for fact in facts_mod.CANONICAL_FACTS:
-                try:
-                    _run(["docker", "exec", "-w", "/app", CONTAINER_WRITE_BRIDGE,
-                          "python", "cleanup.py", "--metta", fact["metta"]], timeout=300.0)
-                except Exception as e:
-                    print(f"[teardown] cleanup skip {fact['id']}: {e}")
-    except Exception as e:
-        print(f"[teardown] ERROR: {e}")
-        _write_json(RESULTS_DIR / args.run_id / "teardown.json", {"error": str(e)})
+    # fresh answers.md + facts-index.md (E-gate inputs)
+    _sudo_write(paths["answers"],
+                f"# Benchmark answers — {args.run_id} (batch)\n")
+    _sudo_write(paths["facts_index"],
+                f"# Extraction record — {args.run_id}\n")
+
+    _sudo_run(["cp", str(paths["prompt"]),
+               str(paths["vol"] / f"prompt.txt.bak-pre-benchmark-{args.run_id}")])
+    _sudo_run(["cp", str(paths["state"]),
+               str(paths["vol"] / f"omega_state.md.bak-pre-benchmark-{args.run_id}")])
+
+    # batch prompt: render the template once per case, all cases listed
+    template = (HERE / "agent_prompt_template.md").read_text(encoding="utf-8")
+    rendered = template.replace("{{RUN_ID}}", args.run_id)
+    if not _sudo_write(paths["prompt"], rendered):
+        print("[setup] ERROR: prompt install failed")
+        return 1
+    _sudo_write(paths["state"], f"BENCHMARK MODE ACTIVE — run {args.run_id} (batch)\n")
+    _sudo_write(paths["vol"] / f"history.pre-benchmark-{args.run_id}.metta",
+                _sudo_read(paths["history"]) or "")
+    _sudo_run(["chown", "-R", "65534:65534", str(paths["bench"])])
+    if not _agent_restart():
+        print("[setup] ERROR: restart failed")
         return 1
 
-    _write_json(RESULTS_DIR / args.run_id / "teardown.json", {
-        "restored": True, "timestamp": datetime.now().isoformat(),
-    })
-    print("[teardown] agent restored to standby")
+    setup_data["prompt_installed"] = True
+    setup_data["timestamp"] = _now_iso()
+    _write_json(RESULTS_DIR / args.run_id / "setup.json", setup_data)
     return 0
 
 
-# ---------------------------------------------------------------------------
-# full
-# ---------------------------------------------------------------------------
+def agent(args) -> int:
+    """Batch agent phase: wait for ALL case answers."""
+    facts_mod = _facts_mod()
+    case_ids = [c["id"] for c in facts_mod.TEST_CASES]
+    paths = _bench_paths(args)
+    timeout_s = args.timeout_minutes * 60
+    start = time.time()
 
-def full(args) -> int:
-    """Full: preflight -> setup -> agent -> grade -> report -> teardown.
+    if args.dry_run:
+        print(f"[agent] [dry-run] would poll for all {len(case_ids)} answers")
+        return 0
 
-    Teardown ALWAYS runs (even when the gate FAILs) so the agent returns to
-    standby. Exit code = gate verdict: 0 PASS, 2 FAIL, 1 harness error.
-    """
-    phases = [
-        ("preflight", preflight),
-        ("setup", setup),
-        ("agent", agent),
-        ("grade", grade),
-        ("report", report),
-    ]
+    while time.time() - start < timeout_s:
+        content = _sudo_read(paths["answers"])
+        if content is not None:
+            found = sum(1 for cid in case_ids if f"FINAL ANSWER ({cid}):" in content)
+            print(f"[agent] {found}/{len(case_ids)} answers ({int((time.time()-start)/60)}m)")
+            if found == len(case_ids):
+                _sudo_run(["cp", str(paths["history"]),
+                           str(paths["vol"] / f"history.post-benchmark-{args.run_id}.metta")])
+                _write_json(RESULTS_DIR / args.run_id / "agent.json",
+                            {"status": "complete", "answers_found": found})
+                return 0
+        time.sleep(60)
+
+    _sudo_run(["cp", str(paths["history"]),
+               str(paths["vol"] / f"history.post-benchmark-{args.run_id}.metta")])
+    _write_json(RESULTS_DIR / args.run_id / "agent.json", {"status": "timeout"})
+    return 1
+
+
+def full_batch(args) -> int:
+    """v2 all-at-once flow: setup -> agent -> grade -> report -> teardown."""
+    phases = [("preflight", preflight), ("setup", setup), ("agent", agent),
+              ("grade", grade), ("report", report)]
     gate_exit = GATE_PASS
     harness_error = False
 
     for name, fn in phases:
-        print(f"\n[full] === {name} ===")
-        # Crash-resumable: skip if output JSON exists unless --force
-        out = RESULTS_DIR / args.run_id / f"{name}.json"
-        if out.exists() and not getattr(args, "force", False):
-            print(f"[full] {name}.json exists — skipping (use --force to re-run)")
-            if name == "grade":
-                g = _load_json(out) or {}
-                gate_exit = GATE_PASS if g.get("gate_verdict") == "PASS" else GATE_FAIL
-            continue
+        print(f"\n[full-batch] === {name} ===")
         rc = fn(args)
         if name in ("grade", "report"):
             if rc == GATE_ERROR:
@@ -759,27 +1362,26 @@ def full(args) -> int:
             else:
                 gate_exit = rc
         elif rc != 0:
-            print(f"[full] {name} FAILED (exit {rc})")
             harness_error = True
             break
 
-    # Teardown included in full — ALWAYS runs (even on gate FAIL)
-    print(f"\n[full] === teardown ===")
-    td_rc = teardown(args)
-    if td_rc != 0:
-        print(f"[full] teardown FAILED (exit {td_rc}) — agent may still be in benchmark mode")
+    print("\n[full-batch] === teardown ===")
+    if teardown(args) != 0:
         harness_error = True
 
     if harness_error:
-        print("\n[full] HARNESS ERROR — see logs above")
         return GATE_ERROR
-    print(f"\n[full] GATE SIGNAL: {'PASS (0)' if gate_exit == GATE_PASS else 'FAIL (2)'}")
     return gate_exit
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Windowless-room GATING TEST orchestrator (strict, deterministic, no LLM)"
+        description="Windowless-room GATING TEST v3 orchestrator "
+                    "(sequential standalone questions; deterministic; no LLM)"
     )
     subparsers = parser.add_subparsers(dest="phase")
 
@@ -797,29 +1399,50 @@ def main() -> int:
         return p
 
     add_common(subparsers.add_parser("preflight"))
+    add_common(subparsers.add_parser("cleanup-das"))
+
+    def add_case_args(p):
+        p.add_argument("--case", required=True,
+                       help="case id (one of: " + ", ".join(c["id"] for c in _facts_mod().TEST_CASES) + ")")
+        p.add_argument("--timeout-minutes", type=int, default=45)
+
+    add_case_args(add_common(subparsers.add_parser("setup-case")))
+    add_case_args(add_common(subparsers.add_parser("agent-case")))
+    gp = add_common(subparsers.add_parser("grade-case"))
+    add_case_args(gp)
+    gp.add_argument("--facts-index-override", default="")
+
+    g = add_common(subparsers.add_parser("grade"))
+    for opt in ["--answers-override", "--history-override",
+                "--pre-snapshot-override", "--post-snapshot-override",
+                "--facts-index-override"]:
+        g.add_argument(opt, default="")
+
+    add_common(subparsers.add_parser("report"))
+    tp = add_common(subparsers.add_parser("teardown"))
+    tp.add_argument("--allow-dirty-backup", action="store_true")
+    tp.add_argument("--keep-snapshots", action="store_true")
+
+    fp = add_common(subparsers.add_parser("full"))
+    fp.add_argument("--batch", action="store_true",
+                    help="v2 all-at-once flow (single prompt with all 7 questions)")
+    fp.add_argument("--cases", default="",
+                    help="comma-separated subset of case ids to run (iteration mode; "
+                         "default: all cases sequentially)")
+    fp.add_argument("--cleanup-first", action="store_true", default=True,
+                    help="run cleanup-das before the sequential run (default)")
+    fp.add_argument("--no-cleanup", dest="cleanup_first", action="store_false")
+    fp.add_argument("--timeout-minutes", type=int, default=45)
+    fp.add_argument("--skip-report", action="store_true")
+    fp.add_argument("--allow-dirty-backup", action="store_true")
+    fp.add_argument("--keep-snapshots", action="store_true")
+    fp.add_argument("--seed-canonical", action="store_true")
+    fp.add_argument("--cleanup", action="store_true")
+
     sp = add_common(subparsers.add_parser("setup"))
     sp.add_argument("--seed-canonical", action="store_true")
     ap = add_common(subparsers.add_parser("agent"))
     ap.add_argument("--timeout-minutes", type=int, default=60)
-    add_common(subparsers.add_parser("grade"))
-    gp = subparsers.choices["grade"]
-    for opt, help_ in [
-        ("--answers-override", "read answers from this path instead of the volume"),
-        ("--history-override", "read history.metta from this path"),
-        ("--pre-snapshot-override", "use this file as the pre-benchmark snapshot"),
-        ("--post-snapshot-override", "use this file as the post-benchmark snapshot"),
-    ]:
-        gp.add_argument(opt, default="", help=help_)
-    add_common(subparsers.add_parser("report"))
-    tp = add_common(subparsers.add_parser("teardown"))
-    tp.add_argument("--cleanup", action="store_true")
-    tp.add_argument("--allow-dirty-backup", action="store_true",
-                    help="restore standby prompt even if the backup is contaminated")
-    fp = add_common(subparsers.add_parser("full"))
-    fp.add_argument("--seed-canonical", action="store_true")
-    fp.add_argument("--cleanup", action="store_true")
-    fp.add_argument("--timeout-minutes", type=int, default=60)
-    fp.add_argument("--allow-dirty-backup", action="store_true")
 
     args = parser.parse_args()
 
@@ -828,9 +1451,23 @@ def main() -> int:
         return 1
 
     dispatch = {
-        "preflight": preflight, "setup": setup, "agent": agent,
-        "grade": grade, "report": report, "teardown": teardown, "full": full,
+        "preflight": preflight, "cleanup-das": cleanup_das,
+        "setup-case": setup_case, "agent-case": agent_case,
+        "grade-case": grade_case, "grade": grade, "report": report,
+        "teardown": teardown, "setup": setup, "agent": agent,
     }
+
+    if args.phase == "full":
+        if getattr(args, "batch", False):
+            return full_batch(args)
+        if not args.cleanup_first:
+            # skip cleanup-das by pre-creating its result marker
+            (RESULTS_DIR / args.run_id / "cleanup-das.json").parent.mkdir(
+                parents=True, exist_ok=True)
+            (RESULTS_DIR / args.run_id / "cleanup-das.json").write_text(
+                json.dumps({"skipped": True}))
+        return full_sequential(args)
+
     return dispatch[args.phase](args)
 
 
