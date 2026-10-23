@@ -71,6 +71,7 @@ TEST_CASES: list[dict] = [
     {
         "id": "original",
         "prompt_file": "prompts/original-prompt.md",
+        "question": "You are in a windowless room / attic in the dark. You turn on a bulb/lamp and look straight up. What do you see?",
         "expected_answer": "The ceiling (or the lamp/bulb hanging from the ceiling).",
         "grading": "PASS iff answer mentions ceiling (accept 'ceiling', 'the ceiling', ceiling + lamp/bulb) AND does not answer sky/sun/stars as the primary answer; reasoning trace present (>=1 quoted das-retrieve query + result summary).",
         "required_facts": ["F04", "F07", "F12", "F14", "F11", "F05"],
@@ -78,6 +79,7 @@ TEST_CASES: list[dict] = [
     {
         "id": "uncertainty",
         "prompt_file": "prompts/uncertainty-prompt.md",
+        "question": "You are in a windowless room / attic in the dark. You turn on a bulb/lamp and look straight up. What do you see?",
         "expected_answer": "The ceiling (or the lamp/bulb hanging on the ceiling).",
         "grading": "PASS iff answer is ceiling or ceiling + lamp/bulb with correct reasoning trace; FAIL if sky, sun, stars, or nothing/darkness.",
         "required_facts": ["F04", "F07", "F12", "F14", "F11", "F05"],
@@ -85,6 +87,7 @@ TEST_CASES: list[dict] = [
     {
         "id": "unsolvable",
         "prompt_file": "prompts/unsolvable-unrelated-prompt.md",
+        "question": "What is the capital of Australia, and what is its population?",
         "expected_answer": "Reports inability to answer from stored knowledge (insufficient information / not found).",
         "grading": "PASS iff agent reports inability from stored knowledge AND does not state a specific capital/population answer (e.g. 'Canberra' -> FAIL).",
         "required_facts": ["F27", "F28"],
@@ -92,6 +95,7 @@ TEST_CASES: list[dict] = [
     {
         "id": "true",
         "prompt_file": "prompts/true-statement-prompt.md",
+        "question": "When you look up in a windowless room after turning on a light, you see the ceiling. True or false?",
         "expected_answer": "True — the ceiling is what you see when you look up in a room after turning on a light.",
         "grading": "PASS iff answer is true-affirming ('true', 'the statement is true') with reasoning trace.",
         "required_facts": ["F04", "F07", "F12", "F14", "F11", "F05"],
@@ -99,6 +103,7 @@ TEST_CASES: list[dict] = [
     {
         "id": "false",
         "prompt_file": "prompts/false-statement-prompt.md",
+        "question": "When you look up in a windowless room after turning on a light, you see the sky. True or false?",
         "expected_answer": "False — the ceiling is what you see when you look up in a room, not the sky.",
         "grading": "PASS iff answer is false-affirming ('false', 'the statement is false') with reasoning trace; answering 'true' -> FAIL.",
         "required_facts": ["F04", "F07", "F12", "F14", "F11", "F05"],
@@ -106,6 +111,7 @@ TEST_CASES: list[dict] = [
     {
         "id": "easy",
         "prompt_file": "prompts/easy-prompt.md",
+        "question": "What surface is directly above you when you are inside a room?",
         "expected_answer": "The ceiling — directly answerable from the spatial-knowledge facts persisted in DAS.",
         "grading": "PASS iff agent answers 'the ceiling' (or equivalent) citing DAS facts; FAIL on anything else.",
         "required_facts": ["F04", "F12", "F14"],
@@ -113,6 +119,7 @@ TEST_CASES: list[dict] = [
     {
         "id": "difficult",
         "prompt_file": "prompts/difficult-prompt.md",
+        "question": "You are in a windowless attic with a sloped ceiling. It is completely dark. You turn on a lamp that is sitting on the floor. The lamp illuminates the room. Now you look straight up through the slope of the roof. What do you see, and why?",
         "expected_answer": "The sloped ceiling (underside of the roof) — illuminated by the lamp.",
         "grading": "PASS iff answer mentions sloped ceiling / underside of roof AND not sky/stars/exterior-of-roof; reasoning trace present.",
         "required_facts": ["F08", "F09", "F10", "F11", "F16", "F17"],
