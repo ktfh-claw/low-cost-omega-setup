@@ -77,3 +77,12 @@
 - name: das-read
   loader: metta
   location: "{REPO}/plugins/das-read"
+
+# Appended: the pin working-memory plugin (2026-10-23, windowless-room v3) —
+# the stock pin skill is a no-op stub that discards the item; this plugin
+# rebinds pin to the prompt-extension path so pinned items re-appear in
+# every following prompt of the run (cross-cycle working memory).
+
+- name: pin
+  loader: metta
+  location: "{REPO}/plugins/pin"
