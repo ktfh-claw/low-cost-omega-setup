@@ -147,6 +147,32 @@ def resolve_citation(repo: str, sha: str, url: str, sudo: bool = True) -> Citati
     return check
 
 
+def reconstruct_citation_blob(repo: str, sha: str, sudo: bool = True) -> tuple[str, str]:
+    """Reconstruct the archived source blob for a citation.
+
+    Returns (blob_path, blob_content) — the reconstruction lane of the P-gate:
+    the grader can arrive back at the exact markdown bytes the agent's
+    reasoning was extracted from, byte-compare them against the repo's
+    background files, and persist a copy under results/<run>/reconstructed/.
+    Raises RuntimeError on unreadable commit/blob.
+    """
+    short = sha[4:] if sha.startswith("git:") else sha
+    if not _run_ok(_git(repo, "cat-file", "-e", f"{short}^{{commit}}", sudo=sudo)):
+        raise RuntimeError("commit not in repo")
+    show = _git(repo, "show", "--name-only", "--format=", short, sudo=sudo)
+    if not _run_ok(show):
+        raise RuntimeError("commit unreadable")
+    files = [f for f in show.stdout.split("\n") if f.strip()]
+    src_files = [f for f in files if f.startswith("sources/")]
+    if len(src_files) != 1:
+        raise RuntimeError(f"expected exactly one sources/ blob, got {len(src_files)}")
+    blob_path = src_files[0]
+    blob = _git(repo, "show", f"{short}:{blob_path}", sudo=sudo)
+    if not _run_ok(blob):
+        raise RuntimeError("blob unreadable at commit")
+    return blob_path, blob.stdout
+
+
 def check_citations(citations: list[Citation], repo: str, sudo: bool = True) -> list[CitationCheck]:
     """Resolve a list of citations; returns per-citation checks."""
     return [resolve_citation(repo, c.sha, c.url, sudo=sudo) for c in citations]
