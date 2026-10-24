@@ -20,6 +20,19 @@ only if EVERY gate condition holds:
                         must REUSE the exact extracted vocabulary, never
                         reformulate it — a reformulated query matches
                         nothing and produces false absence).
+  R-gate  (reasoning):   the REASONING: line must carry the MeTTa reasoning
+                        trace — the formalized question clause (= the
+                        executed query), the fact steps, and the derivation
+                        conclusion — NOT prose. Every trace step must be an
+                        existing atom: verbatim (whitespace-normalized) in
+                        the extraction record, or the executed query clause
+                        itself. This is the campaign-grade standard
+                        (directive 2026-10-24): formalize the question as a
+                        MeTTa clause, reason over retrieved/persisted facts,
+                        persist the trace, quote it verbatim. The unsolvable
+                        case still needs the trace shape (question clause +
+                        the count=0 absence probes) but is exempt from index
+                        grounding (no facts to ground).
   P-gate  (provenance): every source the case cites resolves to the
                         provenance git repo (commit -> blob -> index entry
                         -> sha256 -> url).
@@ -48,6 +61,13 @@ Condition codes (machine-readable failure reasons):
   E_FACTS_NOT_IN_INDEX    a FACTS: line expression is not in the facts index
   E_LITERAL_NOT_EXTRACTED a query literal does not come from the extracted
                           predicate vocabulary (reformulated query)
+  R_MISSING               case block has no REASONING: line
+  R_NOT_METTA             the reasoning line is prose, or fewer than two
+                          s-expression trace steps (a trace needs at least
+                          the question clause + one derivation/fact step)
+  R_TRACE_NOT_GROUNDED    a trace step is neither in the extraction record
+                          nor the executed query clause (not an existing
+                          atom — fabricated or paraphrased reasoning)
   P_MISSING               knowledge case cites no git:<sha> source
   P_UNRESOLVED:<COND>     cited source failed provenance resolution (see
                           provenance_check.py condition codes)
@@ -66,10 +86,11 @@ from history_parse import normalize_query
 
 CASE_BLOCK_RE = re.compile(r"^###\s+CASE\s+([a-z0-9-]+)\s*$", re.MULTILINE)
 FINAL_ANSWER_RE = re.compile(r"^FINAL ANSWER \(([a-z0-9-]+)\):\s*(.*)$", re.MULTILINE)
-QUERY_LINE_RE = re.compile(r"^QUERY:\s*(.+?)\s*$", re.MULTILINE)
+QUERY_LINE_RE = re.compile(r"^QUERY:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 RECEIPT_RE = re.compile(r"DAS_RETRIEVE_OK[^\n]*?count=(\d+)")
-FACTS_LINE_RE = re.compile(r"^FACTS:\s*(.*)$", re.MULTILINE)
-SOURCES_LINE_RE = re.compile(r"^SOURCES:\s*(.*)$", re.MULTILINE)
+FACTS_LINE_RE = re.compile(r"^FACTS:[ \t]*(.*)$", re.MULTILINE)
+REASONING_LINE_RE = re.compile(r"^REASONING:[ \t]*(.*)$", re.MULTILINE)
+SOURCES_LINE_RE = re.compile(r"^SOURCES:[ \t]*(.*)$", re.MULTILINE)
 GIT_SHA_RE = re.compile(r"git:([0-9a-f]{40})")
 URL_RE = re.compile(r"(https?://\S+)")
 QUOTED_LITERAL_RE = re.compile(r'"([^"]+)"')
@@ -115,6 +136,29 @@ def query_literals(query: str) -> list[str]:
     return QUOTED_LITERAL_RE.findall(query)
 
 
+def parse_reasoning_trace(reasoning_raw: str) -> tuple[list[str], bool]:
+    """Parse a REASONING: line into (normalized MeTTa trace steps, has_prose).
+
+    The trace uses the same semicolon-separated convention as the FACTS:
+    line: `<question-clause>; <fact-step-1>; ...; <conclusion-clause>`.
+    STRICT: every non-empty semicolon-separated segment must be a
+    parenthesized s-expression; any other content is prose (has_prose=True
+    -> R_NOT_METTA). Generated text instead of the MeTTa trace fails the
+    R-gate — that is the campaign-grade standard (2026-10-24 directive).
+    """
+    steps: list[str] = []
+    has_prose = False
+    for part in (reasoning_raw or "").split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith("(") and part.endswith(")"):
+            steps.append(normalize_expression(part))
+        else:
+            has_prose = True
+    return steps, has_prose
+
+
 @dataclass
 class CaseBlock:
     """Parsed per-case evidence block from answers.md."""
@@ -123,6 +167,7 @@ class CaseBlock:
     queries: list[str] = field(default_factory=list)
     receipt_counts: list[int] = field(default_factory=list)
     facts_raw: str = ""
+    reasoning_raw: str = ""
     sources_raw: str = ""
     block_text: str = ""
 
@@ -168,6 +213,9 @@ def parse_answers_v2(text: str) -> dict[str, CaseBlock]:
         facts = FACTS_LINE_RE.search(block_text)
         if facts:
             block.facts_raw = facts.group(1).strip()
+        reason = REASONING_LINE_RE.search(block_text)
+        if reason:
+            block.reasoning_raw = reason.group(1).strip()
         src = SOURCES_LINE_RE.search(block_text)
         if src:
             block.sources_raw = src.group(1).strip()
@@ -305,7 +353,7 @@ def gate_case(
     window_archive_receipts: int = 0,
     attestation: Optional[dict] = None,
 ) -> GateResult:
-    """Apply the full gate (A/Q/E/P) to one case.
+    """Apply the full gate (A/Q/E/R/P) to one case.
 
     reissue_fn(query) -> dict {"count": int, "error": str|None}
     citation_checks: list of (sha, url, conditions) — already resolved.
@@ -333,7 +381,7 @@ def gate_case(
     detail: dict = {}
 
     if block is None:
-        return GateResult(case_id, "FAIL", ["A_MISSING", "Q_MISSING", "P_MISSING"])
+        return GateResult(case_id, "FAIL", ["A_MISSING", "Q_MISSING", "P_MISSING", "R_MISSING"])
 
     # --- A-gate: substantive answer ---
     conditions.extend(grade_answer(case_id, block.final_answer))
@@ -455,6 +503,51 @@ def gate_case(
                     if foreign:
                         conditions.append("E_LITERAL_NOT_EXTRACTED")
                         detail["foreign_literals"] = foreign[:5]
+
+    # --- R-gate: MeTTa reasoning trace (campaign-grade standard, 2026-10-24
+    # directive): the REASONING: line must carry the formalized reasoning
+    # trace, NOT generated prose. Shape: the question clause (= the executed
+    # query) first, then the fact steps used (verbatim extraction-record
+    # atoms), then the derived conclusion clause — semicolon-separated
+    # s-expressions. Grounding: the first step must be the executed query
+    # clause (the formalized question the Q-gate re-issued against DAS);
+    # middle steps must be existing atoms (verbatim in the extraction
+    # record); the final step may be derived, but every quoted literal must
+    # come from the extracted vocabulary (or the query). The unsolvable case
+    # keeps the shape requirements (question clause + absence probes) but is
+    # exempt from index grounding (no facts to ground against).
+    if not block.reasoning_raw:
+        conditions.append("R_MISSING")
+    else:
+        trace_steps, has_prose = parse_reasoning_trace(block.reasoning_raw)
+        detail["trace_steps"] = len(trace_steps)
+        if has_prose or len(trace_steps) < 2:
+            conditions.append("R_NOT_METTA")
+        else:
+            query_norm = (normalize_expression(normalize_query(block.queries[0]))
+                          if block.queries else None)
+            ungrounded: list[str] = []
+            if query_norm is not None and trace_steps[0] != query_norm:
+                # the first trace step must BE the formalized question
+                ungrounded.append(trace_steps[0])
+            if not is_unsolvable and facts_index is not None:
+                idx = [normalize_expression(e) for e in facts_index]
+                idx_set = set(idx)
+                vocab = index_literals(idx)
+                if query_norm:
+                    vocab |= set(query_literals(query_norm))
+                last = len(trace_steps) - 1
+                for i, step in enumerate(trace_steps[1:], start=1):
+                    if step == query_norm or step in idx_set:
+                        continue  # the question clause / an existing atom
+                    if i == last:
+                        lits = set(query_literals(step))
+                        if lits and lits <= vocab:
+                            continue  # derived conclusion over stored vocabulary
+                    ungrounded.append(step)
+            if ungrounded:
+                conditions.append("R_TRACE_NOT_GROUNDED")
+                detail["trace_not_grounded"] = ungrounded[:5]
 
     # --- P-gate: provenance resolution ---
     citations = parse_citations(block.sources_raw)

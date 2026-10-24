@@ -39,7 +39,7 @@ GOOD_ANSWERS = """# Benchmark answers
 
 QUERY: (Inheritance $X (Concept "ceiling"))
 DAS_RETRIEVE_OK untrusted=true count=1 truncated=false results=[...]
-REASONING: scene construction: windowless room; looking up intersects the ceiling.
+REASONING: (Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))
 FINAL ANSWER (original): the ceiling
 SOURCES: git:8ffa0b35049c1b9545b08700c0594dc5eb68043e https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/spatial-knowledge.md
 
@@ -47,7 +47,7 @@ SOURCES: git:8ffa0b35049c1b9545b08700c0594dc5eb68043e https://raw.githubusercont
 
 QUERY: (Inheritance (Concept "australia") $X)
 DAS_RETRIEVE_OK untrusted=true count=0 truncated=false results=[]
-REASONING: no stored knowledge about the capital of Australia; absence proven.
+REASONING: (Inheritance (Concept "australia") $X); (Inheritance $X (Concept "australia"))
 FINAL ANSWER (unsolvable): cannot answer from stored knowledge
 SOURCES: none (absence case)
 """
@@ -147,15 +147,21 @@ def _ok_citations():
 
 def _block_for(case_id, query='(Inheritance $X (Concept "ceiling"))', count=1,
                sources="git:8ffa0b35049c1b9545b08700c0594dc5eb68043e https://example.com/spatial-knowledge.md",
-               answer="the ceiling", order="query_first"):
+               answer="the ceiling", order="query_first", reasoning=None):
     q_line = f"QUERY: {query}"
     r_line = f"DAS_RETRIEVE_OK untrusted=true count={count} truncated=false results=[]"
     a_line = f"FINAL ANSWER ({case_id}): {answer}"
     s_line = f"SOURCES: {sources}"
+    # v5 R-gate: the REASONING line carries the MeTTa trace, not prose
+    if reasoning is None:
+        reasoning = (f"{query}; "
+                     '(Evaluation (Predicate "has-part") '
+                     '(Concept "room") (Concept "ceiling"))')
+    reason_line = f"REASONING: {reasoning}"
     if order == "query_first":
-        text = f"{q_line}\n{r_line}\nREASONING: trace\n{a_line}\n{s_line}\n"
+        text = f"{q_line}\n{r_line}\n{reason_line}\n{a_line}\n{s_line}\n"
     else:
-        text = f"{a_line}\n{q_line}\n{r_line}\nREASONING: trace\n{s_line}\n"
+        text = f"{a_line}\n{q_line}\n{r_line}\n{reason_line}\n{s_line}\n"
     return parse_answers_v2(f"### CASE {case_id}\n\n{text}")[case_id]
 
 
@@ -325,11 +331,11 @@ def test_gate_case_unsolvable_count_positive_fails():
     assert "Q_ABSENCE_UNPROVEN" in r.conditions
 
 
-def test_gate_case_missing_block_triple_fail():
+def test_gate_case_missing_block_quad_fail():
     case = _case("original")
     r = gate_case(case, None, [], 0, None, [])
     assert r.verdict == "FAIL"
-    assert set(r.conditions) == {"A_MISSING", "Q_MISSING", "P_MISSING"}
+    assert set(r.conditions) == {"A_MISSING", "Q_MISSING", "P_MISSING", "R_MISSING"}
 
 
 def test_gate_summary_aggregates():

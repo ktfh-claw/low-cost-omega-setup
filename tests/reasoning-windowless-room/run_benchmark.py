@@ -88,6 +88,23 @@ ANSWERS_REL = f"{BENCH_REL}/answers.md"
 FACTS_INDEX_REL = f"{BENCH_REL}/facts-index.md"
 URLS_REL = f"{BENCH_REL}/urls.txt"
 
+# v4 (lever 3 of the wr3b post-mortem, 2026-10-24): the stock agent appends
+# every episode to history.metta and serializes the WHOLE file into every
+# LLM request (~1.6 MB / ~32k prompt tokens per call at wr3b time). That
+# starved the per-case cycle budget — the root cause of all four wr3/wr3b
+# timeouts. The per-case history trim resets history.metta to this
+# comment-only marker before each case window, so every LLM call of the
+# case serializes only that case's episodes. The pre-case snapshot (taken
+# immediately before the trim) archives the trimmed content; grading
+# windows fall back to mode "full" (= current file content = this case).
+def _trim_marker(run_id: str, case_id: str) -> str:
+    """Comment-only MeTTa marker the per-case trim writes to history.metta."""
+    return (
+        f"; history trimmed by the benchmark harness (per-case window: run {run_id}, case {case_id})\n"
+        "; prior episodes are archived in the pre/post-case snapshots under\n"
+        "; results/<run-id>/windows/<case>/\n"
+    )
+
 
 def _http_post(url: str, body: dict, timeout: float = 30.0) -> dict:
     """POST a JSON body; return parsed response or raise."""
@@ -637,31 +654,73 @@ def setup_case(args) -> int:
 
     if args.dry_run:
         print(f"[setup-case] [dry-run] case {args.case}: prepare benchmark dir, "
-              "backup prompt/state (first case), snapshot history, install "
-              "rendered case prompt, restart agent")
+              "backup prompt/state/history (run start), snapshot history, "
+              "install rendered case prompt, "
+              + ("trim history to the per-case window marker"
+                 if getattr(args, "trim_history", True) else "keep full history")
+              + ", restart agent")
         return 0
 
     first = args.case == facts_mod.TEST_CASES[0]["id"]
     _prepare_benchmark_dir(args)
 
+    # v4: run-start initialization happens on THIS RUN's first setup-case,
+    # whichever case id that is. A continuation run (--cases without
+    # `original`, e.g. the remaining five cases after a 2/2 PASS) starts
+    # mid-sequence: the backups must still be created — its teardown must be
+    # able to restore standby — but answers.md / facts-index.md are NOT
+    # re-initialized: the accumulated extraction record is exactly the
+    # cross-case carry-over the E-gate checks query literals against.
+    # Backups are keyed by run-id; prompt_backup_fresh in preflight enforces
+    # a fresh run-id, so a missing backup here means "run start".
+    backup_prompt = paths["vol"] / f"prompt.txt.bak-pre-benchmark-{args.run_id}"
+    if _sudo_run(["test", "-f", str(backup_prompt)]).returncode != 0:
+        _sudo_run(["cp", str(paths["prompt"]),
+                   str(backup_prompt)])
+        _sudo_run(["cp", str(paths["state"]),
+                   str(paths["vol"] / f"omega_state.md.bak-pre-benchmark-{args.run_id}")])
+        # v4 (lever 3): one-time backup of the FULL pre-run history so
+        # teardown can restore the agent's memory byte-identically after
+        # the per-case trims (the trim modifies the agent-owned history
+        # file during the run; the benchmark must leave no trace).
+        # NOTE: distinct from the batch-mode window snapshot
+        # history.pre-benchmark-<run-id>.metta (window boundary semantics).
+        if getattr(args, "trim_history", True):
+            hist_bak = paths["vol"] / f"history.bak-pre-benchmark-{args.run_id}"
+            if not _sudo_run(["cp", str(paths["history"]), str(hist_bak)]).returncode == 0:
+                print("[setup-case] ERROR: history backup failed — refusing to trim")
+                return GATE_ERROR
+        # benchmark dir must be writable by the agent (nobody:nogroup)
+        _sudo_run(["chown", "-R", "65534:65534", str(paths["bench"])])
+
     if first:
-        # fresh answers.md + facts-index.md at run start
+        # fresh answers.md + facts-index.md at run start (a run that
+        # INCLUDES `original` starts from scratch: cleanup-das enforces a
+        # clean store, so extraction must begin anew)
         _sudo_write(paths["answers"],
                     f"# Benchmark answers — {args.run_id} (sequential standalone questions)\n")
         _sudo_write(paths["facts_index"],
                     f"# Extraction record — {args.run_id}\n"
                     "# One persisted predicate expression per line (append after each add-atom).\n")
-        # one-time run backups
-        _sudo_run(["cp", str(paths["prompt"]),
-                   str(paths["vol"] / f"prompt.txt.bak-pre-benchmark-{args.run_id}")])
-        _sudo_run(["cp", str(paths["state"]),
-                   str(paths["vol"] / f"omega_state.md.bak-pre-benchmark-{args.run_id}")])
-        # benchmark dir must be writable by the agent (nobody:nogroup)
-        _sudo_run(["chown", "-R", "65534:65534", str(paths["bench"])])
 
     # per-case history snapshot (defines this case's window start)
     snap = paths["vol"] / f"history.pre-case-{args.run_id}-{args.case}.metta"
     _sudo_run(["cp", str(paths["history"]), str(snap)])
+
+    # v4 (lever 3): per-case history trim. The snapshot above archives the
+    # prior content; resetting history.metta to the comment-only marker means
+    # every LLM call of this case serializes ONLY this case's episodes
+    # (root cause of the wr3/wr3b timeouts: ~1.6 MB day-history in every
+    # request starved the cycle budget). --no-trim-history keeps the v3
+    # behavior (full serialized history).
+    trimmed = False
+    if getattr(args, "trim_history", True):
+        if not _sudo_write(paths["history"], _trim_marker(args.run_id, args.case)):
+            print(f"[setup-case] ERROR: history trim failed (case {args.case})")
+            return GATE_ERROR
+        trimmed = True
+        print(f"[setup-case] history trimmed to the per-case window marker "
+              f"(case {args.case}; prior content archived in {snap.name})")
 
     rendered = _render_case_prompt(args, case)
     if not _sudo_write(paths["prompt"], rendered):
@@ -679,6 +738,7 @@ def setup_case(args) -> int:
     _write_json(RESULTS_DIR / args.run_id / f"setup-case-{args.case}.json", {
         "case_id": args.case, "prompt_installed": True,
         "window_start_snapshot": str(snap), "restarted_at": _now_iso(),
+        "history_trimmed": trimmed,
     })
     print(f"[setup-case] case {args.case} prompt installed; agent restarted")
     return 0
@@ -735,7 +795,7 @@ def _read_facts_index(args) -> str:
 
 
 def grade_case(args) -> int:
-    """Grade ONE case independently (deterministic A/Q/E/P gate)."""
+    """Grade ONE case independently (deterministic A/Q/E/R/P gate)."""
     sys.path.insert(0, str(HERE))
     import grading as grading_mod
     import history_parse
@@ -749,7 +809,7 @@ def grade_case(args) -> int:
     rd = RESULTS_DIR / args.run_id
 
     if args.dry_run:
-        print(f"[grade-case] [dry-run] would gate case {args.case} (A/Q/E/P)")
+        print(f"[grade-case] [dry-run] would gate case {args.case} (A/Q/E/R/P)")
         return 0
 
     answers = _sudo_read(paths["answers"]) or ""
@@ -883,6 +943,7 @@ def teardown(args) -> int:
     paths = _bench_paths(args)
     if args.dry_run:
         print(f"[teardown] [dry-run] contamination guard, restore prompt/state, "
+              "restore history from the pre-benchmark backup (v4 trim), "
               "restart, optionally remove per-case volume snapshots")
         return 0
 
@@ -914,6 +975,24 @@ def teardown(args) -> int:
             input=f"\nbenchmark complete ({args.run_id}), returned to standby\n",
             capture_output=True, text=True, timeout=30.0,
         )
+        # v4 (lever 3): restore the pre-run history the per-case trims
+        # replaced. The full pre-run history is archived to results/ first
+        # (forensic evidence: the trimmed-away episodes), then restored to
+        # the volume and the backup removed. Absent backup (no-trim run,
+        # or run failed before the first setup-case) = nothing to restore.
+        hist_bak = paths["vol"] / f"history.bak-pre-benchmark-{args.run_id}"
+        if _sudo_run(["test", "-f", str(hist_bak)]).returncode == 0:
+            rd = RESULTS_DIR / args.run_id
+            rd.mkdir(parents=True, exist_ok=True)
+            # archive via read+write (results/ is harness-owned; _sudo_run cp
+            # would also work but read+write keeps the archive in the same
+            # code path as _write_json and is unit-testable without sudo)
+            pre_run = _sudo_read(hist_bak) or ""
+            (rd / "history.pre-run.metta").write_text(pre_run, encoding="utf-8")
+            _sudo_run(["cp", str(hist_bak), str(paths["history"])])
+            _sudo_run(["rm", "-f", str(hist_bak)])
+            print("[teardown] history restored from the pre-benchmark backup "
+                  "(per-case trim reverted)")
         if not _agent_restart():
             print("[teardown] ERROR: agent restart failed")
             return 1
@@ -1058,7 +1137,7 @@ def grade(args) -> int:
     import provenance_check
 
     if args.dry_run:
-        print("[grade] [dry-run] would apply the strict gate (A/Q/E/P) to answers.md")
+        print("[grade] [dry-run] would apply the strict gate (A/Q/E/R/P) to answers.md")
         return 0
 
     _resolve_endpoints(args)
@@ -1235,7 +1314,7 @@ def report(args) -> int:
 
     lines.append("")
     lines.append("Condition codes: A_* answer, Q_* query-first (Q_ATTESTED_VIA_ACCESS_LOG "
-                 "is informational), E_* extraction, P_* provenance.")
+                 "is informational), E_* extraction, R_* reasoning trace, P_* provenance.")
     report_md = "\n".join(lines)
     (rd / "report.md").write_text(report_md, encoding="utf-8")
     print(report_md)
@@ -1378,10 +1457,11 @@ def full_batch(args) -> int:
 # CLI
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Windowless-room GATING TEST v3 orchestrator "
-                    "(sequential standalone questions; deterministic; no LLM)"
+        description="Windowless-room GATING TEST v4 orchestrator "
+                    "(sequential standalone questions; per-case history trim; "
+                    "deterministic; no LLM)"
     )
     subparsers = parser.add_subparsers(dest="phase")
 
@@ -1404,7 +1484,20 @@ def main() -> int:
     def add_case_args(p):
         p.add_argument("--case", required=True,
                        help="case id (one of: " + ", ".join(c["id"] for c in _facts_mod().TEST_CASES) + ")")
-        p.add_argument("--timeout-minutes", type=int, default=45)
+        # v4 (lever 4 of the wr3b post-mortem): 75-minute default per-case
+        # window. The wr3b evidence: the agent pipeline works (queries,
+        # extraction, persistence, verification all landed) but the cycle
+        # budget of a 45-minute window was insufficient even with clean DAS
+        # behavior — the terminal answer-block write never landed. 75 m
+        # gives the ingest+verify+answer arc realistic room. Strict gates
+        # are unchanged.
+        p.add_argument("--timeout-minutes", type=int, default=75)
+        # v4 (lever 3): per-case history trim (see setup_case); default ON.
+        p.add_argument("--no-trim-history", dest="trim_history",
+                       action="store_false", default=True,
+                       help="keep the full serialized history (v3 behavior); "
+                            "default trims history.metta to the per-case "
+                            "window marker before each case")
 
     add_case_args(add_common(subparsers.add_parser("setup-case")))
     add_case_args(add_common(subparsers.add_parser("agent-case")))
@@ -1432,7 +1525,12 @@ def main() -> int:
     fp.add_argument("--cleanup-first", action="store_true", default=True,
                     help="run cleanup-das before the sequential run (default)")
     fp.add_argument("--no-cleanup", dest="cleanup_first", action="store_false")
-    fp.add_argument("--timeout-minutes", type=int, default=45)
+    fp.add_argument("--timeout-minutes", type=int, default=75)
+    fp.add_argument("--no-trim-history", dest="trim_history",
+                    action="store_false", default=True,
+                    help="keep the full serialized history (v3 behavior); "
+                         "default trims history.metta to the per-case window "
+                         "marker before each case (v4)")
     fp.add_argument("--skip-report", action="store_true")
     fp.add_argument("--allow-dirty-backup", action="store_true")
     fp.add_argument("--keep-snapshots", action="store_true")
@@ -1443,7 +1541,11 @@ def main() -> int:
     sp.add_argument("--seed-canonical", action="store_true")
     ap = add_common(subparsers.add_parser("agent"))
     ap.add_argument("--timeout-minutes", type=int, default=60)
+    return parser
 
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
 
     if not args.phase:

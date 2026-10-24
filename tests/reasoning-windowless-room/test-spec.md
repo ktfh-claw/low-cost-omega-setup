@@ -1,4 +1,4 @@
-# Windowless Room Gating Test — Test Specification (v3)
+# Windowless Room Gating Test — Test Specification (v6)
 
 ## Overview
 
@@ -6,12 +6,14 @@ This specification defines the windowless-room **gating test** for the Omega age
 
 v3 (2026-10-23 directive) makes **sequential standalone-question mode the default** — one prompt = one question, graded independently — and adds: an **E-gate** on clause extraction, harness-side **attestation lanes** for the known-lossy history channel, a pre-run **cleanup-das** phase, **blob reconstruction** back to the source markdown bytes, and explicit **environment requirements** (das-retrieve skill-description upgrade, pin working-memory plugin, chroma_db memory dir). `--batch` keeps the v2 all-at-once flow.
 
+v4 (2026-10-24 directive, wr3b post-mortem levers 3+4) adds the **per-case history trim** and lengthens the per-case window to **75 minutes** (default). Root cause of all four wr3/wr3b timeouts: the stock agent serializes the WHOLE day history (~1.6 MB / ~32k prompt tokens) into EVERY LLM request, starving the per-case cycle budget — the skill/formulation layer was fixed in v3 (real queries, extraction, persistence all landed) but the terminal answer-block write never landed inside a 45-minute window. Lever 3: `setup-case` archives the current history to the pre-case snapshot, then resets `history.metta` to a comment-only window marker — every LLM call of the case then serializes only that case's episodes. Strict gates are unchanged; the window fallback (`mode "full"` = current file content = this case's episodes only) is by design and recorded per case. `--no-trim-history` keeps the v3 behavior.
+
 A gate FAIL is a valid, expected signal: it means the environment/agent did not meet the governance bar — not that the harness is broken.
 
 ## Scope
 
 - **In scope:** background ingestion (agent-driven in sequential mode), fact extraction + persistence with provenance, query-first answering, strict deterministic grading (A/Q/E/P gates), harness re-issue verification, provenance git resolution + blob reconstruction, harness-side log attestation, pre-run DAS residue cleanup, reporting, teardown, exit-code signaling, and **agent-environment configuration deployed from this repo** (das-retrieve skill description upgrade, pin plugin rebind, chroma_db memory dir) — explicitly authorized by the v3 directive.
-- **Out of scope:** LLM-based grading (forbidden), subjective assessment. At run time the harness still modifies only test-controlled files (prompt.txt, omega_state.md, benchmark/ inside the memory volume); agent plugin/skill configuration is deployed and validated before the run (preflight + the das-read plugin validation driver), never edited by the harness mid-run.
+- **Out of scope:** LLM-based grading (forbidden), subjective assessment. At run time the harness modifies only test-controlled files (prompt.txt, omega_state.md, benchmark/ inside the memory volume) — plus, in v4, the **per-case history trim**: history.metta is reset to a comment-only marker before each case window and restored byte-identically from the run-start backup at teardown (no-trace contract; prior content is always archived in the pre-case snapshots + `results/<run-id>/history.pre-run.metta` before any reset). The trim is the wr3b post-mortem lever 3, explicitly authorized by the 2026-10-24 directive; `--no-trim-history` restores the v3 file-touch set exactly. Agent plugin/skill configuration is deployed and validated before the run (preflight + the das-read plugin validation driver), never edited by the harness mid-run.
 
 ## Modes
 
@@ -19,8 +21,8 @@ A gate FAIL is a valid, expected signal: it means the environment/agent did not 
 
 One prompt contains exactly ONE case question. The harness drives the sequence; each case runs the per-case phases and is graded independently:
 
-1. **setup-case** — prepare the benchmark dir (background files + urls.txt, idempotent); on the FIRST case (`original`) initialize fresh `answers.md` + `facts-index.md`, back up prompt.txt / omega_state.md (`*.bak-pre-benchmark-<run-id>`), chown benchmark/ to 65534:65534; then for EVERY case: snapshot `history.pre-case-<run-id>-<case>.metta` (the case's window start), render + install the per-case prompt, write the benchmark `omega_state.md` (case marker), restart the agent.
-2. **agent-case** — poll `answers.md` every 30 s for this case's `FINAL ANSWER (<case>):` line (default timeout 45 m); on completion OR timeout snapshot `history.post-case-<run-id>-<case>.metta` (window end). A timeout is a case failure, not a harness error — the case is graded anyway (it will fail its gates).
+1. **setup-case** — prepare the benchmark dir (background files + urls.txt, idempotent); at RUN START (the first setup-case of this run-id, whichever case id that is — a continuation run via `--cases` starts mid-sequence) back up prompt.txt / omega_state.md (`*.bak-pre-benchmark-<run-id>`) and, with the trim enabled, the FULL pre-run history (`history.bak-pre-benchmark-<run-id>`); on the first case `original` additionally initialize fresh `answers.md` + `facts-index.md`; chown benchmark/ to 65534:65534. Then for EVERY case: snapshot `history.pre-case-<run-id>-<case>.metta` (the case's window start), **trim history.metta to the per-case window marker** (v4, default; `--no-trim-history` keeps the v3 full-history behavior), render + install the per-case prompt, write the benchmark `omega_state.md` (case marker), restart the agent. The trim never runs without the snapshot: the pre-trim content is always archived first.
+2. **agent-case** — poll `answers.md` every 30 s for this case's `FINAL ANSWER (<case>):` line (default timeout 75 m, v4; was 45 m); on completion OR timeout snapshot `history.post-case-<run-id>-<case>.metta` (window end). A timeout is a case failure, not a harness error — the case is graded anyway (it will fail its gates).
 3. **grade-case** — the independent A/Q/E/P gate for this case (details below). Window = the case's pre/post snapshots. Refuses to grade without the pre-case snapshot (window undefined = harness error). Attestation + reconstruction lanes run here.
 
 Sequential-mode properties:
@@ -29,6 +31,7 @@ Sequential-mode properties:
 - **Independent grading.** Every case is graded regardless of the previous case's verdict; the sequence continues after a FAIL. Overall gate: PASS iff every selected case passes and no harness error occurred.
 - **`--cases` subset filter** (iteration mode): relaunch only the cases under test, e.g. `--cases original,uncertainty`. Unknown ids are a harness error.
 - The first case in `facts.TEST_CASES` order (`original`) is the ingest-required case (E-gate).
+- **Per-case history trim** (v4). With the trim enabled (default), grading's window mode for a trimmed case falls back to `full` — the whole live history.metta at grade time, which after the trim contains ONLY this case's episodes (plus the comment-only marker, which parses as zero retrievals/receipts/shas). This is the designed window semantics under the trim; `mode` is recorded per case in the grade-case JSON. Continuation runs (`--cases` without `original`) preserve the accumulated answers.md/facts-index.md (cross-case carry-over) but still create run backups at their first setup-case.
 
 ### Batch mode (`--batch`, v2 flow, kept)
 
@@ -42,7 +45,7 @@ Orchestrated by `run_benchmark.py` (phases independently runnable over SSH):
 2. **cleanup-das** (v3) — remove previous-run benchmark residue from the DAS mongo store (details below). Runs BEFORE the test (default in `full`; `--no-cleanup` skips by pre-creating its result marker).
 3. **setup-case / agent-case / grade-case** (sequential default) — per-case phases as above.
 4. **report** — assemble `results/<run-id>/report.json` + `report.md`; print; return the gate signal.
-5. **teardown** — contamination guard (refuses to restore a backup prompt that still contains BENCHMARK MODE content, unless `--allow-dirty-backup`); restore standby prompt + truthful omega_state.md; restart; remove the per-case history snapshots from the volume (copies are kept under `results/<run-id>/windows/<case>/`; `--keep-snapshots` preserves them). DAS cleanup is NOT part of teardown anymore — it moved to the pre-run cleanup-das phase (teardown's legacy `--cleanup` flag is not honored).
+5. **teardown** — contamination guard (refuses to restore a backup prompt that still contains BENCHMARK MODE content, unless `--allow-dirty-backup`); restore standby prompt + truthful omega_state.md; **restore the pre-run history from `history.bak-pre-benchmark-<run-id>`** (v4: archives it to `results/<run-id>/history.pre-run.metta` first, then restores the volume file and removes the backup — the per-case trims leave no trace; no backup = no-trim run = nothing to restore); restart; remove the per-case history snapshots from the volume (copies are kept under `results/<run-id>/windows/<case>/`; `--keep-snapshots` preserves them). DAS cleanup is NOT part of teardown anymore — it moved to the pre-run cleanup-das phase (teardown's legacy `--cleanup` flag is not honored).
 6. **full** — sequential default: preflight → cleanup-das → per case (setup → agent → grade) → report → teardown. preflight/cleanup-das are skipped if their phase JSON exists (unless `--force`); teardown ALWAYS runs (even on gate FAIL or harness error). `--batch` selects the v2 all-at-once flow; `--skip-report` omits the report phase.
 7. **batch legacy phases** — `setup` (archives sources, prompts.txt, fresh answers/facts-index, backups, restart), `agent` (all-answers poll, 60 m default), `grade` (whole answers.md against the pre/post-benchmark window; supports `--answers-override` / `--history-override` / `--pre-snapshot-override` / `--post-snapshot-override` / `--facts-index-override` for offline re-grades of archived runs).
 
@@ -73,6 +76,13 @@ A case PASSES iff it has NO blocking conditions. Failure reasons are machine-rea
 - `E_NO_FACTS` — knowledge case block has no `FACTS:` line (unsolvable exempt)
 - `E_FACTS_NOT_IN_INDEX` — a `FACTS:` line expression is not verbatim (whitespace-normalized) in the extraction record
 - `E_LITERAL_NOT_EXTRACTED` — a quoted literal of the executed query does not come from the extracted predicate vocabulary (unsolvable exempt; only checked when a QUERY line exists). This is the extracted-predicate-awareness rule: queries must REUSE the exact extracted spellings — a reformulated query matches nothing and produces a false absence (mechanical trap)
+
+**R-gate (reasoning trace)** — the REASONING line must carry the formalized MeTTa reasoning trace, NOT generated prose (2026-10-24 directive: the standard the 2026-10-20 report campaign proved — every step grounded in atoms/predicates retrieved from DAS):
+- `R_MISSING` — case block has no `REASONING:` line
+- `R_NOT_METTA` — the trace has fewer than 2 steps or contains prose segments
+- Shape: semicolon-separated s-expressions; the FIRST step must be the question clause (the exact executed query, whitespace-normalized); middle steps must be existing atoms — expressions verbatim (whitespace-normalized) in the extraction record (`R_STEP_NOT_IN_INDEX`); the final step may be a derived conclusion whose quoted literals all come from the extracted vocabulary or the query (`R_LITERAL_NOT_EXTRACTED`)
+- The unsolvable case keeps the shape requirements (question clause + absence probes) but is exempt from index grounding (no facts to ground against)
+- Zero LLM: trace parsing and grounding are pure string/set operations
 
 **P-gate (provenance):**
 - knowledge cases must cite `git:<40hex> <url>` sources (`P_MISSING`; unsolvable exempt)
@@ -117,7 +127,7 @@ For every `git:<sha>` citation on a case's SOURCES line, the grader reconstructs
 
 Sequential mode renders each case's `question` (facts.py) into the per-case prompt.
 
-## Answers.md Contract (v3)
+## Answers.md Contract (v5)
 
 Per case, the gate parses blocks of exactly this shape (deviation = FAIL):
 
@@ -127,24 +137,31 @@ Per case, the gate parses blocks of exactly this shape (deviation = FAIL):
 QUERY: <the exact metta pattern you executed>
 DAS_RETRIEVE_OK untrusted=true count=<n> truncated=<bool> results=[...]
 FACTS: <extraction-record expressions used, semicolon-separated>
-REASONING: <short trace>
+REASONING: <the MeTTa reasoning trace — question clause; fact steps; conclusion clause — semicolon-separated s-expressions, NOT prose>
 FINAL ANSWER (<id>): <answer>
 SOURCES: git:<40-hex-sha> <source-url> [git:<40-hex-sha> <source-url> ...]
 ```
 
 - `FACTS:` is required for knowledge cases (E-gate); the unsolvable case is exempt.
+- `REASONING:` is required for every case (R-gate): a semicolon-separated MeTTa trace — first step = the executed question clause, then verbatim extraction-record fact steps, then optionally a derived conclusion over extracted vocabulary. Prose (scene descriptions, narrative text) fails (`R_NOT_METTA`). The unsolvable case is exempt from index grounding but still needs the trace shape (question clause + absence probes).
 - `SOURCES:` is required for knowledge cases; the unsolvable case may cite none.
-- Backward compatibility: bare `FINAL ANSWER (case):` lines still parse, but they fail the Q/P gates (and, for knowledge cases, the E-gate's FACTS check).
+- Backward compatibility: bare `FINAL ANSWER (case):` lines still parse, but they fail the Q/R/P gates (and, for knowledge cases, the E-gate's FACTS check).
+- Block-line parsing is line-anchored (`QUERY:`/`FACTS:`/`REASONING:`/`SOURCES:` labels match horizontal whitespace only; an empty value is a genuinely empty value, not the next line's content).
 
-## The Benchmark Prompt (v3)
+## The Benchmark Prompt (v6)
 
-Per-case template (`agent_prompt_template.md`), de-leaked: **no example queries, no per-case answer guidance** — the query grammar lives in the das-retrieve skill description (Environment Requirements), and the agent must extract its own predicates. The template carries the **convergence rules** (root cause wr3-2026-10-23: per-case restarts wipe episode context and history `$_`-collapse hides prior work — the agent re-archived the same 5 sources ~5× and timed out in a memory-churn loop):
+Per-case template (`agent_prompt_template.md`), de-leaked: **no example queries, no per-case answer guidance** — the query grammar lives in the das-retrieve skill description (Environment Requirements), and the agent must extract its own predicates. v6 restructures the prompt per the 2026-10-24 19:50 UTC directive (wr3d forensics: all cycles prompt-work, the open-ended ingest/study loop saturates every window — steps after it are starved):
 
-1. **Record-driven ingest:** read the extraction record (`facts-index.md`) FIRST; reuse recorded shas/expressions; never re-archive or re-write what the record already lists.
-2. **Immediate receipt echo:** append every receipt, expression, and query (with its count) to the extraction record immediately, one append per tool result — the record is the agent's working memory across wake cycles.
-3. **Answer immediately after the query:** write the case's answer block right after the query, then STOP — one case per cycle, no batch writes, no re-verification of recorded steps.
+**Deliverable-first:** the case is decided by exactly two artifacts — the MeTTa reasoning trace (REASONING: line) and the answer block — stated at the top of the prompt.
 
-The extraction record doubles as the query vocabulary: the exact predicate names and literal spellings to REUSE VERBATIM when querying (E_LITERAL_NOT_EXTRACTED enforces this mechanically).
+**Fixed pipeline, no open-ended study:** the TASK LIST is a closed 5-step pipeline; there is NO research/study step. Each step runs exactly once, in order:
+1. **EXTRACT** — ONE bounded pass over the background sources: per file, skip-if-recorded (record lists `git:<sha>`), else read ONCE → archive → persist clauses → record → move on; no re-reading a processed file, no summarizing/analysis (record-driven ingest and immediate receipt echo are folded into this step; the v3 relevance-decision "the sources you will actually use" is GONE — the pass is unconditional).
+2. **FORMALIZE** the question as one MeTTa clause (record vocabulary, verbatim spellings).
+3. **RETRIEVE** — das-retrieve with the QUERY, receipt + `query <pattern> count=<n>` appended to the record.
+4. **COMPOSE THE REASONING TRACE** — question clause; verbatim record fact steps; optional derived conclusion over recorded vocabulary; persisted as a `trace:` line.
+5. **WRITE the answer block** — immediately after the trace, then STOP.
+
+**Campaign anti-loop rules:** no background re-read after first pass; when unsure, the next undone TASK LIST step — never "study more first"; one case per cycle. The extraction record remains the working-memory prosthesis (per-case restarts + `$_`-collapse) AND the grounding set for the E/R gates. Unit-pinned by `unit/test_v6_prompt.py` (pipeline order, deliverable-first, no-study invariants, block/trace contracts).
 
 ## Canonical-Fact Model
 
@@ -207,8 +224,30 @@ Contradictions between this spec at v2 and (a) the v3 directive / original requi
 8. **Q_NOT_IN_HISTORY absolutism.** v2: fabricated quotes fail unconditionally. The attestation lane can substitute log proof (informational). Also v2 omitted the knowledge-case count=0 → `Q_ABSENCE_UNPROVEN` rule that the code already enforced. **Resolution:** both documented. Applied.
 9. **Gate wording.** v2: "A case PASSES only if ALL conditions hold" — with informational conditions the rule is "no blocking conditions". **Resolution:** wording updated. Applied.
 
+## Requirement Reconciliation (v4)
+
+1. **Scope vs the history trim.** v3 scope: "the harness changes only test-controlled files (prompt.txt, omega_state.md, benchmark/)". The v4 lever-3 trim resets history.metta — an agent-owned file — before each case window. **Resolution:** scope updated (trim + no-trace contract documented); authorized by the 2026-10-24 directive; the pre-trim content is always archived (pre-case snapshot + run-start backup + results copy) and teardown restores the pre-run bytes. Applied.
+2. **Per-case window length.** v3: "default timeout 45 m". The wr3b post-mortem showed the 45-minute cycle budget insufficient even with the v3 skill/prompt fixes fully working (queries, extraction, persistence, verification all landed; only the terminal answer write did not). **Resolution:** default raised to 75 m (lever 4, harness parameter only — strict gates unchanged; `--timeout-minutes` overrides). Applied.
+3. **Window semantics under the trim.** v3 defined the case window as the pre/post-snapshot slice of a monotonically growing history. With the trim, the live history at grade time starts with the marker, so the pre-case snapshot is no longer a prefix → grading falls back to window mode `full`, which is EXACTLY this case's episodes (by design, not data loss). **Resolution:** Modes section documents the fallback as the designed v4 window semantics; the comment-only marker contributes zero retrievals/receipts/shas (unit-tested). Applied.
+
+## Requirement Reconciliation (v5)
+
+1. **Lever-1/2 vs the reasoning-trace standard.** The wr3c close-out recommended lever 1 (facts-index append coupled into the persist step) and lever 2 (answer-block reordering). The 2026-10-24 15:40 UTC directive REJECTED both: "not the right direction" — the purpose of the end-to-end test is redefined as a reusable, redeployable verification standard for Omega+DAS reasoning (anyone redeploying this exact configuration can run the test and verify the reasoning feature is in place). **Resolution:** levers 1–2 not implemented; instead the campaign-grade reasoning-trace standard is formalized as the R-gate + prompt step 4. Applied.
+2. **REASONING line semantics.** v3/v4 contract: `REASONING: <short trace>` — free-form, ungraded. The directive requires the `REASONING:` part to contain the MeTTa reasoning trace (question clause → fact steps → derived conclusion), every step grounded in existing atoms/predicates retrieved from DAS — generated prose fails. **Resolution:** Answers.md Contract v5 defines the trace form; `grading.py` enforces it deterministically (`parse_reasoning_trace`, grounding against the extraction record). Applied.
+3. **Why the campaign needed no facts-index.** Campaign-config reconstruction (2026-10-24): the 2026-10-20 report campaign had NO facts-index.md — a single continuous process (no per-case restarts → no episode-context wipe → no re-ingest churn), working memory = the v7 prompt itself + the report files the agent wrote + das-retrieve receipts quoted into them; the report phase was read-only over pre-persisted facts (0 write-bridge POSTs, mongo static). The benchmark's facts-index.md (v3) exists to compensate for harness-imposed per-case restarts + history `$_`-collapse — problems the campaign never had. **Resolution:** facts-index.md retained (it is the working-memory prosthesis for the sequential restart design AND the R-gate grounding set); documented so the divergence from the campaign is understood, not accidental. Applied.
+4. **Line-anchored block parsing.** The `QUERY:`/`FACTS:`/`REASONING:`/`SOURCES:` line regexes used `\s*` which matches newlines — an empty value captured the NEXT line's content (live evidence: an empty `FACTS:` line captured the `REASONING:` line, masking `E_NO_FACTS`). **Resolution:** all four regexes are now horizontal-whitespace-anchored (`[ \t]*`); unit tests cover the empty-value paths. Applied.
+
+## Requirement Reconciliation (v6)
+
+1. **Prompt structure vs wr3d live evidence.** v5 placed the reasoning-trace step before the answer write but AFTER the conditional ingest block; wr3d forensics showed all ~177 cycles consumed by open-ended background study/re-reading — steps downstream of the study loop are starved in every window (the same convergence-ordering blocker, now conclusively prompt-structural). The 19:50 UTC directive applied both monitor recommendations — campaign-style pinned task structure (v7-rule-1 analog) AND moving the reasoning-trace + answer-write to the top as deliverables. **Resolution:** v6 template = deliverable-first + fixed 5-step pipeline with the study step removed entirely (extraction is one unconditional bounded pass; the record-driven skip rule replaces the v3/v5 relevance decision). Unit-pinned in `test_v6_prompt.py`. Applied.
+2. **Open-ended ingest removed.** v5 step 2 ("Ingest + persist only if needed") required the agent to DECIDE which sources the question needs — a decision the agent never terminates on (wr3/wr3b/wr3c/wr3d all show the same non-termination). The directive: "I don't think it needs any step with an open-ended study… just a simple extract of the reasoning traces… then formalize the question and answer with the reasoning trace." **Resolution:** EXTRACT is unconditional and single-pass (skip only on already-recorded); no relevance judgment exists anywhere in the pipeline. Applied.
+3. **Contract stability.** The answers.md block contract, R-gate grounding rules, E-gate record discipline, and the das-retrieve grammar are UNCHANGED from v5 — v6 reorders and bounds the agent-side workflow only; no harness grading code changed. **Resolution:** `test_v6_prompt.py` additionally pins the block/trace contracts verbatim to catch accidental drift. Applied.
+
 ## History
 
 - v1 (2026-10-21): scored benchmark; live run wr-20261021-2355 — 7/7 substantively correct, 1/7 trace-PASS (no real das-retrieve calls; answers from context).
 - v2 (2026-10-22): re-scoped to strict gating test per Balazs's directive; condition codes, degenerate-trace conditions, provenance git resolution, deterministic grading, signal exit codes.
 - v3 (2026-10-23): sequential standalone-question default (per-case phases, `--cases`, `--batch` kept); E-gate (extraction) + `FACTS:` line; attestation lanes (`Q_ATTESTED_VIA_ACCESS_LOG`, `E_INGEST_ATTESTED_VIA_FACADE_LOG` — informational; lossy history channel stated); cleanup-das pre-run phase (two discovery nets, links-only, canary-proof); P-gate blob reconstruction lane; environment requirements (das-read skill description upgrade, pin rebind, chroma_db dir) with preflight checks; de-leaked per-case prompt with convergence rules (wr3-20261023 root cause: restart-wiped episode context + `$_`-collapse → re-archive churn loop).
+- v4 (2026-10-24): wr3b post-mortem levers 3+4 — per-case history trim (run-start full-history backup, comment-only window marker, teardown byte-identical restore, `--no-trim-history` opt-out, `full`-mode window fallback documented) + 75-minute default per-case window. Root cause addressed: every LLM call serialized ~1.6 MB of day history (~32k prompt tokens) → ~100–150 useful cycles per 45-minute window, consumed by state re-reads/ingest/verification — the answer-block write never landed (4/4 timeouts across wr3/wr3b with the v3 skill layer demonstrably working). Run-start initialization is now key-agnostic (continuation runs back up without re-initializing answers.md/facts-index.md). 104 offline unit tests.
+- v5 (2026-10-24): reasoning-trace standard (15:40 UTC directive — levers 1–2 rejected; the test is redefined as a reusable redeployable verification standard for Omega+DAS reasoning): R-gate added (`R_MISSING`, `R_NOT_METTA`, `R_STEP_NOT_IN_INDEX`, `R_LITERAL_NOT_EXTRACTED` — semicolon-separated MeTTa trace, first step = executed question clause, middle steps verbatim extraction-record atoms, final step may derive over extracted vocabulary; unsolvable keeps shape, exempt from grounding; zero-LLM); prompt step 4 (compose trace → record `trace:` line → paste verbatim into `REASONING:`) inserted before the answer write; block-line regexes fixed to horizontal-whitespace anchoring (empty-value capture bug). 114 offline unit tests.
+- v6 (2026-10-24): wr3d close-out (case-1 FAIL — 177 cycles all prompt-work, study loop starved the trace/answer steps; case-2 aborted by operator directive in favor of the v6 iteration) → both monitor recommendations applied per the 19:50 UTC directive: campaign-style prompt (deliverable-first, fixed 5-step TASK LIST, anti-loop rules) with the reasoning-trace + answer-write as the stated deliverables, and the open-ended study step REMOVED (extraction = one unconditional bounded pass with a record-driven skip rule). Answers/facts contracts and all gates unchanged from v5. 122 offline unit tests (8 new v6 prompt-contract tests in `unit/test_v6_prompt.py`).

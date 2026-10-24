@@ -17,6 +17,7 @@ from grading import (
     parse_answers_v2,
     parse_facts_index,
     parse_facts_line,
+    parse_reasoning_trace,
     index_literals,
     query_literals,
     gate_summary,
@@ -52,14 +53,20 @@ INDEX = parse_facts_index(FACTS_INDEX)
 assert len(INDEX) == 3, INDEX
 
 
-def _block(case_id, query, facts, sources=None, count=1):
-    src = sources or ("git:" + "a" * 40 + " https://example.com/spatial-knowledge.md")
+def _block(case_id, query, facts, sources=None, count=1, reasoning=None):
+    src = sources or (FAKE_SHA + " " + FAKE_URL)
+    if reasoning is None:
+        # v5 R-gate: default trace = question clause; a stored fact step
+        # (verbatim INDEX expression) — the campaign-grade shape
+        reasoning = (f"{query}; "
+                     '(Evaluation (Predicate "visible-when-looking-up") '
+                     '(Concept "observer-inside-room") (Concept "ceiling"))')
     text = f"""### CASE {case_id}
 
 QUERY: {query}
 DAS_RETRIEVE_OK untrusted=true count={count} truncated=false results=[...]
 FACTS: {facts}
-REASONING: scene -> answer.
+REASONING: {reasoning}
 FINAL ANSWER ({case_id}): the ceiling
 SOURCES: {src}
 """
@@ -201,7 +208,141 @@ def test_e_gate_unsolvable_exempt_from_facts_line():
 
 QUERY: (Inheritance (Concept "australia") $X)
 DAS_RETRIEVE_OK untrusted=true count=0 truncated=false results=[]
-REASONING: absence proven.
+REASONING: (Inheritance (Concept "australia") $X); (Inheritance $X (Concept "australia"))
+FINAL ANSWER (unsolvable): cannot answer from stored knowledge
+SOURCES: none (absence case)
+"""
+    blocks = parse_answers_v2(text)
+    r = gate_case(
+        _case("unsolvable"), blocks["unsolvable"],
+        history_queries=['(Inheritance (Concept "australia") $X)'],
+        history_placeholder_calls=0,
+        reissue_fn=lambda q: {"count": 0},
+        citation_checks=[],
+        facts_index=INDEX,
+        window_persist_receipts=1, window_archive_receipts=1,
+    )
+    assert r.verdict == "PASS", r.conditions
+
+
+# ---------------------------------------------------------------------------
+# R-gate (reasoning trace — campaign-grade standard, 2026-10-24 directive)
+# ---------------------------------------------------------------------------
+
+def test_parse_reasoning_trace_steps_and_prose():
+    steps, prose = parse_reasoning_trace(
+        '(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))')
+    assert prose is False
+    assert steps == ['(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))']
+    steps, prose = parse_reasoning_trace('scene construction: windowless room; looking up intersects the ceiling.')
+    assert prose is True and steps == []
+    steps, prose = parse_reasoning_trace('')
+    assert prose is False and steps == []
+
+
+def test_r_gate_prose_reasoning_fails():
+    # generated text instead of the MeTTa trace — the exact failure the
+    # 2026-10-24 directive prohibits ("it should not be some generated text")
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning="scene construction: windowless room; looking up intersects the ceiling."),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "FAIL"
+    assert "R_NOT_METTA" in r.conditions
+
+
+def test_r_gate_missing_reasoning_line_fails():
+    block = _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                   '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))')
+    block.reasoning_raw = ""
+    r = _gate("easy", block, facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "FAIL"
+    assert "R_MISSING" in r.conditions
+
+
+def test_r_gate_single_step_fails():
+    # a trace needs at least the question clause + one derivation step
+    r = _gate("easy",
+              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning='(Inheritance $X (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert "R_NOT_METTA" in r.conditions
+
+
+def test_r_gate_first_step_must_be_the_query():
+    r = _gate("easy",
+              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning='(Evaluation (Predicate "visible-when-looking-up") (Concept "observer-inside-room") (Concept "ceiling")); (Inheritance $X (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "FAIL"
+    assert "R_TRACE_NOT_GROUNDED" in r.conditions
+
+
+def test_r_gate_ungrounded_middle_step_fails():
+    # a step that is neither the query nor an extraction-record atom nor a
+    # derived conclusion over stored vocabulary = fabricated reasoning
+    r = _gate("easy",
+              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning='(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "made-up-relation") (Concept "room") (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "FAIL"
+    assert "R_TRACE_NOT_GROUNDED" in r.conditions
+    assert r.detail.get("trace_not_grounded") == ['(Evaluation (Predicate "made-up-relation") (Concept "room") (Concept "ceiling"))']
+
+
+def test_r_gate_derived_conclusion_over_stored_vocab_passes():
+    # the campaign 06-appendix form: final step is a DERIVED clause (e.g. an
+    # Implication) whose literals all come from the stored vocabulary
+    derived = '(Implication (Inheritance $X (Concept "enclosed-space")) (Evaluation (Predicate "visible-when-looking-up") $X (Concept "ceiling")))'
+    r = _gate("easy",
+              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning=f'(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); {derived}'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "PASS", r.conditions
+
+
+def test_r_gate_derived_conclusion_with_foreign_literal_fails():
+    derived = '(Evaluation (Predicate "visibility") (Concept "gazer") (Concept "ceiling"))'
+    r = _gate("easy",
+              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning=f'(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); {derived}'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert "R_TRACE_NOT_GROUNDED" in r.conditions
+
+
+def test_r_gate_good_trace_passes():
+    # question clause + verbatim stored fact step — the default fixture shape
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "PASS", r.conditions
+    assert not any(c.startswith("R_") for c in r.conditions)
+
+
+def test_r_gate_unsolvable_shape_only():
+    # unsolvable: trace shape still required (question + probe clause), but
+    # exempt from index grounding (no facts to ground against)
+    text = """### CASE unsolvable
+
+QUERY: (Inheritance (Concept "australia") $X)
+DAS_RETRIEVE_OK untrusted=true count=0 truncated=false results=[]
+REASONING: (Inheritance (Concept "australia") $X); (Inheritance $X (Concept "australia"))
 FINAL ANSWER (unsolvable): cannot answer from stored knowledge
 SOURCES: none (absence case)
 """
