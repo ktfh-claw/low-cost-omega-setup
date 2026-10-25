@@ -70,7 +70,10 @@ def test_record_reuse_skip_rule():
 def test_campaign_anti_loop_rules_present():
     t = _template()
     assert "Campaign rules" in t
-    assert "next undone step of the TASK LIST" in t
+    # v8: unsure-resolution now routes through the PINNED LEDGER's next:
+    # field (wr3g read-oscillation fix) instead of re-deriving the next
+    # undone step from the task list
+    assert "next undone step's literal call" in t
     assert "never repeat a completed step" in t
     assert 'never "study more first"' in t
 

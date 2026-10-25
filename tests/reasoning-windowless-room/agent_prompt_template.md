@@ -21,7 +21,23 @@ Answer it using ONLY your DAS-persisted knowledge and the background files (in y
 
 ## TASK LIST — fixed pipeline, each step exactly once, no other work
 
-**Working memory across wake cycles:** tool results do NOT survive from one cycle to the next — only files do. Your extraction record `{{FACTS_INDEX_PATH}}` is your working memory: append every receipt, expression, and query to it IMMEDIATELY as you produce it, one append per tool result, and re-read it at the start of each cycle. If a result is already recorded, do NOT redo it — reuse the recorded sha/expression.
+**Working memory across wake cycles:** tool results do NOT survive from one cycle to the next. Two channels carry state forward:
+- Your extraction record `{{FACTS_INDEX_PATH}}` (files) — append every receipt, expression, query, and `exec` line to it IMMEDIATELY as you produce it, one append per tool result. If a result is already recorded, do NOT redo it — reuse the recorded sha/expression.
+- Your PINNED LEDGER (`pin` tool) — pinned text re-appears in EVERY following prompt of this run. It is the ONLY tool result that survives a wake cycle.
+
+## PINNED LEDGER — required, mechanical
+
+Maintain ONE ledger line and act on it:
+
+`LEDGER: step <1-5> | done: <completed items> | next: <ONE literal tool call>`
+
+- **First cycle of this case:** read `{{URL_LIST_PATH}}` ONCE, then immediately `pin` your ledger with `next:` set to the literal `archive-source` call for the first URL. That pin is your first tool call of the case.
+- **After EVERY tool result:** `pin` the updated ledger line (step, done-items, and the NEXT literal call, which you compose from the result you just saw). Earlier LEDGER lines in your prompt are stale — the LAST LEDGER line is current.
+- **Each cycle:** read the LAST LEDGER line (it is already in your prompt — no tool call needed) and ISSUE the `next:` call immediately. Do not re-derive progress from files. At most ONE orientation read (`cat {{FACTS_INDEX_PATH}}` or `cat {{URL_LIST_PATH}}`) per cycle, ONLY when you need a recorded sha/expression/URL to build the next call — never as a loop.
+- When a step completes, advance the ledger to the next step in the same pin.
+- When the answer block is written: `pin` `LEDGER: step 5 | done: answer block written | next: none — case complete, idle silently` and STOP entirely (see STOP rule).
+
+1. **EXTRACT — one bounded pass over the background sources.** For each background source file in `benchmark/background/`, exactly once:
 
 1. **EXTRACT — one bounded pass over the background sources.** For each background source file in `benchmark/background/`, exactly once:
    - If your extraction record already lists this source with its `git:<sha>`, SKIP it — do not re-read it, do not re-archive it; its clauses are already recorded and in DAS.
@@ -46,7 +62,7 @@ Answer it using ONLY your DAS-persisted knowledge and the background files (in y
 
 **Campaign rules (anti-loop, hard):**
 - After a background file has been processed once (or is already recorded), do NOT open or re-read it again for the rest of this case. There is no research step; step 1 ends when every file has been processed or skipped once.
-- When unsure what to do next, the answer is always the next undone step of the TASK LIST — never "study more first", never repeat a completed step, never re-verify an already-recorded result.
+- When unsure what to do next, the LAST LEDGER line's `next:` field names the next undone step's literal call — issue it; never "study more first", never repeat a completed step, never re-verify an already-recorded result, never re-read state files you already have in your prompt.
 - One case per cycle: do not answer other cases, do not start the next question.
 
 ### REQUIRED FORMAT (the gate parses this — deviation = FAIL)
@@ -80,7 +96,7 @@ Gate rules for the block:
 - The prefix `SUCCESS, RETURN:` only means the skill invocation ran — it does NOT mean the operation succeeded. `ARCHIVE-OK` is the only archive success. `BRIDGE-PERSIST-OK` with `verified=` is the only write success. `DAS_RETRIEVE_OK` with `count=` is the only retrieve success.
 - If a write, archive, or query fails twice the same way, stop, re-read the error, change approach.
 - Update `omega_state.md` truthfully (benchmark mode, case {{CASE_ID}}, answers written).
-- `pin` useful facts/receipts (pinned items persist into your following prompts as working memory).
+- Keep the PINNED LEDGER current after every tool result (it is your cross-cycle working memory). You may additionally pin a few critical receipts (counts, shas, stv outputs), but the LEDGER line must stay the last-pinned.
 
 ## STOP rule
 

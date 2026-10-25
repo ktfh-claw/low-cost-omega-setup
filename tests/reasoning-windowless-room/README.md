@@ -32,7 +32,7 @@ Failure reasons are machine-readable condition codes (`A_MISSING`, `Q_NOT_IN_HIS
 - `provenance_check.py` — citation → git repo resolution chain (mirrors the bridge's write-time verify_commit, read-only)
 - `agent_prompt_template.md` — benchmark-mode prompt with the exact answers.md block format the gate parses
 - `run_benchmark.py` — orchestrator CLI (phases: preflight|setup|agent|grade|report|teardown|full)
-- `unit/` — 127 offline unit tests (stdlib shim runner: `python3 unit/run_tests.py`)
+- `unit/` — 136 offline unit tests (stdlib shim runner: `python3 unit/run_tests.py`)
 - `results/<run-id>/` — per-run artifacts (preflight/setup/agent/grade/report/teardown JSON + report.md)
 
 ## Exit Codes (the signal)
@@ -66,4 +66,5 @@ Failure reasons are machine-readable condition codes (`A_MISSING`, `Q_NOT_IN_HIS
 - v5 (reasoning-trace standard): 2026-10-24 — levers 1–2 rejected; R-gate (MeTTa trace, deterministic grounding), prompt step 4 (trace before answer write), line-anchored block parsing fix; 114 offline unit tests
 - v6 (campaign-style fixed pipeline): 2026-10-24 19:50 UTC directive — deliverable-first prompt (reasoning trace + answer block on top), open-ended study step REMOVED (extraction = one unconditional bounded pass, record-driven skip); anti-loop rules; 8 new prompt-contract tests; 122 offline unit tests
 - v7 (executed-reasoning standard): 2026-10-25 10:57 UTC directive — scenario A/A2 findings built in: `R_NOT_EXECUTED` gate (interpreter `(stv ...)` evidence required — `exec` record lines or trace-quoted stv; hand-composed truth values fail; unsolvable exempt), prompt step 4 EXECUTE THE REASONING (2-arg NAL/PLN contract via the metta-grammar plugin, exec-record discipline), step 5 deliverable-first write, STOP rule idle-silently discipline, preflight metta plugin checks (repo artifact + live mount); 127 offline unit tests
+- v8 (pinned-ledger working memory): 2026-10-25 14:48 UTC directive — wr3g root cause (per-wake restarts collapse prior tool results to `$_` history tuples; each wake re-derived progress from file reads alone; 120/122 shell reads, zero DAS calls, header-only artifacts) fixed by the PINNED LEDGER: a mechanical `pin`-maintained ledger line (`LEDGER: step <1-5> | done: ... | next: <ONE literal tool call>`) is required cross-cycle working memory — pinned tool output is the only tool result that survives a wake; first-cycle seed = ledger pin with the literal archive-source call; each wake issues the `next:` call immediately instead of re-deriving from files; orientation reads bounded to one per cycle; terminal ledger line on completion; anti-loop unsure-resolution reroutes through the ledger. 136 offline unit tests (9 new v8 ledger-contract tests in `unit/test_v8_prompt.py`; v6 anti-loop invariant updated to the ledger routing).
 - Reference: windowless-room prompt (classic LLM failure case)
