@@ -35,13 +35,14 @@ Answer it using ONLY your DAS-persisted knowledge and the background files (in y
 
 3. **RETRIEVE from DAS.** Run `das-retrieve` with the QUERY (the skill description carries the full query grammar). Quote the real tool output. Append `query <pattern> count=<n>` to `{{FACTS_INDEX_PATH}}` immediately so you never re-ask the same question. `count=0` after exact-spelling probes in BOTH directions is a truthful negative — never invent content to fill it.
 
-4. **COMPOSE THE REASONING TRACE — deliverable 1.** As MeTTa s-expressions, semicolon-separated, in this exact order:
+4. **EXECUTE THE REASONING — deliverable 1.** Run the reasoning with the `metta` skill. Operator contract: `(|- premiseA premiseB)` and `(|~ premiseA premiseB)` are STRICTLY 2-ARGUMENT; each premise is an `(expression (stv strength confidence))` pair; a successful call returns `((derived-expression (stv s c)))`. NEVER put three or more premises in one call — such forms never evaluate. Chain calls: feed the derived output of one call in as a premise of the next call. After EVERY successful call, IMMEDIATELY append to `{{FACTS_INDEX_PATH}}` a line: `exec <metta-call> => <interpreter-output-with-stv>`. The tool output is gone next cycle — if it is not in the file, it is lost.
+   Compose the REASONING trace from the recorded executions: semicolon-separated s-expressions, in this exact order:
    - the question clause (the exact QUERY you executed);
-   - the stored fact clauses this reasoning uses, copied VERBATIM from your extraction record;
-   - the derived conclusion clause — you may combine stored predicates into a new expression (e.g. an `(Implication ...)` or `(Evaluation ...)` over stored concepts), but every quoted literal in it must come from your recorded vocabulary.
-   Append the finished trace to `{{FACTS_INDEX_PATH}}` as one line starting with `trace:`. Generated prose — scene descriptions, narrative text — instead of the s-expression trace FAILS the case. If the question cannot be answered from stored knowledge, the trace is the question clause followed by the reverse-direction probe clause(s) you ran (each with its count=0 receipt quoted in the block).
+   - the stored fact clauses this reasoning used, copied VERBATIM from your extraction record;
+   - each executed derivation step with its interpreter `(stv ...)` output (from the `exec` lines).
+   Append the finished trace to `{{FACTS_INDEX_PATH}}` as one line starting with `trace:`. Generated prose — scene descriptions, narrative text — instead of the executed trace FAILS the case. A trace without interpreter `(stv ...)` outputs FAILS the case (`R_NOT_EXECUTED`) — hand-composed truth values do not count. If the question cannot be answered from stored knowledge, the trace is the question clause followed by the reverse-direction probe clause(s) you ran (each with its count=0 receipt quoted in the block).
 
-5. **WRITE the answer block — deliverable 2.** Append it (format below) to `{{ANSWERS_PATH}}` IMMEDIATELY after composing the trace — do not batch, do not continue other work first — then STOP.
+5. **WRITE the answer block — deliverable 2.** Append it (format below) to `{{ANSWERS_PATH}}` IMMEDIATELY after appending the trace — do not batch, do not message anyone first, do not continue other work — then STOP.
 
 **Campaign rules (anti-loop, hard):**
 - After a background file has been processed once (or is already recorded), do NOT open or re-read it again for the rest of this case. There is no research step; step 1 ends when every file has been processed or skipped once.
@@ -68,7 +69,7 @@ Gate rules for the block:
 - `QUERY:` line with the exact metta pattern you executed — it must appear BEFORE the `FINAL ANSWER` line.
 - The literal `DAS_RETRIEVE_OK ... count=<n>` receipt line copied from the actual tool output.
 - `FACTS:` line quoting the extraction-record expressions used (knowledge cases only).
-- `REASONING:` line with the MeTTa trace. The FIRST step must be the exact QUERY clause you executed; the other steps must be expressions from your extraction record, or a final derived conclusion whose quoted literals all come from your stored vocabulary. Prose in REASONING fails the gate (`R_NOT_METTA`).
+- `REASONING:` line with the executed MeTTa trace. The FIRST step must be the exact QUERY clause you executed; the other steps must be expressions from your extraction record, plus the executed derivation steps WITH their interpreter `(stv ...)` outputs. Prose in REASONING fails the gate (`R_NOT_METTA`). A trace with no interpreter `(stv ...)` output fails the gate (`R_NOT_EXECUTED`) — the truth values must come from the interpreter, never composed by you.
 - `FINAL ANSWER ({{CASE_ID}}): <answer>` on its own line.
 - `SOURCES:` line citing every source used for the case as `git:<40-hex-sha> <url>` pairs (the shas your archive-source calls returned). Knowledge cases with no SOURCES line fail the gate. If you newly ingested this case, cite the shas you created; if you only reused already-persisted facts, cite the sources those facts carry in your extraction record.
 - If the question cannot be answered from stored knowledge: quote the real query AND its `count=0` receipt (after probing the reverse direction and the exact record spellings), and answer that you cannot answer from stored knowledge. Do NOT fabricate.
@@ -83,4 +84,4 @@ Gate rules for the block:
 
 ## STOP rule
 
-When the `### CASE {{CASE_ID}}` block with its FINAL ANSWER line is appended to `{{ANSWERS_PATH}}` and `omega_state.md` records this truthfully, STOP. The harness will grade this case and deliver the next question.
+When the `### CASE {{CASE_ID}}` block with its FINAL ANSWER line is appended to `{{ANSWERS_PATH}}` and `omega_state.md` records this truthfully, the case is DONE. STOP means: no more tool calls, no more sends, no verification re-reads, no file rewrites. A later wake cycle that finds the block already appended must do NOTHING — the case is graded by the harness, not by you; re-sending, re-verifying, or re-writing anything FAILS the run's discipline. Idle silently until the next question arrives.

@@ -86,3 +86,16 @@
 - name: pin
   loader: metta
   location: "{REPO}/plugins/pin"
+
+# Appended: the metta-grammar plugin (2026-10-25, windowless-room scenario A
+# close-out) — the stock metta skill registration (skills.metta:153) documents
+# neither the NAL/PLN strictly-2-argument operator contract nor the
+# ephemeral-atomspace chaining rule; live scenario-A evidence showed ~321 calls
+# almost all in never-matching 3+-argument forms. This plugin re-registers the
+# skill listing with the full why/when/grammar description (remove-skill +
+# add-skill, single-definition invariant); the stock handler clause is correct
+# and untouched.
+
+- name: metta-grammar
+  loader: metta
+  location: "{REPO}/plugins/metta-grammar"

@@ -152,11 +152,16 @@ def _block_for(case_id, query='(Inheritance $X (Concept "ceiling"))', count=1,
     r_line = f"DAS_RETRIEVE_OK untrusted=true count={count} truncated=false results=[]"
     a_line = f"FINAL ANSWER ({case_id}): {answer}"
     s_line = f"SOURCES: {sources}"
-    # v5 R-gate: the REASONING line carries the MeTTa trace, not prose
+    # v6 R-gate: the REASONING line carries the executed MeTTa trace, not
+    # prose; the final step quotes the interpreter (stv ...) output
+    # (scenario-A/A2 executed-trace standard, 2026-10-25)
     if reasoning is None:
         reasoning = (f"{query}; "
                      '(Evaluation (Predicate "has-part") '
-                     '(Concept "room") (Concept "ceiling"))')
+                     '(Concept "room") (Concept "ceiling")); '
+                     '((Evaluation (Predicate "visible-when-looking-up") '
+                     '(Concept "observer-inside-room") (Concept "ceiling")) '
+                     '(stv 0.9 0.888888888888889))')
     reason_line = f"REASONING: {reasoning}"
     if order == "query_first":
         text = f"{q_line}\n{r_line}\n{reason_line}\n{a_line}\n{s_line}\n"

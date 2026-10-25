@@ -28,7 +28,7 @@ def test_task_list_fixed_pipeline_order():
         "1. **EXTRACT",
         "2. **FORMALIZE",
         "3. **RETRIEVE",
-        "4. **COMPOSE THE REASONING TRACE",
+        "4. **EXECUTE THE REASONING",
         "5. **WRITE the answer block",
     ]
     pos = [t.index(s) for s in steps]  # raises if any step is missing
@@ -93,11 +93,37 @@ def test_trace_deliverable_contract():
     # step-4 trace shape matches the R-gate parser contract
     assert "the question clause (the exact QUERY you executed)" in t
     assert "copied VERBATIM from your extraction record" in t
-    assert "every quoted literal in it must come from your recorded vocabulary" in t
+    # v6 executed-trace standard (scenario A/A2 lesson, 2026-10-25):
+    # the reasoning must be EXECUTED via the metta skill — the operator
+    # contract, the exec-record discipline, and the R_NOT_EXECUTED warning
+    assert "STRICTLY 2-ARGUMENT" in t
+    assert "feed the derived output of one call in as a premise of the next call" in t
+    assert "exec <metta-call> => <interpreter-output-with-stv>" in t
+    assert "R_NOT_EXECUTED" in t
     # trace persisted to the extraction record (working memory)
     assert "starting with `trace:`" in t
     # unsolvable-case trace form (shape kept, grounding exempt)
     assert "the question clause followed by the reverse-direction probe clause(s)" in t
+
+
+def test_step5_deliverable_first_write():
+    # scenario-A2 defect 1 (answer.md never written; the Telegram send was
+    # treated as the deliverable): step 5 must order the file write FIRST
+    t = _template()
+    step5 = t.index("5. **WRITE the answer block")
+    seg = t[step5:t.index("### REQUIRED FORMAT")]
+    assert "IMMEDIATELY after appending the trace" in seg
+    assert "do not message anyone first" in seg
+
+
+def test_stop_rule_idle_discipline():
+    # scenario-A2 defect 2 (idle re-sends on every wake after completion):
+    # the STOP rule must forbid sends/verification/rewrites on later wakes
+    t = _template()
+    stop = t[t.index("## STOP rule"):]
+    assert "no more sends" in stop
+    assert "must do NOTHING" in stop
+    assert "Idle silently" in stop
 
 
 def test_placeholders_present():

@@ -65,6 +65,12 @@ Condition codes (machine-readable failure reasons):
   R_NOT_METTA             the reasoning line is prose, or fewer than two
                           s-expression trace steps (a trace needs at least
                           the question clause + one derivation/fact step)
+  R_NOT_EXECUTED          the trace carries no interpreter (stv ...) output
+                          (or the extraction record has no `exec` lines):
+                          hand-composed truth values do not count — the
+                          reasoning must have been EXECUTED via the metta
+                          skill (scenario A/A2 lesson, 2026-10-25; unsolvable
+                          cases are exempt)
   R_TRACE_NOT_GROUNDED    a trace step is neither in the extraction record
                           nor the executed query clause (not an existing
                           atom — fabricated or paraphrased reasoning)
@@ -90,6 +96,23 @@ QUERY_LINE_RE = re.compile(r"^QUERY:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 RECEIPT_RE = re.compile(r"DAS_RETRIEVE_OK[^\n]*?count=(\d+)")
 FACTS_LINE_RE = re.compile(r"^FACTS:[ \t]*(.*)$", re.MULTILINE)
 REASONING_LINE_RE = re.compile(r"^REASONING:[ \t]*(.*)$", re.MULTILINE)
+STV_RE = re.compile(r"\(stv\s+-?[0-9]+(?:\.[0-9]+)?\s+-?[0-9]+(?:\.[0-9]+)?\)")
+
+
+def parse_exec_outputs(text: str) -> list[str]:
+    """Extract the interpreter-output s-expressions from the extraction
+    record's `exec <call> => <output>` lines (scenario-A/A2 lesson,
+    2026-10-25). The outputs are executed derivation atoms with their
+    (stv ...) truth values; they count as grounded trace steps (existing
+    atoms produced by the interpreter, recorded verbatim)."""
+    outputs: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("exec ") and "=>" in line:
+            out = line.split("=>", 1)[1].strip()
+            if out.startswith("(") and out.endswith(")"):
+                outputs.append(normalize_expression(out))
+    return outputs
 SOURCES_LINE_RE = re.compile(r"^SOURCES:[ \t]*(.*)$", re.MULTILINE)
 GIT_SHA_RE = re.compile(r"git:([0-9a-f]{40})")
 URL_RE = re.compile(r"(https?://\S+)")
@@ -352,6 +375,7 @@ def gate_case(
     window_persist_receipts: int = 0,
     window_archive_receipts: int = 0,
     attestation: Optional[dict] = None,
+    facts_index_raw: str = "",
 ) -> GateResult:
     """Apply the full gate (A/Q/E/R/P) to one case.
 
@@ -526,6 +550,21 @@ def gate_case(
         else:
             query_norm = (normalize_expression(normalize_query(block.queries[0]))
                           if block.queries else None)
+            # --- R_NOT_EXECUTED (scenario A/A2 lesson, 2026-10-25): the
+            # reasoning must have been EXECUTED by the interpreter, not
+            # hand-composed: either the extraction record carries `exec
+            # <call> => <output-with-stv>` lines, or the trace itself quotes
+            # an interpreter (stv ...) output. Unsolvable cases are exempt
+            # (absence probes have no derivation to execute).
+            exec_outputs = ([o for o in parse_exec_outputs(facts_index_raw)
+                             if STV_RE.search(o)]
+                            if facts_index_raw else [])
+            if exec_outputs:
+                detail["exec_outputs"] = len(exec_outputs)
+            if not is_unsolvable:
+                trace_has_stv = any(STV_RE.search(step) for step in trace_steps)
+                if not (exec_outputs or trace_has_stv):
+                    conditions.append("R_NOT_EXECUTED")
             ungrounded: list[str] = []
             if query_norm is not None and trace_steps[0] != query_norm:
                 # the first trace step must BE the formalized question
@@ -533,6 +572,9 @@ def gate_case(
             if not is_unsolvable and facts_index is not None:
                 idx = [normalize_expression(e) for e in facts_index]
                 idx_set = set(idx)
+                # executed derivation outputs are existing atoms (the
+                # interpreter produced them; the record preserves them)
+                idx_set |= set(exec_outputs)
                 vocab = index_literals(idx)
                 if query_norm:
                     vocab |= set(query_literals(query_norm))

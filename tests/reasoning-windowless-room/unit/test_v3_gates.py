@@ -56,11 +56,16 @@ assert len(INDEX) == 3, INDEX
 def _block(case_id, query, facts, sources=None, count=1, reasoning=None):
     src = sources or (FAKE_SHA + " " + FAKE_URL)
     if reasoning is None:
-        # v5 R-gate: default trace = question clause; a stored fact step
-        # (verbatim INDEX expression) — the campaign-grade shape
+        # v6 R-gate: default trace = question clause; a stored fact step
+        # (verbatim INDEX expression); the executed derivation step quoting
+        # the interpreter (stv ...) output (scenario-A/A2 executed-trace
+        # standard, 2026-10-25)
         reasoning = (f"{query}; "
                      '(Evaluation (Predicate "visible-when-looking-up") '
-                     '(Concept "observer-inside-room") (Concept "ceiling"))')
+                     '(Concept "observer-inside-room") (Concept "ceiling")); '
+                     '((Evaluation (Predicate "visible-when-looking-up") '
+                     '(Concept "observer-inside-room") (Concept "ceiling")) '
+                     '(stv 0.9 0.888888888888889))')
     text = f"""### CASE {case_id}
 
 QUERY: {query}
@@ -302,13 +307,22 @@ def test_r_gate_ungrounded_middle_step_fails():
 
 def test_r_gate_derived_conclusion_over_stored_vocab_passes():
     # the campaign 06-appendix form: final step is a DERIVED clause (e.g. an
-    # Implication) whose literals all come from the stored vocabulary
+    # Implication) whose literals all come from the stored vocabulary.
+    # v6 executed-trace standard: exec evidence comes from the extraction
+    # record's `exec` lines (the harness-side lane — scenario A: real
+    # derivations existed but were never carried into the artifact).
     derived = '(Implication (Inheritance $X (Concept "enclosed-space")) (Evaluation (Predicate "visible-when-looking-up") $X (Concept "ceiling")))'
+    facts_index_raw = FACTS_INDEX + "\n" + (
+        'exec (|~ ((Implication (Inheritance $X (Concept "enclosed-space")) '
+        '(Evaluation (Predicate "visible-when-looking-up") $X (Concept "ceiling"))) (stv 1.0 0.9)) '
+        '((Inheritance (Concept "windowless-room") (Concept "enclosed-space")) (stv 0.81 0.5184))) '
+        '=> ((Evaluation (Predicate "visible-when-looking-up") (Concept "windowless-room") (Concept "ceiling")) (stv 0.81 0.4665))\n')
     r = _gate("easy",
               _block("easy", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning=f'(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); {derived}'),
               facts_index=INDEX,
+              facts_index_raw=facts_index_raw,
               window_persist_receipts=1, window_archive_receipts=1)
     assert r.verdict == "PASS", r.conditions
 
@@ -356,6 +370,60 @@ SOURCES: none (absence case)
         facts_index=INDEX,
         window_persist_receipts=1, window_archive_receipts=1,
     )
+    assert r.verdict == "PASS", r.conditions
+    assert "R_NOT_EXECUTED" not in r.conditions  # absence probes: nothing to execute
+
+
+# R_NOT_EXECUTED (scenario A/A2 executed-trace standard, 2026-10-25)
+# ---------------------------------------------------------------------------
+
+def test_r_not_executed_fires_without_exec_evidence():
+    # knowledge case, well-formed trace, but NO interpreter (stv ...) output
+    # and no exec lines in the extraction record -> hand-composed reasoning
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning='(Inheritance $X (Concept "ceiling")); '
+                               '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert "R_NOT_EXECUTED" in r.conditions
+    assert r.verdict == "FAIL"
+
+
+def test_r_not_executed_satisfied_by_trace_stv():
+    # the trace itself quotes the interpreter (stv ...) output -> executed
+    # (the default fixture reasoning now carries the stv derivation step)
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+              facts_index=INDEX,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert r.verdict == "PASS", r.conditions
+    assert "R_NOT_EXECUTED" not in r.conditions
+
+
+def test_r_not_executed_satisfied_by_exec_record_lines():
+    # exec <call> => <output-with-stv> lines in the extraction record are
+    # harness-side evidence of executed reasoning even when the trace itself
+    # quotes no stv (scenario A: 39 real derivations existed but were never
+    # carried into the artifact — the record is the durable evidence lane)
+    facts_index_exec = FACTS_INDEX + "\n" + (
+        'exec (|- ((Inheritance (Concept "windowless-room") (Concept "room")) (stv 0.9 0.8)) '
+        '((Inheritance (Concept "room") (Concept "enclosed-space")) (stv 0.9 0.8))) '
+        '=> ((Inheritance (Concept "windowless-room") (Concept "enclosed-space")) (stv 0.81 0.5184))\n')
+    idx = parse_facts_index(facts_index_exec)
+    assert len(idx) == 3  # the exec line is not an extraction expression
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
+                     '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                     reasoning='(Inheritance $X (Concept "ceiling")); '
+                               '(Evaluation (Predicate "visible-when-looking-up") '
+                               '(Concept "observer-inside-room") (Concept "ceiling"))'),
+              facts_index=idx,
+              facts_index_raw=facts_index_exec,
+              window_persist_receipts=1, window_archive_receipts=1)
+    assert "R_NOT_EXECUTED" not in r.conditions
     assert r.verdict == "PASS", r.conditions
 
 

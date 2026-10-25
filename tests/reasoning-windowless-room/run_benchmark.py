@@ -357,6 +357,29 @@ def preflight(args) -> int:
         except Exception as e:
             checks["skill_description_upgraded"] = f"error: {e}"
 
+        # v6: metta-grammar plugin deployed? (scenario-A/A2 lesson,
+        # 2026-10-25: NAL/PLN operators are STRICTLY 2-ARGUMENT and the
+        # atomspace is ephemeral between calls — the stock metta skill
+        # description documents none of it, and the agent burned ~321
+        # calls on never-matching 3+-arg forms. Two checks: the repo
+        # artifact carries the contract, AND the running agent container
+        # actually has the plugin mounted — the 10:04Z A2 launch failed
+        # exactly because the live start.sh lacked the mount while the
+        # repo file was fine (systemd unit runs /home/ubuntu/omega-
+        # curiosity/start.sh, not the repo copy).
+        try:
+            plugin_path = "/home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/metta-grammar/metta-grammar.metta"
+            r = _run(["grep", "-c", "STRICTLY 2-ARGUMENT", plugin_path])
+            checks["metta_skill_upgraded"] = "ok" if r.returncode == 0 and r.stdout.strip() != "0" else "MISSING"
+        except Exception as e:
+            checks["metta_skill_upgraded"] = f"error: {e}"
+        try:
+            r = _run(["docker", "exec", CONTAINER_AGENT, "test", "-f",
+                      "/PeTTa/repos/Omega/plugins/metta-grammar/metta-grammar.metta"])
+            checks["metta_plugin_mounted"] = "ok" if r.returncode == 0 else "missing"
+        except Exception as e:
+            checks["metta_plugin_mounted"] = f"error: {e}"
+
         # v3: Omega's native embedding memory (remember/query skills) needs
         # the chroma_db target dir to exist in the volume; the image's
         # /PeTTa/chroma_db symlink dangles otherwise and EVERY boot logs
@@ -383,6 +406,8 @@ def preflight(args) -> int:
         checks["memory_volume"] = "dry-run"
         checks["prompt_backup_fresh"] = "dry-run"
         checks["skill_description_upgraded"] = "dry-run"
+        checks["metta_skill_upgraded"] = "dry-run"
+        checks["metta_plugin_mounted"] = "dry-run"
         checks["canary_fetch_ai"] = "dry-run"
 
     ok_values = {"ok", "running", "dry-run"}
@@ -878,6 +903,7 @@ def grade_case(args) -> int:
         window_persist_receipts=len(persist_receipts),
         window_archive_receipts=len(archive_receipts),
         attestation=attestation,
+        facts_index_raw=facts_index_text,
     )
 
     # blob reconstruction lane: arrive back at the source markdown bytes
@@ -1216,6 +1242,7 @@ def grade(args) -> int:
             facts_index=facts_index,
             window_persist_receipts=len(persist_receipts),
             window_archive_receipts=len(archive_receipts),
+            facts_index_raw=facts_index_text,
         )
         results.append(r)
 
