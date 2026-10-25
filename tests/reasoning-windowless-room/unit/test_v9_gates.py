@@ -187,3 +187,33 @@ def test_no_presence_fn_keeps_v8_behavior():
     index = ['(Inheritance (Concept "ceiling") (Concept "overhead-surface-of-room"))']
     r = _gate("original", index, presence_fn=None)
     assert "E_INDEXED_NOT_PERSISTED" not in r.conditions
+
+
+# ---------------------------------------------------------------------------
+# v9.1: agent-IP selection for the attestation lane (wr3i preflight defect)
+# ---------------------------------------------------------------------------
+
+def _pick_agent_ip():
+    # imported lazily: run_benchmark pulls in heavy deps but the helper is pure
+    import run_benchmark as rb
+    return rb._pick_agent_ip
+
+
+def test_pick_agent_ip_prefers_bridge_subnet():
+    pick = _pick_agent_ip()
+    # live defect shape: default bridge 172.17.0.2 + client net 172.20.0.6
+    assert pick(["172.17.0.2", "172.20.0.6"], "172.20.0.5") == "172.20.0.6"
+    assert pick(["172.20.0.6", "172.17.0.2"], "172.20.0.5") == "172.20.0.6"
+
+
+def test_pick_agent_ip_single_or_empty():
+    pick = _pick_agent_ip()
+    assert pick(["172.20.0.6"], "172.20.0.5") == "172.20.0.6"
+    assert pick(["10.0.0.9"], "") == "10.0.0.9"
+    assert pick([], "172.20.0.5") == ""
+
+
+def test_pick_agent_ip_fallback_without_bridge_hint():
+    pick = _pick_agent_ip()
+    # no bridge prefix to match: first address wins deterministically
+    assert pick(["10.1.0.2", "10.2.0.3"], "") == "10.1.0.2"

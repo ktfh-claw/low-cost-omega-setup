@@ -160,14 +160,39 @@ def _sudo_run(cmd: list[str], timeout: float = 60.0) -> subprocess.CompletedProc
     return _run(["sudo", *cmd], timeout=timeout)
 
 
+def _pick_agent_ip(ips: list[str], bridge_ip: str) -> str:
+    """Pick the ONE agent IP the attestation lane matches against.
+
+    The agent container is multi-network (default bridge + the facade
+    client network), so docker inspect enumerates several addresses;
+    the facade access logs only ever see the client-network one. Prefer
+    the IP sharing the bridge's /24; otherwise fall back to the first.
+    (Live defect, wr3i preflight 2026-10-25: "172.17.0.2172.20.0.6" made
+    every attestation regex unmatchable — a passing run would have graded
+    Q_NOT_IN_HISTORY + E_NO_INGEST false blocking conditions.)
+    """
+    if not ips:
+        return ""
+    if len(ips) == 1:
+        return ips[0]
+    prefix = bridge_ip.rsplit(".", 1)[0] if bridge_ip else ""
+    for ip in ips:
+        if prefix and ip.rsplit(".", 1)[0] == prefix:
+            return ip
+    return ips[0]
+
+
 def _container_ip(container: str) -> str:
     try:
         result = _run([
             "docker", "inspect", "--format",
-            "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+            "{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}} {{end}}",
             container,
         ])
-        return result.stdout.strip()
+        ips = [ip for ip in result.stdout.split() if ip]
+        if container == CONTAINER_AGENT:
+            return _pick_agent_ip(ips, _container_ip(CONTAINER_WRITE_BRIDGE))
+        return ips[0] if ips else ""
     except Exception:
         return ""
 
