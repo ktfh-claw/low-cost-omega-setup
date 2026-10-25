@@ -38,18 +38,16 @@ Maintain ONE ledger line and act on it:
 - When the answer block is written: `pin` `LEDGER: step 5 | done: answer block written | next: none — case complete, idle silently` and STOP entirely (see STOP rule).
 
 1. **EXTRACT — one bounded pass over the background sources.** For each background source file in `benchmark/background/`, exactly once:
-
-1. **EXTRACT — one bounded pass over the background sources.** For each background source file in `benchmark/background/`, exactly once:
    - If your extraction record already lists this source with its `git:<sha>`, SKIP it — do not re-read it, do not re-archive it; its clauses are already recorded and in DAS.
    - Otherwise read it ONCE. You may NOT open any background file again after processing it.
    - Run `metta` with `(archive-source "<raw-github-url>")` (URL list in `{{URL_LIST_PATH}}`) — success is ONLY `ARCHIVE-OK git:<40-hex-sha> sha256:<blob> path=<repo path>`. Immediately append to `{{FACTS_INDEX_PATH}}` a line: `source <filename> git:<sha>`.
-   - Derive the predicate clauses (facts) from the text and store EACH ONE via: `(metta "(add-atom &persistent (<expression>) \"<source-url>\" \"git:<sha-from-archive-source>\" (stv 0.9 0.8))")` — success is ONLY `BRIDGE-PERSIST-OK: verified=<n>`. After EACH success, append the exact expression you just persisted to `{{FACTS_INDEX_PATH}}`, one per line.
+   - Derive the predicate clauses (facts) from the text and store EACH ONE via: `(metta "(add-atom &persistent (<expression>) \"<source-url>\" \"git:<sha-from-archive-source>\" (stv 0.9 0.8))")` — success is ONLY `BRIDGE-PERSIST-OK: verified=<n>`. After EACH receipt, IMMEDIATELY append ONE line to `{{FACTS_INDEX_PATH}}`: `expr <the-exact-expression> verified=<n>`. ONE line per receipt — never batch. A fact WITHOUT a fresh `BRIDGE-PERSIST-OK` receipt is NOT persisted: never record it. The gate re-probes every recorded expression against DAS (`E_INDEXED_NOT_PERSISTED`) — an expression you recorded but did not persist is a recorded false claim.
    - Extract the clauses and move on: no summarizing, no analysis, no further study of the file.
    When every source file has been processed or skipped once, step 1 is DONE — proceed to step 2 immediately, even if you think more could be extracted. This record is your query vocabulary: reuse its exact predicate names and literal spellings VERBATIM in every query; a reformulated clause matches nothing and produces a false absence.
 
 2. **FORMALIZE the question as one MeTTa clause.** Reuse the exact predicate names and literal spellings from your extraction record: ground one side with a quoted literal, bind the target with a `$variable`, keep the stored arity/shape and direction. This clause is your QUERY.
 
-3. **RETRIEVE from DAS.** Run `das-retrieve` with the QUERY (the skill description carries the full query grammar). Quote the real tool output. Append `query <pattern> count=<n>` to `{{FACTS_INDEX_PATH}}` immediately so you never re-ask the same question. `count=0` after exact-spelling probes in BOTH directions is a truthful negative — never invent content to fill it.
+3. **RETRIEVE from DAS.** Run `das-retrieve` with the QUERY (the skill description carries the full query grammar). Quote the real tool output. Append `query <pattern> count=<n>` to `{{FACTS_INDEX_PATH}}` immediately so you never re-ask the same question. `count=0` on a query whose expression your record lists as persisted means the WRITE is missing, not the fact: re-run that expression's `add-atom` ONCE (reuse the recorded `git:<sha>`), then re-query ONCE. A second `count=0` after exact-spelling probes in BOTH directions is a truthful negative — never invent content to fill it. Never issue the same query more than twice; a repeated `count=0` is final — route through the LAST LEDGER line to the next step.
 
 4. **EXECUTE THE REASONING — deliverable 1.** Run the reasoning with the `metta` skill. Operator contract: `(|- premiseA premiseB)` and `(|~ premiseA premiseB)` are STRICTLY 2-ARGUMENT; each premise is an `(expression (stv strength confidence))` pair; a successful call returns `((derived-expression (stv s c)))`. NEVER put three or more premises in one call — such forms never evaluate. Chain calls: feed the derived output of one call in as a premise of the next call. After EVERY successful call, IMMEDIATELY append to `{{FACTS_INDEX_PATH}}` a line: `exec <metta-call> => <interpreter-output-with-stv>`. The tool output is gone next cycle — if it is not in the file, it is lost.
    Compose the REASONING trace from the recorded executions: semicolon-separated s-expressions, in this exact order:
@@ -64,6 +62,7 @@ Maintain ONE ledger line and act on it:
 - After a background file has been processed once (or is already recorded), do NOT open or re-read it again for the rest of this case. There is no research step; step 1 ends when every file has been processed or skipped once.
 - When unsure what to do next, the LAST LEDGER line's `next:` field names the next undone step's literal call — issue it; never "study more first", never repeat a completed step, never re-verify an already-recorded result, never re-read state files you already have in your prompt.
 - One case per cycle: do not answer other cases, do not start the next question.
+- NEVER issue the same `das-retrieve` query more than twice per case. `count=0` twice means the pattern is absent (or the write is missing — see step 3's re-persist rule, which you may apply ONCE); after that the zero is final. Re-issuing a twice-zero query is the loop that has killed every prior run.
 
 ### REQUIRED FORMAT (the gate parses this — deviation = FAIL)
 

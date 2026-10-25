@@ -1,0 +1,35 @@
+# Extraction record — wr3h-20261025
+# One persisted predicate expression per line (append after each add-atom).
+source spatial-knowledge.md git:8ffa0b35049c1b9545b08700c0594dc5eb68043e
+
+source spatial-knowledge.md git:8ffa0b35049c1b9545b08700c0594dc5eb68043e
+expr (Inheritance (Concept "ceiling") (Concept "overhead-surface-of-room"))
+expr (Inheritance (Concept "ceiling") (Concept "upper-boundary-of-enclosed-space"))
+expr (Evaluation (Predicate "visible-when-looking-up-inside") (Concept "room") (Concept "ceiling"))
+expr (Evaluation (Predicate "blocks") (Concept "ceiling") (Concept "line-of-sight"))
+expr (Evaluation (Predicate "is-opaque") (Concept "ceiling"))
+expr (Evaluation (Predicate "cannot-see-through") (Concept "ceiling"))
+expr (Evaluation (Predicate "separates") (Concept "ceiling") (Concept "interior-from-exterior"))
+expr (Inheritance (Concept "windowless-room") (Concept "room"))
+expr (Evaluation (Predicate "has-no") (Concept "windowless-room") (Concept "windows"))
+expr (Evaluation (Predicate "no-natural-light-enters") (Concept "windowless-room"))
+expr (Evaluation (Predicate "is-illuminated-by") (Concept "room-interior") (Concept "artificial-light"))
+expr (Evaluation (Predicate "typical-mount-location") (Concept "light-bulb") (Concept "ceiling"))
+expr (Evaluation (Predicate "illuminates") (Concept "light-bulb") (Concept "room-interior"))
+source lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2
+
+expr (Implication (Inheritance (Concept "dark room") (Concept "darkness")) (stv 0.9 0.8)) src=lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2 (BRIDGE-PERSIST-OK verified=19)
+
+source lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2
+expr (Inheritance (Concept "light-bulb") (Concept "artificial-light-source")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Inheritance (Concept "lamp") (Concept "artificial-light-source")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Evaluation (Predicate "illuminates") (Concept "light-source") (Concept "room-surfaces")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Evaluation (Predicate "is-visible") (Concept "light-source")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Evaluation (Predicate "blocks-view-of") (Concept "ceiling") (Concept "sky")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Evaluation (Predicate "reveals") (Concept "activated-light") (Concept "ceiling")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Evaluation (Predicate "becomes-visible-when-illuminated") (Concept "room-interior") (Concept "ceiling")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Evaluation (Predicate "cannot-pass-through") (Concept "light") (Concept "opaque-surface")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+expr (Evaluation (Predicate "typical-mount-location") (Concept "lamp") (Concept "ceiling")) [lighting.md git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2]
+
+
+source failure-modes.md git:6149e5973acce682eafb5661d12f9adaeb527750

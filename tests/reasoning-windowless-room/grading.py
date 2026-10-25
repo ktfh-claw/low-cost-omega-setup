@@ -130,20 +130,113 @@ def normalize_expression(expr: str) -> str:
     return " ".join(expr.split())
 
 
+def _balanced_expression_prefix(line: str) -> str | None:
+    """The balanced, quote-aware parenthesized prefix of ``line``, if any.
+
+    v9 (wr3h evidence): the agent's real extraction-record lines carry the
+    expression plus trailing annotations — ``expr (...) src=<file> git:<sha>``
+    or receipt strings like ``(BRIDGE-PERSIST-OK verified=19)`` — so the
+    expression is the balanced prefix, not the whole line.
+    """
+    depth = 0
+    in_str = False
+    esc = False
+    for i, ch in enumerate(line):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return line[: i + 1]
+    return None
+
+
 def parse_facts_index(text: str) -> list[str]:
     """Parse the agent's facts index (extraction record) into expressions.
 
-    One expression per line; markdown bullets/dashes and CASE markers are
-    tolerated (stripped); blank lines and non-expression lines are skipped.
+    Tolerated line shapes (v9, from live wr3h evidence): plain parenthesized
+    expressions, markdown bullets, a leading ``expr`` label (the template's
+    recorded format), and trailing receipt/source annotations after the
+    balanced expression. ``source <file> git:<sha>`` lines, headers, and
+    non-expression lines are skipped.
     """
     expressions: list[str] = []
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("-") or line.startswith("*"):
             line = line.lstrip("-* ")
-        if line.startswith("(") and line.endswith(")"):
-            expressions.append(normalize_expression(line))
+        if line.startswith("expr ") or line.startswith("expr\t"):
+            line = line[len("expr"):].lstrip()
+        if not line.startswith("("):
+            continue
+        prefix = _balanced_expression_prefix(line)
+        if prefix and len(prefix) > 2:
+            expressions.append(normalize_expression(prefix))
     return expressions
+
+
+def index_variable_form(expr: str) -> str | None:
+    """A probe pattern for ``expr``: last top-level element replaced by $X.
+
+    Ground (variable-free) patterns never complete in the pinned engine,
+    so DAS presence is probed by binding the last element to a variable and
+    comparing the count (>0 = present). Top-level element boundaries are
+    found with a quote-aware scan (parenthesis depth + string state), so
+    parentheses or spaces inside quoted literals cannot confuse it.
+    Returns None when the expression admits no such form (not
+    parenthesized / unbalanced / no second element to bind).
+    """
+    s = expr.strip()
+    if not s.startswith("("):
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    cur_start: int | None = None   # start of the current top-level element
+    outer_close: int | None = None
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            if depth == 1 and cur_start is None:
+                cur_start = i
+            continue
+        if ch == "(":
+            depth += 1
+            if depth > 1 and cur_start is None:
+                cur_start = i
+            continue
+        if ch == ")":
+            depth -= 1
+            if depth == 0:
+                outer_close = i
+                break
+            continue  # inner close: part of the current element
+        if depth == 1 and ch.isspace():
+            cur_start = None  # next element starts after this boundary
+            continue
+        if depth == 1 and cur_start is None:
+            cur_start = i
+    if outer_close is None or cur_start is None:
+        return None  # unbalanced, or no element after the last boundary
+    return s[:cur_start] + "$X" + s[outer_close:]
 
 
 def index_literals(expressions: list[str]) -> set[str]:
@@ -361,7 +454,11 @@ def parse_citations(sources_raw: str) -> list[tuple[str, str]]:
     return citations
 
 
-INFORMATIONAL_CONDITIONS = {"Q_ATTESTED_VIA_ACCESS_LOG", "E_INGEST_ATTESTED_VIA_FACADE_LOG"}
+INFORMATIONAL_CONDITIONS = {
+    "Q_ATTESTED_VIA_ACCESS_LOG",
+    "E_INGEST_ATTESTED_VIA_FACADE_LOG",
+    "E_INDEXED_NOT_PERSISTED",
+}
 
 
 def gate_case(
@@ -376,6 +473,7 @@ def gate_case(
     window_archive_receipts: int = 0,
     attestation: Optional[dict] = None,
     facts_index_raw: str = "",
+    presence_fn=None,
 ) -> GateResult:
     """Apply the full gate (A/Q/E/R/P) to one case.
 
@@ -399,6 +497,13 @@ def gate_case(
     query must still be proven real (now by two tamper-resistant
     machine logs instead of a known-lossy one) AND the receipt/reissue/
     degenerate checks still apply.
+    presence_fn: v9 (wr3h evidence) — probe fn mapping a variable-form
+    pattern to {"count": int, "error": ...} against DAS. When provided,
+    every recorded index expression is probed; ones that resolve to zero
+    are reported as the informational E_INDEXED_NOT_PERSISTED condition
+    with per-expression detail (wr3h's failure mode: the index claimed
+    ~23 persisted expressions but ~10 were never written; the agent then
+    re-queried the missing atoms to deadline).
     """
     case_id = case["id"]
     conditions: list[str] = []
@@ -527,6 +632,29 @@ def gate_case(
                     if foreign:
                         conditions.append("E_LITERAL_NOT_EXTRACTED")
                         detail["foreign_literals"] = foreign[:5]
+                # v9 (wr3h evidence): presence cross-check — every recorded
+                # index expression must actually resolve in DAS. wr3h
+                # recorded ~23 expressions but ~10 (incl. the case-critical
+                # spatial facts) were never persisted; the agent then
+                # re-queried the missing atoms to deadline. Informational in
+                # the gate (the discipline fix is prompt-side), but now
+                # VISIBLE per expression instead of silently misleading the
+                # whole run.
+                if presence_fn is not None:
+                    absent = []
+                    for e in index:
+                        probe = index_variable_form(e)
+                        if probe is None:
+                            continue
+                        resp = presence_fn(probe)
+                        if resp.get("error"):
+                            continue  # probe failure is not gate evidence
+                        if resp.get("count", 0) <= 0:
+                            absent.append(e)
+                    detail["index_absent_count"] = len(absent)
+                    detail["index_absent"] = absent[:5]
+                    if absent:
+                        conditions.append("E_INDEXED_NOT_PERSISTED")
 
     # --- R-gate: MeTTa reasoning trace (campaign-grade standard, 2026-10-24
     # directive): the REASONING: line must carry the formalized reasoning

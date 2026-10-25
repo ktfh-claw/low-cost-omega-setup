@@ -886,15 +886,20 @@ def grade_case(args) -> int:
         except Exception as e:
             return {"error": str(e)}
 
-    # attestation lane: window = [setup restart, now]
+    # attestation lane: window = [setup restart, now]. v9: ALWAYS
+    # collected — the history channel collapses tool calls to $_ (wr3h:
+    # 100% placeholder tuples), so the retrieve/persist/archive censuses
+    # come from the tamper-resistant facade + read-proxy access logs. The
+    # query-specific qe_pattern_match stays conditional on the block
+    # naming a query (empty query -> False, so Q_NOT_IN_HISTORY semantics
+    # are unchanged).
     since_iso = None
     setup_json = _load_json(rd / f"setup-case-{args.case}.json") or {}
     since_iso = setup_json.get("restarted_at") or _now_iso()
-    attestation = None
-    if block is not None and block.queries:
-        attestation = collect_attestation(
-            args, args.case, since_iso, _now_iso(),
-            history_parse.normalize_query(block.queries[0]))
+    att_query = (history_parse.normalize_query(block.queries[0])
+                 if (block is not None and block.queries) else "")
+    attestation = collect_attestation(
+        args, args.case, since_iso, _now_iso(), att_query)
 
     r = grading_mod.gate_case(
         case, block, history_queries, placeholder_calls, reissue,
@@ -904,6 +909,7 @@ def grade_case(args) -> int:
         window_archive_receipts=len(archive_receipts),
         attestation=attestation,
         facts_index_raw=facts_index_text,
+        presence_fn=reissue,
     )
 
     # blob reconstruction lane: arrive back at the source markdown bytes
@@ -950,6 +956,9 @@ def grade_case(args) -> int:
             "persist_receipts": len(persist_receipts),
             "archive_receipts": len(archive_receipts),
             "add_atom_shas": add_atom_shas[:20],
+            "attested_retrieve_calls": attestation["access_count"],
+            "attested_write_calls": attestation["write_count"],
+            "attested_archive_calls": attestation["archive_count"],
         },
         "facts_index_size": len(facts_index),
         "attestation": attestation,
