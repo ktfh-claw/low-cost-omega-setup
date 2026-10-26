@@ -126,6 +126,8 @@ Machine states are emitted in `grade-case-<case>.json`, `grade.json`, `report.js
 
 **Blob reconstruction lane (evidence, not a condition):** for every citation, the harness reconstructs the archived blob and byte-compares it against the repo's background markdown (`matches_repo_file`), persisting it under `results/<run-id>/reconstructed/`. A tampered blob already fails `BLOB_SHA_MISMATCH`; the byte-compare additionally proves the archived bytes ARE the background markdown the agent's reasoning was extracted from.
 
+**Prompt-side counterpart (v14):** the extraction record stores each archive receipt in full — `source <filename> git:<sha> sha256:<blob> path=<repo path> <raw-github-url>` — and the answer block's SOURCES pairs are copied verbatim from those recorded `source` lines (never re-typed, never re-paired, never guessed). A sha or URL that appears in no recorded `source` line is fabricated provenance; this gate is what catches it when the discipline slips (wr3i one-position mispairing; wr3m corrupted re-typed sha and invented URL).
+
 ---
 
 ## 8. Harness-side attestation lane states
@@ -184,3 +186,4 @@ History census (grade JSON `history_window`): `mode` (window mode; `full` = curr
 - v11 (2026-10-26): atom-wise grounding for EVERY non-first trace step; memory-volume-relative prompt paths.
 - v12 (2026-10-26): prompt-side FACTS verbatim-copy discipline (this reference added); gates unchanged.
 - v13 (2026-10-26): `A_SKY` negation lexicon extended with lexical blockers (blocks/prevents/excludes/hides/obscures + inflections) — wr3l evidence: the honest answer "blocks any view of the sky" false-failed; an UNNEGATED claim still fails and the negation/blocker must still PRECEDE the keyword.
+- v14 (2026-10-26): prompt-side full-provenance extraction records — every `source` line now records the complete archive receipt (sha + sha256 blob + repo path + raw-github URL) and SOURCES pairs are verbatim copies of recorded pairs; gates unchanged.

@@ -199,5 +199,9 @@ def test_prompt_cites_sha_url_pairs_verbatim():
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "..", "agent_prompt_template.md")) as f:
         t = f.read()
+    # v14: the anti-mispair rule now points at the extraction record's
+    # `source` lines (full provenance receipts recorded at archive time:
+    # sha + blob + path + url) instead of the ephemeral archive receipt,
+    # and forbids citing anything outside a recorded `source` line
     assert "never re-pair a sha with a different url" in t
-    assert "never cite a sha for a file you did not archive this case" in t
+    assert "never cite a sha or url that appears in no recorded `source` line" in t

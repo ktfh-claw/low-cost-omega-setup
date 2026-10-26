@@ -72,5 +72,8 @@ def test_step1_answer_vocabulary():
     # exact spellings — the gloss trap is answer-side, not query-side only
     t = _template()
     seg = _segment(t, "1. **EXTRACT", "2. **FORMALIZE")
-    assert "query AND answer vocabulary" in seg
+    # v14 extends the binding to SOURCES citations as well (full
+    # provenance receipts: sha + blob + path + url recorded at archive
+    # time; citation pairs copied from the record, never rebuilt)
+    assert "query, answer AND SOURCES vocabulary" in seg
     assert "an unrecorded expression on a FACTS: line is a false claim" in seg
