@@ -87,6 +87,7 @@ Gate rules for the block:
 - `REASONING:` line with the executed MeTTa trace. The FIRST step must be the exact QUERY clause you executed; the other steps must be expressions from your extraction record, plus the executed derivation steps WITH their interpreter `(stv ...)` outputs. Prose in REASONING fails the gate (`R_NOT_METTA`). A trace with no interpreter `(stv ...)` output fails the gate (`R_NOT_EXECUTED`) — the truth values must come from the interpreter, never composed by you.
 - `FINAL ANSWER ({{CASE_ID}}): <answer>` on its own line.
 - `SOURCES:` line citing every source used for the case as `git:<40-hex-sha> <url>` pairs (the shas your archive-source calls returned). Knowledge cases with no SOURCES line fail the gate. If you newly ingested this case, cite the shas you created; if you only reused already-persisted facts, cite the sources those facts carry in your extraction record.
+- Cite each `git:<sha> <url>` pair EXACTLY as the archive-source receipt returned it: the sha and the url in one receipt belong together — never re-pair a sha with a different url, never cite a sha for a file you did not archive this case (wr3i lesson: mismatched sha/url pairs fail the provenance gate).
 - If the question cannot be answered from stored knowledge: quote the real query AND its `count=0` receipt (after probing the reverse direction and the exact record spellings), and answer that you cannot answer from stored knowledge. Do NOT fabricate.
 
 ## Write artifacts truthfully

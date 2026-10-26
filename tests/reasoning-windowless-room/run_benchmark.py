@@ -247,8 +247,21 @@ def _docker_logs_since(container: str, since_iso: str, until_iso: str) -> str:
 def _agent_query_count_in_window(since_iso: str, until_iso: str, agent_ip: str) -> int:
     """Count real POST /v1/query 200s from the agent IP in the window."""
     logs = _docker_logs_since(CONTAINER_READ_PROXY, since_iso, until_iso)
+    return _count_query_posts(logs, agent_ip)
+
+
+def _count_query_posts(logs: str, agent_ip: str) -> int:
+    """Count agent-IP POST /v1/query 2xx lines in read-proxy access logs.
+
+    v10 (wr3i evidence): the previous rf-string pattern was over-escaped
+    (``HTTP/1\\\\.1`` and ``2\\\\d\\\\d`` demand literal backslashes in the
+    log line), so the attested-retrieve lane read 0 for every window that
+    contained real query traffic. Single-escaped form — byte-identical to
+    the working facade pattern in ``_posts_in_window`` — matches the real
+    log line ``... "POST /v1/query HTTP/1.1" 200 -``.
+    """
     pat = re.compile(
-        rf"http {re.escape(agent_ip)} \"POST /v1/query HTTP/1\\.1\" 2\\d\\d"
+        rf"http {re.escape(agent_ip)} \"POST /v1/query HTTP/1\.1\" 2\d\d"
     )
     return len(pat.findall(logs))
 
