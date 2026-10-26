@@ -53,7 +53,8 @@ INDEX = parse_facts_index(FACTS_INDEX)
 assert len(INDEX) == 3, INDEX
 
 
-def _block(case_id, query, facts, sources=None, count=1, reasoning=None):
+def _block(case_id, query, facts, sources=None, count=1, reasoning=None,
+           answer="the ceiling"):
     src = sources or (FAKE_SHA + " " + FAKE_URL)
     if reasoning is None:
         # v6 R-gate: default trace = question clause; a stored fact step
@@ -72,7 +73,7 @@ QUERY: {query}
 DAS_RETRIEVE_OK untrusted=true count={count} truncated=false results=[...]
 FACTS: {facts}
 REASONING: {reasoning}
-FINAL ANSWER ({case_id}): the ceiling
+FINAL ANSWER ({case_id}): {answer}
 SOURCES: {src}
 """
     blocks = parse_answers_v2(text)
@@ -155,15 +156,15 @@ def test_e_gate_good_extraction_passes():
 
 
 def test_e_gate_missing_facts_line_fails():
-    block = _block("easy", '(Inheritance $X (Concept "ceiling"))', "")
-    r = _gate("easy", block, facts_index=INDEX,
+    block = _block("original", '(Inheritance $X (Concept "ceiling"))', "")
+    r = _gate("original", block, facts_index=INDEX,
               window_persist_receipts=1, window_archive_receipts=1)
     assert r.verdict == "FAIL"
     assert "E_NO_FACTS" in r.conditions
 
 
 def test_e_gate_facts_not_in_index_fails():
-    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
                              '(Inheritance (Concept "made-up") $X)'),
               facts_index=INDEX,
               window_persist_receipts=1, window_archive_receipts=1)
@@ -173,7 +174,7 @@ def test_e_gate_facts_not_in_index_fails():
 
 def test_e_gate_foreign_query_literal_fails():
     # query reformulates the extracted vocabulary -> mechanical-trap rule
-    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "roome"))',
+    r = _gate("original", _block("original", '(Inheritance $X (Concept "roome"))',
                              '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
               window_persist_receipts=1, window_archive_receipts=1)
@@ -183,7 +184,7 @@ def test_e_gate_foreign_query_literal_fails():
 
 
 def test_e_gate_reused_literal_passes():
-    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
                              '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
               window_persist_receipts=1, window_archive_receipts=1)
@@ -200,9 +201,10 @@ def test_e_gate_no_ingest_first_case_fails_without_receipts():
 
 
 def test_e_gate_later_case_ingest_not_required():
-    # "easy" is not the first case: no fresh ingest required
-    r = _gate("easy", _block("easy", '(Inheritance $X (Concept "ceiling"))',
-                             '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
+    # "false" is not the first case: no fresh ingest required
+    r = _gate("false", _block("false", '(Inheritance $X (Concept "ceiling"))',
+                              '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                              answer="false — you see the ceiling, not the sky"),
               facts_index=INDEX,
               window_persist_receipts=0, window_archive_receipts=0)
     assert r.verdict == "PASS", r.conditions
@@ -260,10 +262,10 @@ def test_r_gate_prose_reasoning_fails():
 
 
 def test_r_gate_missing_reasoning_line_fails():
-    block = _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    block = _block("original", '(Inheritance $X (Concept "ceiling"))',
                    '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))')
     block.reasoning_raw = ""
-    r = _gate("easy", block, facts_index=INDEX,
+    r = _gate("original", block, facts_index=INDEX,
               window_persist_receipts=1, window_archive_receipts=1)
     assert r.verdict == "FAIL"
     assert "R_MISSING" in r.conditions
@@ -271,8 +273,8 @@ def test_r_gate_missing_reasoning_line_fails():
 
 def test_r_gate_single_step_fails():
     # a trace needs at least the question clause + one derivation step
-    r = _gate("easy",
-              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning='(Inheritance $X (Concept "ceiling"))'),
               facts_index=INDEX,
@@ -281,8 +283,8 @@ def test_r_gate_single_step_fails():
 
 
 def test_r_gate_first_step_must_be_the_query():
-    r = _gate("easy",
-              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning='(Evaluation (Predicate "visible-when-looking-up") (Concept "observer-inside-room") (Concept "ceiling")); (Inheritance $X (Concept "ceiling"))'),
               facts_index=INDEX,
@@ -294,8 +296,8 @@ def test_r_gate_first_step_must_be_the_query():
 def test_r_gate_ungrounded_middle_step_fails():
     # a step that is neither the query nor an extraction-record atom nor a
     # derived conclusion over stored vocabulary = fabricated reasoning
-    r = _gate("easy",
-              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning='(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "made-up-relation") (Concept "room") (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
@@ -317,8 +319,8 @@ def test_r_gate_derived_conclusion_over_stored_vocab_passes():
         '(Evaluation (Predicate "visible-when-looking-up") $X (Concept "ceiling"))) (stv 1.0 0.9)) '
         '((Inheritance (Concept "windowless-room") (Concept "enclosed-space")) (stv 0.81 0.5184))) '
         '=> ((Evaluation (Predicate "visible-when-looking-up") (Concept "windowless-room") (Concept "ceiling")) (stv 0.81 0.4665))\n')
-    r = _gate("easy",
-              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning=f'(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); {derived}'),
               facts_index=INDEX,
@@ -329,8 +331,8 @@ def test_r_gate_derived_conclusion_over_stored_vocab_passes():
 
 def test_r_gate_derived_conclusion_with_foreign_literal_fails():
     derived = '(Evaluation (Predicate "visibility") (Concept "gazer") (Concept "ceiling"))'
-    r = _gate("easy",
-              _block("easy", '(Inheritance $X (Concept "ceiling"))',
+    r = _gate("original",
+              _block("original", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning=f'(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); {derived}'),
               facts_index=INDEX,

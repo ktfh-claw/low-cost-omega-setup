@@ -71,7 +71,7 @@ def test_wr3j_mid_trace_derivation_output_grounded():
     # v11 grounds it atom-wise over the stored vocabulary.
     index = [INDEX_EXPR]
     reasoning = QUERY + "; " + INDEX_EXPR + "; " + MID_DERIVATION + "; " + FINAL_EXEC_STEP
-    r = _gate("uncertainty", index, QUERY, reasoning)
+    r = _gate("original", index, QUERY, reasoning)
     assert "R_TRACE_NOT_GROUNDED" not in r.conditions, r.detail
 
 
@@ -93,7 +93,7 @@ def test_fabricated_mid_step_still_fails():
     index = [INDEX_EXPR]
     fabricated = "((--> (gazing-upwards attic-space) beholds-roof-window) (stv 0.7 0.5))"
     reasoning = QUERY + "; " + INDEX_EXPR + "; " + fabricated
-    r = _gate("uncertainty", index, QUERY, reasoning)
+    r = _gate("original", index, QUERY, reasoning)
     assert "R_TRACE_NOT_GROUNDED" in r.conditions
 
 
@@ -101,5 +101,5 @@ def test_first_step_query_rule_unchanged():
     # step0 must still be the exact formalized question clause
     index = [INDEX_EXPR]
     reasoning = INDEX_EXPR + "; " + MID_DERIVATION
-    r = _gate("uncertainty", index, QUERY, reasoning)
+    r = _gate("original", index, QUERY, reasoning)
     assert "R_TRACE_NOT_GROUNDED" in r.conditions

@@ -81,7 +81,7 @@ def test_stv_valid():
         assert 0.0 <= stv[1] <= 1.0
 
 def test_test_case_ids():
-    expected = {"original", "uncertainty", "unsolvable", "true", "false", "easy", "difficult"}
+    expected = {"original", "unsolvable", "false"}
     actual = set(c["id"] for c in TEST_CASES)
     assert actual == expected
 

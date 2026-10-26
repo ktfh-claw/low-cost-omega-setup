@@ -29,7 +29,7 @@ Sequential-mode properties:
 
 - **Agent-driven ingestion.** The harness does NOT archive the background sources; the agent must ingest them itself (archive-source → ARCHIVE-OK; add-atom → BRIDGE-PERSIST-OK). The E-gate's first-case ingest check (below) verifies this actually happened.
 - **Independent grading.** Every case is graded regardless of the previous case's verdict; the sequence continues after a FAIL. Overall gate: PASS iff every selected case passes and no harness error occurred.
-- **`--cases` subset filter** (iteration mode): relaunch only the cases under test, e.g. `--cases original,uncertainty`. Unknown ids are a harness error.
+- **`--cases` subset filter** (iteration mode): relaunch only the cases under test, e.g. `--cases original,false`. Unknown ids are a harness error.
 - The first case in `facts.TEST_CASES` order (`original`) is the ingest-required case (E-gate).
 - **Per-case history trim** (v4). With the trim enabled (default), grading's window mode for a trimmed case falls back to `full` — the whole live history.metta at grade time, which after the trim contains ONLY this case's episodes (plus the comment-only marker, which parses as zero retrievals/receipts/shas). This is the designed window semantics under the trim; `mode` is recorded per case in the grade-case JSON. Continuation runs (`--cases` without `original`) preserve the accumulated answers.md/facts-index.md (cross-case carry-over) but still create run backups at their first setup-case.
 
@@ -119,12 +119,10 @@ For every `git:<sha>` citation on a case's SOURCES line, the grader reconstructs
 | # | ID | Type | Expected answer |
 |---|----|------|----------------|
 | 1 | `original` | Primary prompt | The ceiling (or lamp/bulb on it) |
-| 2 | `uncertainty` | Ambiguity variant | The ceiling |
-| 3 | `unsolvable` | Unrelated domain (capital of Australia) | Honest inability; proven count=0 absence |
-| 4 | `true` | True statement | true |
-| 5 | `false` | False statement | false |
-| 6 | `easy` | Simple lookup | The ceiling |
-| 7 | `difficult` | Multi-step (attic) | The sloped ceiling (underside of the roof) |
+| 2 | `unsolvable` | Unrelated domain (capital of Australia) | Honest inability; proven count=0 absence |
+| 3 | `false` | False statement | false |
+
+The case set is 3 cases as of v15 (was 7 through v14; removed: `uncertainty`, `true`, `easy`, `difficult` — prompt files deleted, gates NOT relaxed).
 
 Sequential mode renders each case's `question` (facts.py) into the per-case prompt.
 

@@ -1125,7 +1125,7 @@ def full_sequential(args) -> int:
     """v3 default: preflight -> cleanup-das -> per case (setup/agent/grade,
     independent) -> report -> teardown (always).
 
-    --cases limits the sequence to a subset (e.g. "original,uncertainty") —
+    --cases limits the sequence to a subset (e.g. "original,false") —
     the iteration mode: relaunch only the cases under test.
     """
     facts_mod = _facts_mod()

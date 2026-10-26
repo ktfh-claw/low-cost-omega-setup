@@ -138,7 +138,7 @@ def test_wr3i_executed_derivation_step_grounded():
     index = ["((--> (looking-up windowless-room) sees-ceiling) (stv 0.9 0.8))"]
     query = "(--> (looking-up windowless-room) $X)"
     reasoning = (query + "; " + index[0] + "; " + WR3I_TRACE_STEP)
-    r = _gate("uncertainty", index, query, reasoning)
+    r = _gate("original", index, query, reasoning)
     assert "R_TRACE_NOT_GROUNDED" not in r.conditions, r.detail
 
 
@@ -147,7 +147,7 @@ def test_fabricated_conclusion_atoms_still_fail():
     query = "(--> (looking-up windowless-room) $X)"
     fabricated = "((--> (gazing-upwards attic-space) beholds-roof-window) (stv 0.7 0.5))"
     reasoning = (query + "; " + index[0] + "; " + fabricated)
-    r = _gate("uncertainty", index, query, reasoning)
+    r = _gate("original", index, query, reasoning)
     assert "R_TRACE_NOT_GROUNDED" in r.conditions
 
 

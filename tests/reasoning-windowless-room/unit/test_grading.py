@@ -69,15 +69,15 @@ def test_parse_answers_v2_receipt_count():
 
 def test_parse_answers_v2_bare_final_answer_compatibility():
     """FINAL ANSWER lines outside ### CASE blocks still parse (v1 shape)."""
-    text = "FINAL ANSWER (easy): the ceiling"
+    text = "FINAL ANSWER (original): the ceiling"
     blocks = parse_answers_v2(text)
-    assert blocks["easy"].final_answer == "the ceiling"
+    assert blocks["original"].final_answer == "the ceiling"
 
 
 def test_parse_answers_v2_query_quoted_form():
-    text = '### CASE easy\n\nQUERY: "(Inheritance $X (Concept \\"ceiling\\"))"\nFINAL ANSWER (easy): the ceiling\n'
+    text = '### CASE original\n\nQUERY: "(Inheritance $X (Concept \\"ceiling\\"))"\nFINAL ANSWER (original): the ceiling\n'
     blocks = parse_answers_v2(text)
-    assert blocks["easy"].queries == ['(Inheritance $X (Concept "ceiling"))']
+    assert blocks["original"].queries == ['(Inheritance $X (Concept "ceiling"))']
 
 
 # ---------------------------------------------------------------------------
@@ -196,8 +196,8 @@ def test_gate_case_query_not_in_history_fails():
 
 
 def test_gate_case_placeholder_query_fails():
-    case = _case("easy")
-    block = _block_for("easy", query="$_131542")
+    case = _case("original")
+    block = _block_for("original", query="$_131542")
     r = gate_case(case, block,
                   history_queries=["$_131542"],
                   history_placeholder_calls=1,
@@ -208,8 +208,8 @@ def test_gate_case_placeholder_query_fails():
 
 
 def test_gate_case_degenerate_query_fails():
-    case = _case("easy")
-    block = _block_for("easy", query="(Inheritance $X $Y)")
+    case = _case("original")
+    block = _block_for("original", query="(Inheritance $X $Y)")
     r = gate_case(case, block,
                   history_queries=["(Inheritance $X $Y)"],
                   history_placeholder_calls=0,
@@ -220,8 +220,8 @@ def test_gate_case_degenerate_query_fails():
 
 
 def test_gate_case_reissue_mismatch_fails():
-    case = _case("easy")
-    block = _block_for("easy", count=5)
+    case = _case("original")
+    block = _block_for("original", count=5)
     r = gate_case(case, block,
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
@@ -232,8 +232,8 @@ def test_gate_case_reissue_mismatch_fails():
 
 
 def test_gate_case_no_receipt_fails():
-    case = _case("easy")
-    block = _block_for("easy")
+    case = _case("original")
+    block = _block_for("original")
     block.receipt_counts = []
     r = gate_case(case, block,
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
@@ -245,8 +245,8 @@ def test_gate_case_no_receipt_fails():
 
 
 def test_gate_case_answer_after_query_order_fails():
-    case = _case("easy")
-    block = _block_for("easy", order="answer_first")
+    case = _case("original")
+    block = _block_for("original", order="answer_first")
     r = gate_case(case, block,
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
@@ -257,8 +257,8 @@ def test_gate_case_answer_after_query_order_fails():
 
 
 def test_gate_case_missing_sources_fails():
-    case = _case("easy")
-    block = _block_for("easy", sources="")
+    case = _case("original")
+    block = _block_for("original", sources="")
     r = gate_case(case, block,
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
@@ -269,8 +269,8 @@ def test_gate_case_missing_sources_fails():
 
 
 def test_gate_case_unresolved_citation_fails():
-    case = _case("easy")
-    block = _block_for("easy")
+    case = _case("original")
+    block = _block_for("original")
     SHA = "git:8ffa0b35049c1b9545b08700c0594dc5eb68043e"
     bad = [(SHA, "https://example.com/spatial-knowledge.md", ["COMMIT_NOT_IN_REPO"])]
     r = gate_case(case, block,
@@ -344,8 +344,8 @@ def test_gate_case_missing_block_quad_fail():
 
 
 def test_gate_summary_aggregates():
-    ok = gate_case(_case("easy"),
-                   _block_for("easy"),
+    ok = gate_case(_case("original"),
+                   _block_for("original"),
                    ['(Inheritance $X (Concept "ceiling"))'],
                    0, lambda q: {"count": 1}, _ok_citations())
     bad = gate_case(_case("original"), None, [], 0, None, [])
@@ -366,7 +366,7 @@ WR_RUN2_ANSWERS = """# Benchmark answers — wr-20261021-2355
 
 FINAL ANSWER (original): the ceiling
 FINAL ANSWER (uncertainty): the ceiling
-FINAL ANSWER (easy): the ceiling
+FINAL ANSWER (original): the ceiling
 FINAL ANSWER (difficult): the sloped ceiling (underside of the roof)
 FINAL ANSWER (true): true
 FINAL ANSWER (false): false

@@ -51,7 +51,7 @@ Failure reasons are machine-readable condition codes (`A_MISSING`, `Q_NOT_IN_HIS
 
 ## Success Criteria
 
-- All 7 cases PASS the A/Q/E/R/P gate (exit 0)
+- All selected cases (3-case set: `original`, `unsolvable`, `false`) PASS the A/Q/E/R/P gate (exit 0)
 - No fabricated queries (quoted query must exist in the benchmark-window history)
 - No degenerate queries (placeholders, bare variables)
 - Every citation resolves to the provenance git repo

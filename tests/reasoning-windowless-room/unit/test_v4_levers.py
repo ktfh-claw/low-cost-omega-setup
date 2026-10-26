@@ -40,7 +40,7 @@ def test_setup_case_default_window_75_minutes():
 def test_timeout_minutes_overridable():
     args = rb.build_parser().parse_args(["full", "--run-id", "t", "--timeout-minutes", "60"])
     assert args.timeout_minutes == 60
-    args = rb.build_parser().parse_args(["agent-case", "--case", "easy", "--run-id", "t",
+    args = rb.build_parser().parse_args(["agent-case", "--case", "false", "--run-id", "t",
                                          "--timeout-minutes", "90"])
     assert args.timeout_minutes == 90
 
@@ -79,8 +79,8 @@ def test_trim_marker_is_comment_only_metta():
 
 
 def test_trim_marker_identifies_run_and_case():
-    m = rb._trim_marker("wr3c-20261024", "uncertainty")
-    assert "wr3c-20261024" in m and "uncertainty" in m
+    m = rb._trim_marker("wr3c-20261024", "false")
+    assert "wr3c-20261024" in m and "false" in m
 
 
 def test_trim_marker_is_never_parsed_as_an_episode():
@@ -252,12 +252,12 @@ def test_setup_case_trim_is_per_case_not_per_run():
         # case 1 writes episodes into history (simulated)
         fv.files["/fake/vol/history.metta"] = (
             rb._trim_marker("t-run", "original") + '(("2026-10-24 07:10:00" ((query "q1")))\n')
-        rc = rb.setup_case(_fake_args("t-run", "uncertainty"))
+        rc = rb.setup_case(_fake_args("t-run", "false"))
         assert rc == 0, rc
         # the SECOND case must ALSO be trimmed (marker of case 2, not case 1)
-        assert fv.files["/fake/vol/history.metta"] == rb._trim_marker("t-run", "uncertainty")
+        assert fv.files["/fake/vol/history.metta"] == rb._trim_marker("t-run", "false")
         # and the case-1 episodes must be archived in the case-2 pre-snapshot
-        pre2 = fv.files["/fake/vol/history.pre-case-t-run-uncertainty.metta"]
+        pre2 = fv.files["/fake/vol/history.pre-case-t-run-false.metta"]
         assert "q1" in pre2
         # answers.md NOT re-initialized on later cases (cross-case carry-over)
         assert "Benchmark answers" in fv.files["/fake/vol/benchmark/answers.md"]
@@ -290,7 +290,7 @@ def test_setup_case_continuation_run_still_backs_up_without_reinit():
     try:
         fv.files["/fake/vol/benchmark/answers.md"] = "### CASE original\n...accumulated\n"
         fv.files["/fake/vol/benchmark/facts-index.md"] = "(Inheritance (Concept \"room\") (Concept \"enclosed-space\"))\n"
-        rc = rb.setup_case(_fake_args("t-run", "uncertainty"))
+        rc = rb.setup_case(_fake_args("t-run", "false"))
         assert rc == 0, rc
         assert fv.files["/fake/vol/prompt.txt.bak-pre-benchmark-t-run"] == "STANDBY PROMPT"
         assert any(k.endswith("history.bak-pre-benchmark-t-run") for k in fv.files)

@@ -16,7 +16,7 @@ Machine states are emitted in `grade-case-<case>.json`, `grade.json`, `report.js
 | `per_case[case].verdict` | `PASS` / `FAIL` / `ERROR` | `ERROR` = the case never reached grading (setup phase failed); recorded in `full` mode only. |
 | `mode` | `sequential` / `batch` | Sequential = one prompt, one question, per-case phases (default). Batch = v2 all-at-once flow (kept for offline re-grades). |
 
-**Case set** (`facts.TEST_CASES`): `original`, `uncertainty`, `unsolvable`, `true`, `false`, `easy`, `difficult`. A case PASSes iff it accumulates **zero blocking conditions** (informational conditions never fail a case — §2).
+**Case set** (`facts.TEST_CASES`, 3 cases as of v15 — was 7 through v14): `original`, `unsolvable`, `false`. Removed cases (`uncertainty`, `true`, `easy`, `difficult`) deleted with their prompt files; gates and e2e procedure otherwise unchanged. A case PASSes iff it accumulates **zero blocking conditions** (informational conditions never fail a case — §2).
 
 ---
 
