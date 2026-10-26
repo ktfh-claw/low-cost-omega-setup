@@ -17,7 +17,7 @@ Everything else is input-gathering for these two artifacts. There is **NO open-e
 
 {{QUESTION}}
 
-Answer it using ONLY your DAS-persisted knowledge and the background files (in your memory volume at `benchmark/background/`). Do NOT use websearch. Do NOT answer from parametric memory alone.
+Answer it using ONLY your DAS-persisted knowledge and the background files (in your memory volume at `repos/Omega/memory/benchmark/background/`). Do NOT use websearch. Do NOT answer from parametric memory alone.
 
 ## TASK LIST — fixed pipeline, each step exactly once, no other work
 
@@ -37,7 +37,7 @@ Maintain ONE ledger line and act on it:
 - When a step completes, advance the ledger to the next step in the same pin.
 - When the answer block is written: `pin` `LEDGER: step 5 | done: answer block written | next: none — case complete, idle silently` and STOP entirely (see STOP rule).
 
-1. **EXTRACT — one bounded pass over the background sources.** For each background source file in `benchmark/background/`, exactly once:
+1. **EXTRACT — one bounded pass over the background sources.** For each background source file in `repos/Omega/memory/benchmark/background/`, exactly once:
    - If your extraction record already lists this source with its `git:<sha>`, SKIP it — do not re-read it, do not re-archive it; its clauses are already recorded and in DAS.
    - Otherwise read it ONCE. You may NOT open any background file again after processing it.
    - Run `metta` with `(archive-source "<raw-github-url>")` (URL list in `{{URL_LIST_PATH}}`) — success is ONLY `ARCHIVE-OK git:<40-hex-sha> sha256:<blob> path=<repo path>`. Immediately append to `{{FACTS_INDEX_PATH}}` a line: `source <filename> git:<sha>`.

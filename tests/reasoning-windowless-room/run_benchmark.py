@@ -87,6 +87,19 @@ BENCH_REL = "benchmark"
 ANSWERS_REL = f"{BENCH_REL}/answers.md"
 FACTS_INDEX_REL = f"{BENCH_REL}/facts-index.md"
 URLS_REL = f"{BENCH_REL}/urls.txt"
+# v11 (wr3j evidence): the prompt-rendered artifact paths must be
+# MEMORY-VOLUME-RELATIVE, not benchmark-relative. The agent container's
+# file tools (append-file/read-file) resolve relative paths against the
+# container cwd /PeTTa, and /PeTTa/benchmark does not exist — the volume is
+# mounted at /PeTTa/repos/Omega/memory. wr3j burned the case-1 window on
+# 34+ APPEND-FAILED "file does not exist" loops before the agent
+# self-worked-around via the repos/Omega/memory path. Shell `cat` calls
+# resolved the same defect in earlier runs (wr3c "cwd disorientation,
+# self-recovered"). The same in-container path works for ALL tools.
+BENCH_PROMPT_REL = "repos/Omega/memory/benchmark"
+ANSWERS_PROMPT_REL = f"{BENCH_PROMPT_REL}/answers.md"
+FACTS_INDEX_PROMPT_REL = f"{BENCH_PROMPT_REL}/facts-index.md"
+URLS_PROMPT_REL = f"{BENCH_PROMPT_REL}/urls.txt"
 
 # v4 (lever 3 of the wr3b post-mortem, 2026-10-24): the stock agent appends
 # every episode to history.metta and serializes the WHOLE file into every
@@ -681,9 +694,9 @@ def _render_case_prompt(args, case: dict) -> str:
             .replace("{{RUN_ID}}", args.run_id)
             .replace("{{CASE_ID}}", case["id"])
             .replace("{{QUESTION}}", case["question"])
-            .replace("{{URL_LIST_PATH}}", URLS_REL)
-            .replace("{{ANSWERS_PATH}}", ANSWERS_REL)
-            .replace("{{FACTS_INDEX_PATH}}", FACTS_INDEX_REL))
+            .replace("{{URL_LIST_PATH}}", URLS_PROMPT_REL)
+            .replace("{{ANSWERS_PATH}}", ANSWERS_PROMPT_REL)
+            .replace("{{FACTS_INDEX_PATH}}", FACTS_INDEX_PROMPT_REL))
 
 
 def _agent_restart() -> bool:

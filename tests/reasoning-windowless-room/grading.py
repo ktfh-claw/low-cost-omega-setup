@@ -820,33 +820,31 @@ def gate_case(
                 if query_norm:
                     vocab |= set(query_literals(query_norm))
                     bare_vocab |= _bare_content_symbols(query_norm)
-                last = len(trace_steps) - 1
                 for i, step in enumerate(trace_steps[1:], start=1):
                     if step == query_norm or step in idx_set:
                         continue  # the question clause / an existing atom
-                    if i == last:
-                        # v10 (wr3i evidence): the final step is often the
-                        # executed derivation line itself, ``(|- call premise)
-                        # => output`` — parse_reasoning_trace keeps it as one
-                        # s-expression because ``=>`` terminates the balanced
-                        # prefix only after the output. Ground it as ATOMS:
-                        # every atom of the step (call, premises, output)
-                        # must be an existing/recorded atom (query clause,
-                        # index expression, or exec output). A whole-line
-                        # comparison could never ground it.
-                        grounded = True
-                        for atom in _split_derivation_atoms(step):
-                            if atom in idx_set or atom == query_norm:
-                                continue
-                            lits = set(query_literals(atom))
-                            bare = _bare_content_symbols(atom)
-                            if (lits and lits <= vocab) or (not lits and bare <= bare_vocab):
-                                continue  # derived over stored vocabulary
-                            grounded = False
-                            break
-                        if grounded:
-                            continue  # every atom grounded
-                        # fall through: ungrounded atom -> flag the step
+                    # v11 (wr3j evidence): atom-wise grounding for EVERY
+                    # non-first trace step, not only the final one. wr3j's
+                    # mid-trace steps were executed-derivation outputs the
+                    # interpreter produced; the v10 i==last restriction
+                    # flagged them although every atom grounds under the
+                    # same literal/bare-symbol rule (v10's own final-step
+                    # rule). A step without ``=>`` still parses as a single
+                    # atom, so plain clauses keep the byte comparison; a
+                    # fabricated mid-step still fails — its new symbol or
+                    # literal is in no stored vocabulary.
+                    grounded = True
+                    for atom in _split_derivation_atoms(step):
+                        if atom in idx_set or atom == query_norm:
+                            continue
+                        lits = set(query_literals(atom))
+                        bare = _bare_content_symbols(atom)
+                        if (lits and lits <= vocab) or (not lits and bare <= bare_vocab):
+                            continue  # derived over stored vocabulary
+                        grounded = False
+                        break
+                    if grounded:
+                        continue  # every atom grounded
                     ungrounded.append(step)
             if ungrounded:
                 conditions.append("R_TRACE_NOT_GROUNDED")
