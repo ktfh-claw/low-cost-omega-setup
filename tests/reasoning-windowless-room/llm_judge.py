@@ -34,6 +34,10 @@ import urllib.request
 DEFAULT_BASE_URL = "https://api.asi1.ai/v1"
 DEFAULT_MODEL = "asi1-ultra"
 DEFAULT_TIMEOUT = 60.0
+MAX_TOKENS = 512          # live evidence 2026-10-26: asi1-ultra consumed a
+                         # 16-token budget pre-content (finish_reason=length,
+                         # empty message) — the parser takes the first
+                         # TRUE/FALSE token, so headroom is harmless
 HTTP_ATTEMPTS = 2          # first attempt + one retry on transient errors
 RETRY_SLEEP_S = 2.0
 
@@ -101,7 +105,7 @@ def _chat(base_url: str, model: str, api_key: str, messages: list[dict],
         "model": model,
         "messages": messages,
         "temperature": 0.0,
-        "max_tokens": 16,
+        "max_tokens": MAX_TOKENS,
     }).encode("utf-8")
     req = urllib.request.Request(
         url, data=body, method="POST",
