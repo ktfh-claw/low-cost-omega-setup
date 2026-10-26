@@ -1,0 +1,24 @@
+{
+  "run_id": "wr3k-20261026",
+  "mode": "sequential",
+  "gate_verdict": "FAIL",
+  "cases_passed": 1,
+  "cases_total": 2,
+  "per_case": {
+    "original": {
+      "verdict": "PASS",
+      "conditions": [
+        "Q_ATTESTED_VIA_ACCESS_LOG",
+        "E_INGEST_ATTESTED_VIA_FACADE_LOG"
+      ]
+    },
+    "uncertainty": {
+      "verdict": "FAIL",
+      "conditions": [
+        "Q_ATTESTED_VIA_ACCESS_LOG",
+        "E_FACTS_NOT_IN_INDEX"
+      ]
+    }
+  },
+  "timestamp": "2026-10-26T10:05:39Z"
+}

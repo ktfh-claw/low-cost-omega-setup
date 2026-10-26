@@ -1,0 +1,26 @@
+## 10:26Z wake (wr3k-20261026 CLOSE-OUT verification) — run complete 10:05:39Z
+Run finished early (~43m vs 75m/case timeout budget; case 1: 1562s, case 2: 871s). GATE SIGNAL: FAIL (2) — 1/2 passed. Harness pid 3786005 gone; no run_benchmark procs on host; full log /tmp/wr3k-full.log ends "[full] GATE SIGNAL: FAIL (2)" with clean teardown.
+
+### Case 1 original (09:24:29-09:50:31Z): PASS — first case-1 PASS of the series (was FAIL #1-13 timeout/missing in wr3a..wr3j)
+- final_answer: "You see the ceiling. The room is windowless, so looking straight up reveals only the ceiling above you, now visible because the turned-on bulb illuminates the room." — correct + negation-aware.
+- Conditions: Q_ATTESTED_VIA_ACCESS_LOG + E_INGEST_ATTESTED_VIA_FACADE_LOG (both informational). detail: query=(Inheritance (Concept "ceiling") $X), quoted_count=3, reissue_count=3, facts_index_size=9, index_absent_count=0, trace_steps=5, exec_outputs=3.
+- Attestation: attested_retrieve_calls=3, attested_write_calls=9, attested_archive_calls=5, qe_pattern_match=true, window [09:24:29Z, 09:50:31Z].
+- Citations 3/3 correct sha<->url pairs; reconstruction 3/3 matches_repo_file=true (blob-exact).
+- v11 path fix verified: APPEND-FAILED count in docker log since case-1 start = 0 (wr3j had 34+). Memory-relative prompt paths (repos/Omega/memory/benchmark/...) worked: ingest, facts-index, answers all landed inside the timeout budget with room to spare.
+
+### Case 2 uncertainty (09:50:48-10:05:19Z): FAIL — single condition E_FACTS_NOT_IN_INDEX
+- final_answer: "You see the ceiling — the upper interior surface of the windowless room (no window, no sky). With the lamp on, looking straight up you see the room's ceiling above you." — substantively correct.
+- E_FACTS_NOT_IN_INDEX (BLOCKING, agent-side): 2 of 14 facts-index exprs were recorded but not present in DAS at grade time: (Inheritance (Concept "ceiling") (Concept "upper-interior-surface")), (Inheritance (Concept "windowless-room") (Concept "space-bounded-by-walls-ceiling-floor")).
+- Clean lanes: Q informational (attested_retrieve_calls=4, quoted_count=1, reissue_count=1, no Q_MISSING/DEGENERATE/NOT_IN_HISTORY); A-gate clean (no A_SKY false trip); P fully clean (1/1 citation pair correct, 1/1 reconstruction matches_repo_file=true).
+- **v11 grader fix VERIFIED: R_TRACE_NOT_GROUNDED did NOT fire** — wr3j's blocking grader defect #4 (mid-trace executed-derivation outputs flagged) is fixed live; trace_steps=4 with exec derivations mid-trace all grounded under the extended atom-wise rule. The predicted "wr3j case-2 clean arc minus defect #4 => PASS" was blocked ONLY by the genuine agent-side record-vs-write gap (E_FACTS_NOT_IN_INDEX), i.e. the agent recorded 2 index exprs whose DAS persists aren't attested — same class as wr3j's informational E_INDEXED_NOT_PERSISTED, now block-conditional.
+- Attestation: attested_write_calls=5, attested_archive_calls=3, window [09:50:48Z, 10:05:19Z].
+
+### Teardown contract: ALL VERIFIED
+- teardown.json restored=true (10:05:42Z); container omega-curiosity Up since 10:05:42Z (restarted at teardown, standby mode).
+- Standby prompt: live /PeTTa/repos/Omega/memory/prompt.txt md5 see below == pre-benchmark backup prompt.txt.bak-pre-benchmark-wr3k-20261026 md5 (harness contamination guard passed); BENCHMARK MODE=0, FINAL ANSWER=0; omega_state.md BENCHMARK=0 (campaign-complete standby).
+- History byte-identical restore: live history.metta prefix (first 1,727,517 B) md5 6aca95c017da0d2a6d265c6e5f1250ce == history.pre-run.metta; post-restore growth is standby's own episodes (timestamps >= 10:08Z, normal). BENCHMARK markers: backup 0, live 0.
+- Canaries: cleanup canaries_before=4 / canaries_after=4 (fetch_ai_inheritance), canaries_intact=true, remaining_count=0; live count=4.
+- No harness proc (pgrep run_benchmark empty); case post-snapshots archived under windows/{original,uncertainty}/{pre,post}.metta + history.post-case-*.metta in volume.
+
+### Series summary: wr3a..wr3j 0/2 (13 consecutive case-1 timeouts/fails) -> wr3k 1/2 with first-ever case-1 PASS and case-2 blocked only by a genuine agent-side index-vs-persist gap. v9+v10+v11 all verified live this run. NO relaunch, NO config changes, NO pushes (Balazs owns next step). Cron wr3k-e2e-monitor removed at this close-out.
+- Standby prompt md5s: live a5445796ff26ce610c355d74f751a9ca == pre-run backup a5445796ff26ce610c355d74f751a9ca (restore byte-identical).

@@ -1,0 +1,7 @@
+{
+  "case_id": "original",
+  "prompt_installed": true,
+  "window_start_snapshot": "/var/lib/docker/volumes/omega-curiosity-memory/_data/history.pre-case-wr3k-20261026-original.metta",
+  "restarted_at": "2026-10-26T09:24:29Z",
+  "history_trimmed": true
+}

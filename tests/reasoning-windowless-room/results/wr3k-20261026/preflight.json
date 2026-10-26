@@ -1,0 +1,24 @@
+{
+  "checks": {
+    "container_omega-das-write-bridge-write-bridge-1": "running",
+    "container_omega-das-integration-read-proxy-1": "running",
+    "container_omega-das-integration-query-engine-1": "running",
+    "container_omega-das-integration-mongodb-1": "running",
+    "container_omega-curiosity": "running",
+    "write_bridge_ip": "172.20.0.5",
+    "read_proxy_ip": "172.20.0.3",
+    "agent_ip": "172.20.0.6",
+    "write_bridge_smoke": "ok",
+    "write_bridge_smoke_cleanup": "ok",
+    "read_proxy_query": "ok",
+    "provenance_repo": "ok",
+    "memory_volume": "ok",
+    "prompt_backup_fresh": "ok",
+    "skill_description_upgraded": "ok",
+    "metta_skill_upgraded": "ok",
+    "metta_plugin_mounted": "ok",
+    "chroma_memory_dir": "ok",
+    "canary_fetch_ai": "count=4"
+  },
+  "all_ok": true
+}

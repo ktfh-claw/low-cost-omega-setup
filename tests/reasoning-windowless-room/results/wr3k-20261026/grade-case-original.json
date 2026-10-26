@@ -1,0 +1,92 @@
+{
+  "run_id": "wr3k-20261026",
+  "case_id": "original",
+  "verdict": "PASS",
+  "conditions": [
+    "Q_ATTESTED_VIA_ACCESS_LOG",
+    "E_INGEST_ATTESTED_VIA_FACADE_LOG"
+  ],
+  "detail": {
+    "final_answer": "You see the ceiling. The room is windowless, so looking straight up reveals only the ceiling above you, now visible because the turned-on bulb illuminates the room.",
+    "query": "(Inheritance (Concept \"ceiling\") $X)",
+    "quoted_count": 3,
+    "reissue_count": 3,
+    "facts_index_size": 9,
+    "index_absent_count": 0,
+    "index_absent": [],
+    "trace_steps": 5,
+    "exec_outputs": 3
+  },
+  "history_window": {
+    "mode": "full",
+    "retrieve_calls": 0,
+    "retrieve_args": [],
+    "placeholder_calls": 0,
+    "persist_receipts": 0,
+    "archive_receipts": 0,
+    "add_atom_shas": [],
+    "attested_retrieve_calls": 3,
+    "attested_write_calls": 9,
+    "attested_archive_calls": 5
+  },
+  "facts_index_size": 9,
+  "attestation": {
+    "case_id": "original",
+    "agent_ip": "172.20.0.6",
+    "access_count": 3,
+    "qe_pattern_match": true,
+    "write_count": 9,
+    "archive_count": 5,
+    "window": [
+      "2026-10-26T09:24:29Z",
+      "2026-10-26T09:50:31Z"
+    ]
+  },
+  "citations": [
+    {
+      "sha": "git:8ffa0b35049c1b9545b08700c0594dc5eb68043e",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/spatial-knowledge.md",
+      "conditions": []
+    },
+    {
+      "sha": "git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/lighting.md",
+      "conditions": []
+    },
+    {
+      "sha": "git:3443aff999b31e12be7c78bd9a476fce9b707242",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/perspective.md",
+      "conditions": []
+    }
+  ],
+  "reconstruction": [
+    {
+      "sha": "git:8ffa0b35049c1b9545b08700c0594dc5eb68043e",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/spatial-knowledge.md",
+      "blob_path": "sources/2026/10/0eca6832896f15108a00e5829a707872564b9f573316db9c7f5e7dea6ec67383.md",
+      "reconstructed": true,
+      "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/spatial-knowledge.md",
+      "matches_repo_file": true,
+      "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/8ffa0b35049c1b9545b08700c0594dc5eb68043e-spatial-knowledge.md"
+    },
+    {
+      "sha": "git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/lighting.md",
+      "blob_path": "sources/2026/10/28f63931be6e9de6e99159d6cc93f962ed8af6164e7c48d1a065b49a6a76d7e3.md",
+      "reconstructed": true,
+      "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/lighting.md",
+      "matches_repo_file": true,
+      "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/64779eb6d20abe89b8831f1fefb2063e2d8b49b2-lighting.md"
+    },
+    {
+      "sha": "git:3443aff999b31e12be7c78bd9a476fce9b707242",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/perspective.md",
+      "blob_path": "sources/2026/10/3267cd1b5b5586ede06972b9791fc7f5d81777d4cb2aef915d31381af33dc21c.md",
+      "reconstructed": true,
+      "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/perspective.md",
+      "matches_repo_file": true,
+      "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/3443aff999b31e12be7c78bd9a476fce9b707242-perspective.md"
+    }
+  ],
+  "timestamp": "2026-10-26T09:50:45Z"
+}

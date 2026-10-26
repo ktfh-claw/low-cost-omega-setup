@@ -1,0 +1,329 @@
+{
+  "run_id": "wr3k-20261026",
+  "grade": {
+    "run_id": "wr3k-20261026",
+    "mode": "sequential",
+    "gate_verdict": "FAIL",
+    "cases_passed": 1,
+    "cases_total": 2,
+    "per_case": {
+      "original": {
+        "verdict": "PASS",
+        "conditions": [
+          "Q_ATTESTED_VIA_ACCESS_LOG",
+          "E_INGEST_ATTESTED_VIA_FACADE_LOG"
+        ]
+      },
+      "uncertainty": {
+        "verdict": "FAIL",
+        "conditions": [
+          "Q_ATTESTED_VIA_ACCESS_LOG",
+          "E_FACTS_NOT_IN_INDEX"
+        ]
+      }
+    },
+    "timestamp": "2026-10-26T10:05:39Z"
+  },
+  "cases": {
+    "original": {
+      "run_id": "wr3k-20261026",
+      "case_id": "original",
+      "verdict": "PASS",
+      "conditions": [
+        "Q_ATTESTED_VIA_ACCESS_LOG",
+        "E_INGEST_ATTESTED_VIA_FACADE_LOG"
+      ],
+      "detail": {
+        "final_answer": "You see the ceiling. The room is windowless, so looking straight up reveals only the ceiling above you, now visible because the turned-on bulb illuminates the room.",
+        "query": "(Inheritance (Concept \"ceiling\") $X)",
+        "quoted_count": 3,
+        "reissue_count": 3,
+        "facts_index_size": 9,
+        "index_absent_count": 0,
+        "index_absent": [],
+        "trace_steps": 5,
+        "exec_outputs": 3
+      },
+      "history_window": {
+        "mode": "full",
+        "retrieve_calls": 0,
+        "retrieve_args": [],
+        "placeholder_calls": 0,
+        "persist_receipts": 0,
+        "archive_receipts": 0,
+        "add_atom_shas": [],
+        "attested_retrieve_calls": 3,
+        "attested_write_calls": 9,
+        "attested_archive_calls": 5
+      },
+      "facts_index_size": 9,
+      "attestation": {
+        "case_id": "original",
+        "agent_ip": "172.20.0.6",
+        "access_count": 3,
+        "qe_pattern_match": true,
+        "write_count": 9,
+        "archive_count": 5,
+        "window": [
+          "2026-10-26T09:24:29Z",
+          "2026-10-26T09:50:31Z"
+        ]
+      },
+      "citations": [
+        {
+          "sha": "git:8ffa0b35049c1b9545b08700c0594dc5eb68043e",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/spatial-knowledge.md",
+          "conditions": []
+        },
+        {
+          "sha": "git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/lighting.md",
+          "conditions": []
+        },
+        {
+          "sha": "git:3443aff999b31e12be7c78bd9a476fce9b707242",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/perspective.md",
+          "conditions": []
+        }
+      ],
+      "reconstruction": [
+        {
+          "sha": "git:8ffa0b35049c1b9545b08700c0594dc5eb68043e",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/spatial-knowledge.md",
+          "blob_path": "sources/2026/10/0eca6832896f15108a00e5829a707872564b9f573316db9c7f5e7dea6ec67383.md",
+          "reconstructed": true,
+          "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/spatial-knowledge.md",
+          "matches_repo_file": true,
+          "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/8ffa0b35049c1b9545b08700c0594dc5eb68043e-spatial-knowledge.md"
+        },
+        {
+          "sha": "git:64779eb6d20abe89b8831f1fefb2063e2d8b49b2",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/lighting.md",
+          "blob_path": "sources/2026/10/28f63931be6e9de6e99159d6cc93f962ed8af6164e7c48d1a065b49a6a76d7e3.md",
+          "reconstructed": true,
+          "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/lighting.md",
+          "matches_repo_file": true,
+          "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/64779eb6d20abe89b8831f1fefb2063e2d8b49b2-lighting.md"
+        },
+        {
+          "sha": "git:3443aff999b31e12be7c78bd9a476fce9b707242",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/perspective.md",
+          "blob_path": "sources/2026/10/3267cd1b5b5586ede06972b9791fc7f5d81777d4cb2aef915d31381af33dc21c.md",
+          "reconstructed": true,
+          "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/perspective.md",
+          "matches_repo_file": true,
+          "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/3443aff999b31e12be7c78bd9a476fce9b707242-perspective.md"
+        }
+      ],
+      "timestamp": "2026-10-26T09:50:45Z"
+    },
+    "uncertainty": {
+      "run_id": "wr3k-20261026",
+      "case_id": "uncertainty",
+      "verdict": "FAIL",
+      "conditions": [
+        "Q_ATTESTED_VIA_ACCESS_LOG",
+        "E_FACTS_NOT_IN_INDEX"
+      ],
+      "detail": {
+        "final_answer": "You see the ceiling \u2014 the upper interior surface of the windowless room (no window, no sky). With the lamp on, looking straight up you see the room's ceiling above you.",
+        "query": "(Implication (Inheritance $x (Concept \"room\")) (Inheritance (Concept \"look-up-indoors-result\") $y))",
+        "quoted_count": 1,
+        "reissue_count": 1,
+        "facts_index_size": 14,
+        "facts_not_in_index": [
+          "(Inheritance (Concept \"ceiling\") (Concept \"upper-interior-surface\"))",
+          "(Inheritance (Concept \"windowless-room\") (Concept \"space-bounded-by-walls-ceiling-floor\"))"
+        ],
+        "index_absent_count": 0,
+        "index_absent": [],
+        "trace_steps": 4,
+        "exec_outputs": 4
+      },
+      "history_window": {
+        "mode": "full",
+        "retrieve_calls": 0,
+        "retrieve_args": [],
+        "placeholder_calls": 0,
+        "persist_receipts": 0,
+        "archive_receipts": 0,
+        "add_atom_shas": [],
+        "attested_retrieve_calls": 4,
+        "attested_write_calls": 5,
+        "attested_archive_calls": 3
+      },
+      "facts_index_size": 14,
+      "attestation": {
+        "case_id": "uncertainty",
+        "agent_ip": "172.20.0.6",
+        "access_count": 4,
+        "qe_pattern_match": true,
+        "write_count": 5,
+        "archive_count": 3,
+        "window": [
+          "2026-10-26T09:50:48Z",
+          "2026-10-26T10:05:19Z"
+        ]
+      },
+      "citations": [
+        {
+          "sha": "git:2e115f9d32ef8b7247456bd5d5bdcdcd2d1b1f2b",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/meta-reasoning.md",
+          "conditions": []
+        }
+      ],
+      "reconstruction": [
+        {
+          "sha": "git:2e115f9d32ef8b7247456bd5d5bdcdcd2d1b1f2b",
+          "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/meta-reasoning.md",
+          "blob_path": "sources/2026/10/577da9fcf9f22f86f13b4b9bca1f766f9b39da5e942767e8a5eb38825b50ebeb.md",
+          "reconstructed": true,
+          "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/meta-reasoning.md",
+          "matches_repo_file": true,
+          "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/2e115f9d32ef8b7247456bd5d5bdcdcd2d1b1f2b-meta-reasoning.md"
+        }
+      ],
+      "timestamp": "2026-10-26T10:05:39Z"
+    }
+  },
+  "cleanup": {
+    "started": "2026-10-26T09:22:34Z",
+    "mongo_counts_before": "{\"nodes\":3228,\"links\":4685}",
+    "canaries_before": {
+      "fetch_ai_inheritance": 4
+    },
+    "discovered_expressions": [
+      "(Evaluation (Predicate \"visible-when-looking-up-in\") (Concept \"room\") (Concept \"ceiling\"))",
+      "(Inheritance (Concept \"ceiling\") (Concept \"opaque-surface\"))",
+      "(Evaluation (Predicate \"mounted-on\") (Concept \"light-bulb\") (Concept \"ceiling\"))",
+      "(Inheritance (Concept \"windowless-room\") (Concept \"room\"))",
+      "(Inheritance (Concept \"ceiling\") (Concept \"horizontal-boundary-of-room\"))",
+      "(Evaluation (Predicate \"sees-when-looking-up\") (Concept \"person-in-room\") (Concept \"ceiling\"))",
+      "(Evaluation (Predicate \"sees-when-light-on\") (Concept \"person-in-room\") (Concept \"ceiling\"))",
+      "(Inheritance (Concept \"windowless-room\") (Concept \"room-without-window\"))",
+      "(Inheritance (Concept \"light-on-room\") (Concept \"illuminated-room\"))",
+      "(Evaluation (Predicate \"ceiling-is-opaque\") (Concept \"ceiling\") (Concept \"blocks-view-of-sky\"))",
+      "(Evaluation (Predicate \"is-opaque\") (Concept \"ceiling\"))",
+      "(Evaluation (Predicate \"looks-up-indoors\") (Concept \"person-in-room\") (Concept \"ceiling\"))",
+      "(-> \"failure-modes\" \"simple-stories-limited-generalization\")",
+      "(Evaluation (Predicate \"correct-answer-is\") (Concept \"look-up-in-windowless-room\") (Concept \"ceiling\"))",
+      "(Inheritance (Concept \"ceiling\") (Concept \"opaque-barrier-blocking-view-of-sky\"))",
+      "(Evaluation (Predicate \"correct-answer-for\") (Concept \"windowless-room-prompt\") (Concept \"ceiling\"))",
+      "(Evaluation (Predicate \"common-wrong-answer\") (Concept \"windowless-room-prompt\") (Concept \"ceiling\"))"
+    ],
+    "discovered_count": 17,
+    "cleanup_results": [
+      {
+        "metta": "(Evaluation (Predicate \"visible-when-looking-up-in\") (Concept \"room\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:40 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:40 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:22:41 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:22:41 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:22:41 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:41 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:41 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:22:42 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:22:42 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:22:42 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:42 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:43 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:22:44 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:22:44 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"f4e662805926ff44199b5df9a7d49e56\", \"f56d7c8ba408f835cbaef5c0984fb179\", \"c949f9deea691603495f3df756f4ffff\", \"3147d73ffda49b4e1cd906b041d92b24\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Inheritance (Concept \"ceiling\") (Concept \"opaque-surface\"))",
+        "returncode": 0,
+        "stdout": "0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:45 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:45 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:22:47 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:22:47 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n2026-10-26 09:22:47 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:47 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:47 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:22:48 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:22:48 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:22:48 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:48 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:48 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:22:49 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:22:49 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n{\"deleted\": [\"c949f9deea691603495f3df756f4ffff\", \"35b12a4fc5e1b5e370ae310da2b4a81c\", \"bb0989b9f99748c0ab2f0be598dfc1db\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"mounted-on\") (Concept \"light-bulb\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:52 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:52 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:22:53 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:22:53 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:22:53 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:53 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:54 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:22:55 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:22:55 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:22:55 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:55 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:55 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:22:56 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:22:56 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"86460a2423223dff67980d8378ac3916\", \"c63afc1683dfd5a57f0d17cf5256cc4e\", \"c949f9deea691603495f3df756f4ffff\", \"e535804fca30f281e000f7e7db5fec12\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Inheritance (Concept \"windowless-room\") (Concept \"room\"))",
+        "returncode": 0,
+        "stdout": "0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:58 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:58 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:22:59 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:22:59 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n2026-10-26 09:22:59 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:22:59 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:22:59 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:00 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:00 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:00 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:00 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:00 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:02 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:02 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n{\"deleted\": [\"858316784adb4a4430d5d35a45ce7455\", \"f56d7c8ba408f835cbaef5c0984fb179\", \"a06f0e0028d04826dfe6382ca8bc5810\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Inheritance (Concept \"ceiling\") (Concept \"horizontal-boundary-of-room\"))",
+        "returncode": 0,
+        "stdout": "0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:03 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:04 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:05 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:05 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n2026-10-26 09:23:05 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:05 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:05 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:06 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:06 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:06 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:06 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:06 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:08 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:08 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n{\"deleted\": [\"c949f9deea691603495f3df756f4ffff\", \"a9261152da5b881cbbf3125aaea7d428\", \"289f5d09b70e79a2fc84f85803b3dd7d\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"sees-when-looking-up\") (Concept \"person-in-room\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:11 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:11 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:12 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:12 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:12 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:12 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:12 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:13 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:13 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:23:13 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:13 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:14 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:15 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:15 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"296d4c548dfda4650466f518335a3b83\", \"27fe344cf520b4825173256d78291c3a\", \"c949f9deea691603495f3df756f4ffff\", \"42dba3c290b331d7418b1ed81366f42d\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"sees-when-light-on\") (Concept \"person-in-room\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:18 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:18 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:19 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:19 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:19 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:19 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:19 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:20 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:20 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:23:20 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:20 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:21 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:22 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:22 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"ffab42d98fe00aa6d56b82594a7d9b76\", \"27fe344cf520b4825173256d78291c3a\", \"c949f9deea691603495f3df756f4ffff\", \"9e8d5fe748a35816dce8729721b12fa6\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Inheritance (Concept \"windowless-room\") (Concept \"room-without-window\"))",
+        "returncode": 0,
+        "stdout": "0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:23 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:24 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:25 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:25 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n2026-10-26 09:23:25 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:25 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:25 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:26 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:26 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:26 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:26 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:26 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:28 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:28 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n{\"deleted\": [\"858316784adb4a4430d5d35a45ce7455\", \"26930353ceb208ebb76cec3002552e79\", \"6f8a0f82611d993ce4f5c2fe7532006e\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Inheritance (Concept \"light-on-room\") (Concept \"illuminated-room\"))",
+        "returncode": 0,
+        "stdout": "0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:29 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:30 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:31 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:31 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n2026-10-26 09:23:31 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:31 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:31 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:32 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:32 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:32 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:32 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:32 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:34 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:34 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n{\"deleted\": [\"41f6b8d489169b627a69179d30b4ae34\", \"3c3403f42190acddbdb95fcdb37c85d0\", \"ff4f4ec8b8441d163fc460e838155bfa\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"ceiling-is-opaque\") (Concept \"ceiling\") (Concept \"blocks-view-of-sky\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:37 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:37 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:38 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:38 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:38 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:38 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:38 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:39 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:39 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:23:39 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:39 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:40 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:41 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:41 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"65075510ffbe11ed1b11c35328dc316a\", \"c949f9deea691603495f3df756f4ffff\", \"ad39fb99e37dfec8bd1ac3b04ee426ec\", \"467c4d111af07b10127e3ac6f4034e02\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"is-opaque\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:42 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:43 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:44 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:44 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n2026-10-26 09:23:44 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:44 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:44 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:45 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:45 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:45 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:45 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:45 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:47 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:47 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n{\"deleted\": [\"09af92b7bed391e21593bec126d0c447\", \"c949f9deea691603495f3df756f4ffff\", \"b73a38a747bee854070d9815ecb58dd2\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"looks-up-indoors\") (Concept \"person-in-room\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:49 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:50 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:51 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:23:51 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:23:51 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:51 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:51 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:52 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:23:52 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:23:52 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:52 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:52 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:53 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:23:53 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"688d18d532a969c95bdb6873e5be2d7d\", \"27fe344cf520b4825173256d78291c3a\", \"c949f9deea691603495f3df756f4ffff\", \"d181b8ea1049845d655634cd370108c0\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(-> \"failure-modes\" \"simple-stories-limited-generalization\")",
+        "returncode": 0,
+        "stdout": "2026-10-26 09:23:54 | [\u001b[32mINFO\u001b[0m] | Port range: [43300 : 43331]\n2026-10-26 09:23:54 | [\u001b[32mINFO\u001b[0m] | Port range: [43300 : 43331]\n2026-10-26 09:23:54 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.ATOMDB>\n2026-10-26 09:23:54 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.ATOMDB> to atomdb-broker:40007\n2026-10-26 09:23:54 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43300\n2026-10-26 09:23:55 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43300\n2026-10-26 09:23:55 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:55 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:55 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:56 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:23:56 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n{\"deleted\": [\"994b8f7c2fe29e8ef90fc2ed124c98cb\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"correct-answer-is\") (Concept \"look-up-in-windowless-room\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:23:59 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:23:59 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:00 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:00 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:24:00 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:00 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:01 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:02 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:02 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:24:02 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:02 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:02 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:24:03 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:24:03 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"8d0bac1518b642ff49a556ddc6976898\", \"d2f87e0e429c13d20c24391c9d8f89a8\", \"c949f9deea691603495f3df756f4ffff\", \"fb3a696c2244799a7841a11f4ccd004c\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Inheritance (Concept \"ceiling\") (Concept \"opaque-barrier-blocking-view-of-sky\"))",
+        "returncode": 0,
+        "stdout": "0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:05 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:05 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:24:06 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43301\n2026-10-26 09:24:06 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43301\n2026-10-26 09:24:06 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:06 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:06 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:07 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:07 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:24:07 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:07 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:08 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:09 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:09 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n{\"deleted\": [\"c949f9deea691603495f3df756f4ffff\", \"df54ed71ef1b8209ec23ab9fbdfc4252\", \"efb36a8121c1d8eb86dc3ff76e1859f0\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"correct-answer-for\") (Concept \"windowless-room-prompt\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:12 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:12 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:13 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:13 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:24:13 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:13 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:14 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:15 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:15 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:24:15 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:15 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:15 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:24:16 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:24:16 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"29c3a4a39b092cf91e753a79528ca607\", \"e0e77c118f5d55404e11822f7b9d57a6\", \"c949f9deea691603495f3df756f4ffff\", \"8268c326936c517faa9808cbdfdfc23a\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      },
+      {
+        "metta": "(Evaluation (Predicate \"common-wrong-answer\") (Concept \"windowless-room-prompt\") (Concept \"ceiling\"))",
+        "returncode": 0,
+        "stdout": "BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:19 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:19 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:20 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43302\n2026-10-26 09:24:20 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43302\n2026-10-26 09:24:20 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:20 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:20 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:21 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43303\n2026-10-26 09:24:21 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43303\n2026-10-26 09:24:21 | [\u001b[32mINFO\u001b[0m] | write-bridge:43999 is issuing BUS command <BusCommand.PATTERN_MATCHING_QUERY>\n2026-10-26 09:24:21 | [\u001b[32mINFO\u001b[0m] | BUS node write-bridge:43999 is routing command <BusCommand.PATTERN_MATCHING_QUERY> to query-engine:40002\n2026-10-26 09:24:22 | [\u001b[32mINFO\u001b[0m] | Remote command: <node_joined_network> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:24:23 | [\u001b[32mINFO\u001b[0m] | Remote command: <bus_command_proxy> arrived at DistributedAlgorithmNodeServicer write-bridge:43304\n2026-10-26 09:24:23 | [\u001b[32mINFO\u001b[0m] | graceful_shutdown port: 43304\n{\"deleted\": [\"4d8b331743fc43ce86af2d56bd4c8fcc\", \"e0e77c118f5d55404e11822f7b9d57a6\", \"c949f9deea691603495f3df756f4ffff\", \"0e4c2058cbe200831014a8cf2eaf067f\"], \"absent\": true, \"still_present\": [], \"checks\": 1, \"standby_seconds\": 0.0}",
+        "stderr": ""
+      }
+    ],
+    "mongo_counts_after": "{\"nodes\":3228,\"links\":4644}",
+    "canaries_after": {
+      "fetch_ai_inheritance": 4
+    },
+    "remaining_expressions": [],
+    "remaining_count": 0,
+    "canaries_intact": true,
+    "finished": "2026-10-26T09:24:26Z"
+  },
+  "timestamp": "2026-10-26T10:05:39Z"
+}

@@ -1,0 +1,68 @@
+{
+  "run_id": "wr3k-20261026",
+  "case_id": "uncertainty",
+  "verdict": "FAIL",
+  "conditions": [
+    "Q_ATTESTED_VIA_ACCESS_LOG",
+    "E_FACTS_NOT_IN_INDEX"
+  ],
+  "detail": {
+    "final_answer": "You see the ceiling \u2014 the upper interior surface of the windowless room (no window, no sky). With the lamp on, looking straight up you see the room's ceiling above you.",
+    "query": "(Implication (Inheritance $x (Concept \"room\")) (Inheritance (Concept \"look-up-indoors-result\") $y))",
+    "quoted_count": 1,
+    "reissue_count": 1,
+    "facts_index_size": 14,
+    "facts_not_in_index": [
+      "(Inheritance (Concept \"ceiling\") (Concept \"upper-interior-surface\"))",
+      "(Inheritance (Concept \"windowless-room\") (Concept \"space-bounded-by-walls-ceiling-floor\"))"
+    ],
+    "index_absent_count": 0,
+    "index_absent": [],
+    "trace_steps": 4,
+    "exec_outputs": 4
+  },
+  "history_window": {
+    "mode": "full",
+    "retrieve_calls": 0,
+    "retrieve_args": [],
+    "placeholder_calls": 0,
+    "persist_receipts": 0,
+    "archive_receipts": 0,
+    "add_atom_shas": [],
+    "attested_retrieve_calls": 4,
+    "attested_write_calls": 5,
+    "attested_archive_calls": 3
+  },
+  "facts_index_size": 14,
+  "attestation": {
+    "case_id": "uncertainty",
+    "agent_ip": "172.20.0.6",
+    "access_count": 4,
+    "qe_pattern_match": true,
+    "write_count": 5,
+    "archive_count": 3,
+    "window": [
+      "2026-10-26T09:50:48Z",
+      "2026-10-26T10:05:19Z"
+    ]
+  },
+  "citations": [
+    {
+      "sha": "git:2e115f9d32ef8b7247456bd5d5bdcdcd2d1b1f2b",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/meta-reasoning.md",
+      "conditions": []
+    }
+  ],
+  "reconstruction": [
+    {
+      "sha": "git:2e115f9d32ef8b7247456bd5d5bdcdcd2d1b1f2b",
+      "url": "https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/main/tests/reasoning-windowless-room/background/meta-reasoning.md",
+      "blob_path": "sources/2026/10/577da9fcf9f22f86f13b4b9bca1f766f9b39da5e942767e8a5eb38825b50ebeb.md",
+      "reconstructed": true,
+      "repo_file": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/background/meta-reasoning.md",
+      "matches_repo_file": true,
+      "saved_to": "/home/ubuntu/low-cost-omega-setup/tests/reasoning-windowless-room/results/wr3k-20261026/reconstructed/2e115f9d32ef8b7247456bd5d5bdcdcd2d1b1f2b-meta-reasoning.md"
+    }
+  ],
+  "timestamp": "2026-10-26T10:05:39Z"
+}
