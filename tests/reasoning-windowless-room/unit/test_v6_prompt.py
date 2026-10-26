@@ -83,7 +83,7 @@ def test_answer_block_contract_unchanged():
     for line in (
         "QUERY: <the exact metta pattern you executed>",
         "DAS_RETRIEVE_OK untrusted=true count=<n> truncated=... results=[...]",
-        "FACTS: <the predicate expressions from your extraction record that this answer used, semicolon-separated>",
+        "FACTS: <the exact `expr` expressions copied VERBATIM from your extraction record that this answer used, semicolon-separated — no new or paraphrased expressions>",
         "REASONING: <the MeTTa reasoning trace: question clause; fact step(s); conclusion clause — semicolon-separated s-expressions, NOT prose>",
         "FINAL ANSWER ({{CASE_ID}}): <answer>",
         "SOURCES: git:<40-hex-sha> <source-url> [git:<40-hex-sha> <source-url> ...]",

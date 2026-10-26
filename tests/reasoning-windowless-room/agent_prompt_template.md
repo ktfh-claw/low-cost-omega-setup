@@ -43,7 +43,7 @@ Maintain ONE ledger line and act on it:
    - Run `metta` with `(archive-source "<raw-github-url>")` (URL list in `{{URL_LIST_PATH}}`) — success is ONLY `ARCHIVE-OK git:<40-hex-sha> sha256:<blob> path=<repo path>`. Immediately append to `{{FACTS_INDEX_PATH}}` a line: `source <filename> git:<sha>`.
    - Derive the predicate clauses (facts) from the text and store EACH ONE via: `(metta "(add-atom &persistent (<expression>) \"<source-url>\" \"git:<sha-from-archive-source>\" (stv 0.9 0.8))")` — success is ONLY `BRIDGE-PERSIST-OK: verified=<n>`. After EACH receipt, IMMEDIATELY append ONE line to `{{FACTS_INDEX_PATH}}`: `expr <the-exact-expression> verified=<n>`. ONE line per receipt — never batch. A fact WITHOUT a fresh `BRIDGE-PERSIST-OK` receipt is NOT persisted: never record it. The gate re-probes every recorded expression against DAS (`E_INDEXED_NOT_PERSISTED`) — an expression you recorded but did not persist is a recorded false claim.
    - Extract the clauses and move on: no summarizing, no analysis, no further study of the file.
-   When every source file has been processed or skipped once, step 1 is DONE — proceed to step 2 immediately, even if you think more could be extracted. This record is your query vocabulary: reuse its exact predicate names and literal spellings VERBATIM in every query; a reformulated clause matches nothing and produces a false absence.
+   When every source file has been processed or skipped once, step 1 is DONE — proceed to step 2 immediately, even if you think more could be extracted. This record is your query AND answer vocabulary: reuse its exact predicate names and literal spellings VERBATIM in every query and on every FACTS: line; a reformulated clause matches nothing, and an unrecorded expression on a FACTS: line is a false claim the gate rejects.
 
 2. **FORMALIZE the question as one MeTTa clause.** Reuse the exact predicate names and literal spellings from your extraction record: ground one side with a quoted literal, bind the target with a `$variable`, keep the stored arity/shape and direction. This clause is your QUERY.
 
@@ -56,7 +56,8 @@ Maintain ONE ledger line and act on it:
    - each executed derivation step with its interpreter `(stv ...)` output (from the `exec` lines).
    Append the finished trace to `{{FACTS_INDEX_PATH}}` as one line starting with `trace:`. Generated prose — scene descriptions, narrative text — instead of the executed trace FAILS the case. A trace without interpreter `(stv ...)` outputs FAILS the case (`R_NOT_EXECUTED`) — hand-composed truth values do not count. If the question cannot be answered from stored knowledge, the trace is the question clause followed by the reverse-direction probe clause(s) you ran (each with its count=0 receipt quoted in the block).
 
-5. **WRITE the answer block — deliverable 2.** Append it (format below) to `{{ANSWERS_PATH}}` IMMEDIATELY after appending the trace — do not batch, do not message anyone first, do not continue other work — then STOP.
+5. **WRITE the answer block — deliverable 2.** The `FACTS:` line is a COPY from your extraction record, not a composition: copy the exact `expr` expressions this answer used, character-for-character VERBATIM. Never write a paraphrase, a translation, or a new gloss of your own — every expression on the FACTS: line must already sit in `{{FACTS_INDEX_PATH}}` as a recorded `expr` line; an unrecorded expression FAILS the gate (`E_FACTS_NOT_IN_INDEX`; wr3k lesson: the case-2 answer was correct, but two answer-time glosses — paraphrases of recorded facts in new words — failed the whole case). If a needed expression is not in the record, it does not exist for this answer: either persist it first (step 1's add-atom + `expr` line, while time remains) or answer without it.
+   Append the block (format below) to `{{ANSWERS_PATH}}` IMMEDIATELY after appending the trace — do not batch, do not message anyone first, do not continue other work — then STOP.
 
 **Campaign rules (anti-loop, hard):**
 - After a background file has been processed once (or is already recorded), do NOT open or re-read it again for the rest of this case. There is no research step; step 1 ends when every file has been processed or skipped once.
@@ -73,7 +74,7 @@ Append one block to `{{ANSWERS_PATH}}` (do not rewrite existing blocks), in this
 
 QUERY: <the exact metta pattern you executed>
 DAS_RETRIEVE_OK untrusted=true count=<n> truncated=... results=[...]
-FACTS: <the predicate expressions from your extraction record that this answer used, semicolon-separated>
+FACTS: <the exact `expr` expressions copied VERBATIM from your extraction record that this answer used, semicolon-separated — no new or paraphrased expressions>
 REASONING: <the MeTTa reasoning trace: question clause; fact step(s); conclusion clause — semicolon-separated s-expressions, NOT prose>
 FINAL ANSWER ({{CASE_ID}}): <answer>
 SOURCES: git:<40-hex-sha> <source-url> [git:<40-hex-sha> <source-url> ...]
@@ -83,7 +84,7 @@ Gate rules for the block:
 - `### CASE {{CASE_ID}}` header with this exact case id.
 - `QUERY:` line with the exact metta pattern you executed — it must appear BEFORE the `FINAL ANSWER` line.
 - The literal `DAS_RETRIEVE_OK ... count=<n>` receipt line copied from the actual tool output.
-- `FACTS:` line quoting the extraction-record expressions used (knowledge cases only).
+- `FACTS:` line quoting the extraction-record expressions used (knowledge cases only). It is a VERBATIM COPY of `expr` lines from your extraction record — each expression character-for-character as recorded, no new or paraphrased expressions. Composing a new expression at answer time — a paraphrase, a synonym, a definitional gloss — fails the gate (`E_FACTS_NOT_IN_INDEX`): every FACTS: expression is checked against the record, and an expression that was never recorded is a false claim even when the answer is substantively correct (wr3k lesson). If the phrasing you want to state is not in your record, it is not extracted knowledge: either persist it first (add-atom + `expr` line) or leave it out of FACTS: and put the plain-language version only in the FINAL ANSWER text.
 - `REASONING:` line with the executed MeTTa trace. The FIRST step must be the exact QUERY clause you executed; the other steps must be expressions from your extraction record, plus the executed derivation steps WITH their interpreter `(stv ...)` outputs. Prose in REASONING fails the gate (`R_NOT_METTA`). A trace with no interpreter `(stv ...)` output fails the gate (`R_NOT_EXECUTED`) — the truth values must come from the interpreter, never composed by you.
 - `FINAL ANSWER ({{CASE_ID}}): <answer>` on its own line.
 - `SOURCES:` line citing every source used for the case as `git:<40-hex-sha> <url>` pairs (the shas your archive-source calls returned). Knowledge cases with no SOURCES line fail the gate. If you newly ingested this case, cite the shas you created; if you only reused already-persisted facts, cite the sources those facts carry in your extraction record.
