@@ -32,19 +32,19 @@ Machine states are emitted in `grade-case-<case>.json`, `grade.json`, `report.js
 
 ---
 
-## 3. A-gate — answer substance (`grade_answer` + `llm_judge.py`, v15b)
+## 3. A-gate — answer substance (`grade_answer` + `llm_judge.py`, v16)
 
-**Goal:** the final answer line must exist (deterministic parse) and be substantively correct for the case's ground truth — judged by ONE OpenAI chat-completions-compatible LLM call (default ASI:One `https://api.asi1.ai/v1`, model `asi1-ultra`, temperature 0; one call per graded case). The judge payload carries ONLY the case question, the ground truth (facts.py `expected_answer` + answer-only `grading` guidance), and the FINAL ANSWER text — never the reasoning trace, receipts, queries, or citations, so the judge cannot reward evidence discipline it cannot see. Verdict = the first CORRECT/INCORRECT token of the reply; judge metadata (model, latency, raw reply prefix) lands in the grade JSON `detail.judge` (API key never logged).
+**Goal:** the final answer line must exist (deterministic parse) and be substantively correct — judged by ONE OpenAI chat-completions-compatible LLM call per case (default ASI:One `https://api.asi1.ai/v1`, model `asi1-ultra`, temperature 0 — the same API key the Omega agent uses, resolved arg > env > Omega `runtime.env`, never logged). The request is a SINGLE user message containing exactly three items: the test prompt (case question), the Omega agent's FINAL ANSWER text, and the expected correct answer. The endpoint replies TRUE or FALSE; the verdict is the first TRUE/FALSE token. The judge never sees the reasoning trace, receipts, queries, or citations, so it cannot reward evidence discipline it cannot see. Judge metadata (model, base_url, key_source, latency, raw reply prefix) lands in the grade JSON `detail.judge`.
 
-**Why v15b (directive 2026-10-26 22:56 UTC):** the v2–v14 deterministic keyword lexicons (A_SKY negation windows, A_FABRICATED capital lists, A_NO_INABILITY inability phrases) could not generalize across phrasings without an LLM. The judge replaces all of them; the benchmark's classic "look up → sky" failure and hallucinated-capital failure are now caught semantically, and honest negations ("no sky visible") pass without lexicon maintenance.
+**Why (directive 2026-10-26 22:56 UTC follow-up):** the v2–v14 deterministic keyword lexicons could not generalize across phrasings; the v16 single-prompt TRUE/FALSE form is the simplest general form — question + agent answer + expected answer -> TRUE/FALSE, parsed by the script and used as the blocking gate. Preflight smoke-checks the judge (fail fast before case windows burn).
 
 | Code | Trigger | Goal |
 |---|---|---|
 | `A_MISSING` | No `FINAL ANSWER (<case>)` line in the case block (or no block at all) | The deliverable must exist. Also co-emitted with Q/P/R_MISSING when the whole block is absent. |
-| `A_WRONG` | The judge replies INCORRECT for the answer line | The answer must be substantively correct for the case question. |
+| `A_WRONG` | The judge replies FALSE for the answer line | The answer must be substantively correct for the case question. |
 | `A_JUDGE_UNAVAILABLE` | No resolvable API key (arg > env > runtime.env), judge HTTP failure after one retry, empty or unparseable reply | Fail-safe: an answer that was never judged can never pass (blocking). |
 
-**Removed in v15b:** `A_SKY`, `A_FABRICATED`, `A_NO_INABILITY` (keyword-lexicon conditions superseded by the judge).
+**Removed in v15b/v16:** `A_SKY`, `A_FABRICATED`, `A_NO_INABILITY` (keyword-lexicon conditions superseded by the judge).
 
 ---
 
@@ -177,4 +177,5 @@ History census (grade JSON `history_window`): `mode` (window mode; `full` = curr
 - v12 (2026-10-26): prompt-side FACTS verbatim-copy discipline (this reference added); gates unchanged.
 - v13 (2026-10-26): `A_SKY` negation lexicon extended with lexical blockers (blocks/prevents/excludes/hides/obscures + inflections) — wr3l evidence: the honest answer "blocks any view of the sky" false-failed; an UNNEGATED claim still fails and the negation/blocker must still PRECEDE the keyword.
 - v14 (2026-10-26): prompt-side full-provenance extraction records — every `source` line now records the complete archive receipt (sha + sha256 blob + repo path + raw-github URL) and SOURCES pairs are verbatim copies of recorded pairs; gates unchanged.
-- v15 (2026-10-26): case set reduced to `original`, `unsolvable`, `false` (removed `uncertainty`, `true`, `easy`, `difficult` + prompt files; nothing else relaxed); A-gate substance → single OpenAI-compatible LLM judge (`llm_judge.py`, question + ground truth + answer line only); `A_SKY`/`A_FABRICATED`/`A_NO_INABILITY` removed, `A_JUDGE_UNAVAILABLE` added (fail-safe).
+- v15 (2026-10-26): case set reduced to `original`, `unsolvable`, `false` (removed `uncertainty`, `true`, `easy`, `difficult` + prompt files; nothing else relaxed); A-gate substance → single OpenAI-compatible LLM judge; `A_SKY`/`A_FABRICATED`/`A_NO_INABILITY` removed, `A_JUDGE_UNAVAILABLE` added (fail-safe).
+- v16 (2026-10-26): judge simplified to the single-prompt TRUE/FALSE form — ONE user message with the test question, the agent's answer, and the expected answer; verdict = first TRUE/FALSE token; configurable endpoint (`--judge-base-url/--judge-model/--judge-api-key/--judge-timeout`), defaults reuse the Omega agent's ASI:One asi1-ultra + runtime.env key; preflight smoke-checks the judge.

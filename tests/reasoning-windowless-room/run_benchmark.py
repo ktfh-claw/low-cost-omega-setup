@@ -41,10 +41,11 @@ if ALL gate conditions hold (no relaxation vs v2):
 
 Grading is deterministic (regex/keyword parsing, string matching, HTTP
 re-issue, git reads, docker-log reads) EXCEPT the A-gate answer-substance
-judge (v15b, directive 2026-10-26): one OpenAI chat-completions-compatible
-call (llm_judge.py; default https://api.asi1.ai/v1 model asi1-ultra) that
-sees ONLY the case question, the ground truth, and the FINAL ANSWER line,
-and replies CORRECT/INCORRECT. No other gate uses an LLM; a judge failure
+judge (v16, directive 2026-10-26): one OpenAI chat-completions-compatible
+call (llm_judge.py; default https://api.asi1.ai/v1 model asi1-ultra, the
+same API key the Omega agent uses) built from ONE prompt containing the
+test question, the agent's FINAL ANSWER line, and the expected correct
+answer; the endpoint replies TRUE or FALSE. No other gate uses an LLM; a judge failure
 emits A_JUDGE_UNAVAILABLE and fails the case (an ungraded answer can
 never pass).
 
@@ -455,6 +456,17 @@ def preflight(args) -> int:
             checks["canary_fetch_ai"] = f"count={resp.get('count', '?')}"
         except Exception as e:
             checks["canary_fetch_ai"] = f"error: {e}"
+
+        # v16: the A-gate judge must be resolvable and answering BEFORE the
+        # run starts — a dead judge would burn every 75-minute case window
+        # on A_JUDGE_UNAVAILABLE.
+        try:
+            smoke_judge = _get_judge(args)
+            ok_smoke, _ = smoke_judge(
+                {"question": "What is 2 + 2?", "expected_answer": "4"}, "4")
+            checks["judge_smoke"] = "ok" if ok_smoke else "judge answered FALSE on smoke"
+        except Exception as e:
+            checks["judge_smoke"] = f"error: {e}"
     else:
         checks["write_bridge_smoke"] = "dry-run"
         checks["read_proxy_query"] = "dry-run"
@@ -465,6 +477,7 @@ def preflight(args) -> int:
         checks["metta_skill_upgraded"] = "dry-run"
         checks["metta_plugin_mounted"] = "dry-run"
         checks["canary_fetch_ai"] = "dry-run"
+        checks["judge_smoke"] = "dry-run"
 
     ok_values = {"ok", "running", "dry-run"}
     all_ok = all(

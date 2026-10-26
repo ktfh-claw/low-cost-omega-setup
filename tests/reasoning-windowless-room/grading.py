@@ -6,10 +6,11 @@ only if EVERY gate condition holds:
 
   A-gate  (answer):     FINAL ANSWER line present. Substance is judged
                         by ONE OpenAI chat-completions-compatible LLM
-                        call (llm_judge.py, v15b): the judge sees ONLY
-                        the question, the ground truth, and the answer
-                        line — no reasoning, receipts, or other gate
-                        evidence.
+                        call (llm_judge.py, v16 single-prompt form):
+                        ONE user message carrying the test prompt, the
+                        agent's final answer, and the expected correct
+                        answer; the endpoint replies TRUE or FALSE —
+                        no reasoning, receipts, or other gate evidence.
   Q-gate  (query-first): a real das-retrieve query executed BEFORE the
                         answer, quoted with its DAS_RETRIEVE_OK receipt,
                         cross-attested against the benchmark-window
@@ -44,9 +45,10 @@ only if EVERY gate condition holds:
 
 All grading EXCEPT the answer-substance call is deterministic: regex/keyword
 parsing, string matching, and HTTP re-issue against the read-proxy. The one
-LLM use is the A-gate judge (v15b directive 2026-10-26): a single
-chat-completions call deciding CORRECT/INCORRECT for the FINAL ANSWER
-line, with no access to any other gate evidence.
+LLM use is the A-gate judge (v16 directive 2026-10-26): a single
+chat-completions call deciding TRUE/FALSE for the FINAL ANSWER line
+from one prompt (question + agent answer + expected answer), with no
+access to any other gate evidence.
 
 Condition codes (machine-readable failure reasons):
   A_MISSING               no FINAL ANSWER line for the case
@@ -466,10 +468,10 @@ def grade_answer(case: dict, final_answer: str,
                   judge_fn=None) -> tuple[list[str], dict]:
     """A-gate (v15b): presence + LLM-judged substance.
 
-    The judge (llm_judge.make_judge) sees ONLY the case question, the
-    ground truth (expected answer + answer-only grading guidance), and
-    the FINAL ANSWER text — no reasoning trace, receipts, or other gate
-    evidence. Returns (conditions, judge_detail).
+    The judge (llm_judge.make_judge, v16 single-prompt form) sees ONLY
+    the test question, the agent's FINAL ANSWER text, and the expected
+    correct answer — one user message, no reasoning trace, receipts, or
+    other gate evidence. Returns (conditions, judge_detail).
 
     Fail-safe: no judge configured (or the judge call fails) ->
     A_JUDGE_UNAVAILABLE — an answer that was never judged can never

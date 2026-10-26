@@ -1,22 +1,27 @@
-"""A-gate LLM judge (v15b, directive 2026-10-26 22:56 UTC).
+"""A-gate LLM judge (v16, directive 2026-10-26 22:56 UTC follow-up).
 
-The answer-substance check is no longer deterministic keyword grading
-(v2–v14: A_SKY/A_FABRICATED/A_NO_INABILITY keyword lexicons). A single
-OpenAI chat-completions-compatible call now judges whether the case's
-FINAL ANSWER line is substantively correct:
+Simplified single-prompt design per Balázs's directive ("instead of
+that"): construct ONE simple prompt that contains the test prompt (the
+case question), the Omega agent's final answer, and the correct answer
+we expect; send it as a single OpenAI-compatible chat-completions
+request; the endpoint replies with a simple TRUE or FALSE; the script
+parses that verdict and uses it as the blocking A-gate.
 
-  - the judge sees ONLY the case question, the ground truth
-    (expected answer + answer-only grading guidance from facts.py),
-    and the FINAL ANSWER text — never the reasoning trace, receipts,
-    or any other gate evidence;
-  - the reply must contain the token CORRECT or INCORRECT;
-  - everything else in the harness stays deterministic.
-
-Default endpoint: ASI:One (https://api.asi1.ai/v1, model asi1-ultra) —
-the same OpenAI-compatible provider the Omega agent itself uses. API key
-resolution: explicit --judge-api-key arg > ASIONE_API_KEY / OPENAI_API_KEY
-env > the Omega deployment's runtime.env (the harness runs on the OVH
-host). The key is never logged, committed, or written to artifacts.
+  - messages = ONE user message (no system prompt, no JSON payload):
+    question + expected answer + agent answer + "Reply with exactly
+    one word: TRUE or FALSE";
+  - endpoint configurable via the run_benchmark CLI
+    (--judge-base-url / --judge-model / --judge-api-key /
+    --judge-timeout); defaults reuse the Omega agent's own setup:
+    ASI:One https://api.asi1.ai/v1, model asi1-ultra, API key resolved
+    from the Omega deployment's runtime.env (ASIONE_API_KEY) — the
+    same key the Omega agent uses;
+  - the judge sees ONLY those three items — never the reasoning trace,
+    receipts, queries, or citations (input restriction preserved from
+    v15b);
+  - fail-safe: unresolvable key / HTTP failure after one retry /
+    unparseable reply -> JudgeUnavailable -> blocking
+    A_JUDGE_UNAVAILABLE (an unjudged answer can never pass).
 """
 from __future__ import annotations
 
@@ -33,17 +38,6 @@ HTTP_ATTEMPTS = 2          # first attempt + one retry on transient errors
 RETRY_SLEEP_S = 2.0
 
 DEFAULT_RUNTIME_ENV = "/home/ubuntu/omega-curiosity/runtime.env"
-
-SYSTEM_PROMPT = (
-    "You are a strict, minimal answer grader for a reasoning benchmark. "
-    "You get a JSON object with: the test question, the ground-truth "
-    "expected answer with grading guidance, and a candidate final answer. "
-    "Judge ONLY whether the candidate answer is substantively correct for "
-    "the question, following the grading guidance. Ignore style, grammar, "
-    "and any reasoning, evidence, queries or citations the candidate text "
-    "may mention. Reply with exactly one word on the first line: CORRECT "
-    "or INCORRECT. You may add one short sentence after it."
-)
 
 
 class JudgeUnavailable(Exception):
@@ -75,25 +69,29 @@ def resolve_api_key(explicit: str = "",
 
 
 def build_messages(case: dict, final_answer: str) -> list[dict]:
-    """Judge payload: question + ground truth + answer line ONLY."""
-    payload = {
-        "question": case.get("question", ""),
-        "expected_answer": case.get("expected_answer", ""),
-        "grading_guidance": case.get("grading", ""),
-        "final_answer": final_answer,
-    }
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-    ]
+    """Judge payload: ONE user message with the test prompt (question),
+    the agent's final answer, and the expected correct answer."""
+    prompt = (
+        "You are grading an answer in a reasoning benchmark.\n\n"
+        "Question given to the agent:\n"
+        f"{case.get('question', '')}\n\n"
+        "Expected correct answer:\n"
+        f"{case.get('expected_answer', '')}\n\n"
+        "The agent's final answer:\n"
+        f"{final_answer}\n\n"
+        "Is the agent's final answer correct — does it match the expected "
+        "answer in substance? Judge only whether the answer is right, not "
+        "its style or wording. Reply with exactly one word: TRUE or FALSE."
+    )
+    return [{"role": "user", "content": prompt}]
 
 
 def parse_verdict(text: str) -> bool:
-    """First CORRECT/INCORRECT token wins; unparseable reply raises."""
-    m = re.search(r"\b(CORRECT|INCORRECT)\b", text or "", re.IGNORECASE)
+    """First TRUE/FALSE token wins; TRUE = correct. Junk raises."""
+    m = re.search(r"\b(TRUE|FALSE)\b", text or "", re.IGNORECASE)
     if not m:
         raise JudgeUnavailable(f"unparseable judge reply: {(text or '')[:120]!r}")
-    return m.group(1).upper() == "CORRECT"
+    return m.group(1).upper() == "TRUE"
 
 
 def _chat(base_url: str, model: str, api_key: str, messages: list[dict],
@@ -103,7 +101,7 @@ def _chat(base_url: str, model: str, api_key: str, messages: list[dict],
         "model": model,
         "messages": messages,
         "temperature": 0.0,
-        "max_tokens": 40,
+        "max_tokens": 16,
     }).encode("utf-8")
     req = urllib.request.Request(
         url, data=body, method="POST",
@@ -136,7 +134,7 @@ def make_judge(base_url: str = DEFAULT_BASE_URL, model: str = DEFAULT_MODEL,
                 content = _chat(base_url, model, key, messages, timeout)
                 ok = parse_verdict(content)
                 return ok, {
-                    "judge_verdict": "CORRECT" if ok else "INCORRECT",
+                    "judge_verdict": "TRUE" if ok else "FALSE",
                     "model": model,
                     "base_url": base_url,
                     "key_source": source,

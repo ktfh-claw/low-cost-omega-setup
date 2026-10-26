@@ -24,11 +24,11 @@ from grading import (
 # v15b: the A-gate substance check is the LLM judge; offline unit tests
 # stub it deterministically (the real judge is exercised by live runs)
 def _judge_ok(case, final_answer):
-    return True, {"judge_verdict": "CORRECT", "stub": True}
+    return True, {"judge_verdict": "TRUE", "stub": True}
 
 
 def _judge_wrong(case, final_answer):
-    return False, {"judge_verdict": "INCORRECT", "stub": True}
+    return False, {"judge_verdict": "FALSE", "stub": True}
 
 
 def _case(case_id):
@@ -125,14 +125,14 @@ def test_grade_answer_judge_ok_passes():
     case = _case("original")
     conds, detail = grade_answer(case, "the ceiling", _judge_ok)
     assert conds == []
-    assert detail["judge"]["judge_verdict"] == "CORRECT"
+    assert detail["judge"]["judge_verdict"] == "TRUE"
 
 
 def test_grade_answer_judge_wrong_fails():
     case = _case("original")
     conds, detail = grade_answer(case, "a lamp", _judge_wrong)
     assert conds == ["A_WRONG"]
-    assert detail["judge"]["judge_verdict"] == "INCORRECT"
+    assert detail["judge"]["judge_verdict"] == "FALSE"
 
 
 def test_grade_answer_no_judge_never_passes():
