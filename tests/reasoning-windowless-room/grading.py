@@ -404,7 +404,13 @@ def _has_query_literal(body: str) -> bool:
 # is the honest, correct claim for the windowless-room cases).
 _NEGATION_RE = re.compile(
     r"\b(no|not|n't|never|without|cannot|can't|don't|doesn't|isn't|aren't|"
-    r"wasn't|weren't|won't|wouldn't|neither|nor|none|nothing|zero)\b"
+    r"wasn't|weren't|won't|wouldn't|neither|nor|none|nothing|zero|"
+    # v13 (wr3l evidence): lexical blockers count as preceding negation —
+    # the honest wr3l answer "the ceiling ... which blocks any view of the
+    # sky; indoors looking up shows the ceiling, not the sky" was failed
+    # by A_SKY because "blocks" was missing from the lexicon.
+    r"blocks|blocked|blocking|prevents|prevented|preventing|"
+    r"excludes|excluded|excluding|hides|hidden|obscures|obscured)\b"
 )
 _NEGATION_CONTEXT_CHARS = 60
 

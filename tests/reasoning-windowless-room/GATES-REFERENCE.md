@@ -52,7 +52,7 @@ Machine states are emitted in `grade-case-<case>.json`, `grade.json`, `report.js
 |---|---|---|
 | `A_MISSING` | No `FINAL ANSWER (<case>)` line in the case block (or no block at all) | The deliverable must exist. Also co-emitted with Q/P/R_MISSING when the whole block is absent. |
 | `A_WRONG` | Substantive keywords missing (table above) | Answer must be about the right thing. |
-| `A_SKY` | Unnegated sky/sun/stars(/exterior-of-roof) mention | The parametric "look up → sky" association is exactly the failure the test exists to catch. |
+| `A_SKY` | Unnegated sky/sun/stars(/exterior-of-roof) mention — a preceding negation or blocker ("no sky", "blocks any view of the sky") passes | The parametric "look up → sky" association is exactly the failure the test exists to catch. |
 | `A_FABRICATED` | Unsolvable case: a specific capital is named | The correct behavior for unknowable questions is honesty, not hallucination. |
 | `A_NO_INABILITY` | Unsolvable case: no inability statement | Absence must be stated, not papered over. |
 
@@ -183,3 +183,4 @@ History census (grade JSON `history_window`): `mode` (window mode; `full` = curr
 - v10 (2026-10-26): negation-aware `A_SKY`; bare-symbol `Q_DEGENERATE_PATTERN` literals; atom-wise derivation grounding; attested-retrieve regex fix; prompt citation-pair rule.
 - v11 (2026-10-26): atom-wise grounding for EVERY non-first trace step; memory-volume-relative prompt paths.
 - v12 (2026-10-26): prompt-side FACTS verbatim-copy discipline (this reference added); gates unchanged.
+- v13 (2026-10-26): `A_SKY` negation lexicon extended with lexical blockers (blocks/prevents/excludes/hides/obscures + inflections) — wr3l evidence: the honest answer "blocks any view of the sky" false-failed; an UNNEGATED claim still fails and the negation/blocker must still PRECEDE the keyword.
