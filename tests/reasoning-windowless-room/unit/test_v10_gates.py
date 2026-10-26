@@ -22,49 +22,22 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 
 from grading import (
     _bare_content_symbols,
-    _mentions_unnegated,
     _split_derivation_atoms,
-    grade_answer,
     query_is_degenerate,
 )
 
 FAKE_SHA = "git:" + "a" * 40
+
+
+# v15b: the A-gate substance check is the LLM judge; offline unit tests
+# stub it deterministically (the real judge is exercised by live runs)
+def _judge_ok(case, final_answer):
+    return True, {"judge_verdict": "CORRECT", "stub": True}
+
+
+def _judge_wrong(case, final_answer):
+    return False, {"judge_verdict": "INCORRECT", "stub": True}
 FAKE_URL = "https://example.com/spatial-knowledge.md"
-
-
-# ---------------------------------------------------------------------------
-# v10 fix 1: negation-aware A_SKY (wr3i: "no window or sky visible" -> FAIL)
-# ---------------------------------------------------------------------------
-
-def test_wr3i_answer_no_sky_visible_passes():
-    la = ("you see the ceiling (of the windowless room/attic) above you — "
-          "the surface directly overhead, lit by the bulb/lamp you turned on; "
-          "there is no window or sky visible, only the interior ceiling.")
-    assert grade_answer("uncertainty", la) == [], grade_answer("uncertainty", la)
-    assert grade_answer("original", la.lower()) == []
-
-
-def test_unnegated_sky_still_fails():
-    assert grade_answer("original", "you see the sky") == ["A_SKY"]
-    assert grade_answer("uncertainty", "the sun is what you see") == ["A_SKY"]
-
-
-def test_negation_after_keyword_still_fails():
-    # the negation must PRECEDE the claim: "sky visible but no windows" is
-    # still a wrong answer
-    assert grade_answer("original", "the sky visible but no windows") == ["A_SKY"]
-
-
-def test_mentions_unnegated_direct():
-    assert _mentions_unnegated("no sky visible", ("sky",)) is False
-    assert _mentions_unnegated("the sky", ("sky",)) is True
-    assert _mentions_unnegated("sky, but not outdoors", ("sky",)) is True
-    assert _mentions_unnegated("nothing at all", ("sky",)) is False
-
-
-def test_ceiling_still_required():
-    assert grade_answer("original", "no sky visible") == ["A_WRONG"]
-    assert grade_answer("difficult", "no sky visible, sloped ceiling") == []
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +81,7 @@ WR3I_TRACE_STEP = ("(|- ((--> (looking-up windowless-room) sees-ceiling) "
 
 
 def _gate(case_id, index, query, reasoning, **kw):
+    kw.setdefault("judge_fn", _judge_ok)
     from facts import TEST_CASES
     from grading import gate_case, normalize_expression
 

@@ -1,4 +1,4 @@
-# Windowless Room Gating Test — Exhaustive Gate-State Reference (v12)
+# Windowless Room Gating Test — Exhaustive Gate-State Reference (v15)
 
 Authoritative reference for every machine-readable state the harness can emit: run-level verdicts and exit codes, per-case verdicts, all condition codes (blocking and informational), attestation-lane states, and every phase-artifact JSON field. Each entry carries the **goal** of the check (why it exists) and the exact **trigger** (when it fires). Grading implementation: `grading.py` (+ `provenance_check.py`, `history_parse.py`); orchestrator: `run_benchmark.py`. Zero LLM in any grading path — everything below is regex/set/HTTP/git.
 
@@ -32,29 +32,19 @@ Machine states are emitted in `grade-case-<case>.json`, `grade.json`, `report.js
 
 ---
 
-## 3. A-gate — answer substance (`grade_answer`)
+## 3. A-gate — answer substance (`grade_answer` + `llm_judge.py`, v15b)
 
-**Goal:** the final answer must be present and substantively correct for the case's ground truth — including the negation nuance that separates scene simulation from phrase association (the benchmark's classic LLM failure: "look up → sky"). Keyword/regex grading is deterministic; per-case keys below.
+**Goal:** the final answer line must exist (deterministic parse) and be substantively correct for the case's ground truth — judged by ONE OpenAI chat-completions-compatible LLM call (default ASI:One `https://api.asi1.ai/v1`, model `asi1-ultra`, temperature 0; one call per graded case). The judge payload carries ONLY the case question, the ground truth (facts.py `expected_answer` + answer-only `grading` guidance), and the FINAL ANSWER text — never the reasoning trace, receipts, queries, or citations, so the judge cannot reward evidence discipline it cannot see. Verdict = the first CORRECT/INCORRECT token of the reply; judge metadata (model, latency, raw reply prefix) lands in the grade JSON `detail.judge` (API key never logged).
 
-**Per-case correctness rules:**
-
-| Case | PASS requires | FAIL conditions |
-|---|---|---|
-| `original`, `uncertainty`, `easy` | answer mentions `ceiling`; no UNNEGATED `sky`/`sun`/`stars` | `A_SKY` (unnegated keyword), `A_WRONG` (no `ceiling`) |
-| `difficult` | mentions `sloped ceiling` / `underside of roof` / `sloped-ceiling`; no UNNEGATED `sky`/`stars`/`exterior-of-roof` | `A_SKY`, `A_WRONG` |
-| `true` | contains the word `true` | `A_WRONG` |
-| `false` | contains the word `false` | `A_WRONG` |
-| `unsolvable` | names NO Australian capital (canberra/sydney/melbourne/brisbane/perth/adelaide/darwin/hobart) AND states an inability (insufficient / not found / do not know / cannot answer / unknown / no stored …) | `A_FABRICATED` (capital named), `A_NO_INABILITY` (no inability statement) |
-
-**Negation rule (v10):** a keyword mention is harmless only when a negation (`no`, `not`, `never`, `without`, `cannot`, `neither`, `none`, …) PRECEDES it within ~60 chars. "no window or sky visible" is the honest correct claim; "sky visible but no windows" still fails.
+**Why v15b (directive 2026-10-26 22:56 UTC):** the v2–v14 deterministic keyword lexicons (A_SKY negation windows, A_FABRICATED capital lists, A_NO_INABILITY inability phrases) could not generalize across phrasings without an LLM. The judge replaces all of them; the benchmark's classic "look up → sky" failure and hallucinated-capital failure are now caught semantically, and honest negations ("no sky visible") pass without lexicon maintenance.
 
 | Code | Trigger | Goal |
 |---|---|---|
 | `A_MISSING` | No `FINAL ANSWER (<case>)` line in the case block (or no block at all) | The deliverable must exist. Also co-emitted with Q/P/R_MISSING when the whole block is absent. |
-| `A_WRONG` | Substantive keywords missing (table above) | Answer must be about the right thing. |
-| `A_SKY` | Unnegated sky/sun/stars(/exterior-of-roof) mention — a preceding negation or blocker ("no sky", "blocks any view of the sky") passes | The parametric "look up → sky" association is exactly the failure the test exists to catch. |
-| `A_FABRICATED` | Unsolvable case: a specific capital is named | The correct behavior for unknowable questions is honesty, not hallucination. |
-| `A_NO_INABILITY` | Unsolvable case: no inability statement | Absence must be stated, not papered over. |
+| `A_WRONG` | The judge replies INCORRECT for the answer line | The answer must be substantively correct for the case question. |
+| `A_JUDGE_UNAVAILABLE` | No resolvable API key (arg > env > runtime.env), judge HTTP failure after one retry, empty or unparseable reply | Fail-safe: an answer that was never judged can never pass (blocking). |
+
+**Removed in v15b:** `A_SKY`, `A_FABRICATED`, `A_NO_INABILITY` (keyword-lexicon conditions superseded by the judge).
 
 ---
 
@@ -170,7 +160,7 @@ History census (grade JSON `history_window`): `mode` (window mode; `full` = curr
 
 ## 10. Classification summary
 
-- **Blocking (fail the case):** `A_MISSING`, `A_WRONG`, `A_SKY`, `A_FABRICATED`, `A_NO_INABILITY`, `Q_MISSING`, `Q_NOT_QUERY_FIRST`, `Q_PLACEHOLDER`, `Q_DEGENERATE_PATTERN`, `Q_NOT_IN_HISTORY`, `Q_NO_RECEIPT`, `Q_REISSUE_ERROR`, `Q_REISSUE_MISMATCH`, `Q_ABSENCE_UNPROVEN`, `E_NO_EXTRACTION`, `E_NO_INGEST`, `E_NO_FACTS`, `E_FACTS_NOT_IN_INDEX`, `E_LITERAL_NOT_EXTRACTED`, `R_MISSING`, `R_NOT_METTA`, `R_NOT_EXECUTED`, `R_TRACE_NOT_GROUNDED`, `P_MISSING`, all `P_UNRESOLVED:*`.
+- **Blocking (fail the case):** `A_MISSING`, `A_WRONG`, `A_JUDGE_UNAVAILABLE`, `Q_MISSING`, `Q_NOT_QUERY_FIRST`, `Q_PLACEHOLDER`, `Q_DEGENERATE_PATTERN`, `Q_NOT_IN_HISTORY`, `Q_NO_RECEIPT`, `Q_REISSUE_ERROR`, `Q_REISSUE_MISMATCH`, `Q_ABSENCE_UNPROVEN`, `E_NO_EXTRACTION`, `E_NO_INGEST`, `E_NO_FACTS`, `E_FACTS_NOT_IN_INDEX`, `E_LITERAL_NOT_EXTRACTED`, `R_MISSING`, `R_NOT_METTA`, `R_NOT_EXECUTED`, `R_TRACE_NOT_GROUNDED`, `P_MISSING`, all `P_UNRESOLVED:*`.
 - **Informational (never fail):** `Q_ATTESTED_VIA_ACCESS_LOG`, `E_INGEST_ATTESTED_VIA_FACADE_LOG`, `E_INDEXED_NOT_PERSISTED`.
 - **Harness-level (fail the RUN, exit 1):** preflight `all_ok=false`, cleanup residue/canary failure, unusable history window, unreadable answers, setup phase error (per-case `verdict:"ERROR"`), teardown failure.
 - **Valid negative signal:** gate FAIL (exit 2) — the governance bar was not met; the artifacts say exactly which gate and why.
@@ -187,3 +177,4 @@ History census (grade JSON `history_window`): `mode` (window mode; `full` = curr
 - v12 (2026-10-26): prompt-side FACTS verbatim-copy discipline (this reference added); gates unchanged.
 - v13 (2026-10-26): `A_SKY` negation lexicon extended with lexical blockers (blocks/prevents/excludes/hides/obscures + inflections) — wr3l evidence: the honest answer "blocks any view of the sky" false-failed; an UNNEGATED claim still fails and the negation/blocker must still PRECEDE the keyword.
 - v14 (2026-10-26): prompt-side full-provenance extraction records — every `source` line now records the complete archive receipt (sha + sha256 blob + repo path + raw-github URL) and SOURCES pairs are verbatim copies of recorded pairs; gates unchanged.
+- v15 (2026-10-26): case set reduced to `original`, `unsolvable`, `false` (removed `uncertainty`, `true`, `easy`, `difficult` + prompt files; nothing else relaxed); A-gate substance → single OpenAI-compatible LLM judge (`llm_judge.py`, question + ground truth + answer line only); `A_SKY`/`A_FABRICATED`/`A_NO_INABILITY` removed, `A_JUDGE_UNAVAILABLE` added (fail-safe).

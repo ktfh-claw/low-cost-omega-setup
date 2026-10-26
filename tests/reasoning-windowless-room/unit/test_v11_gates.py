@@ -23,6 +23,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 
 FAKE_SHA = "git:" + "a" * 40
+
+
+# v15b: the A-gate substance check is the LLM judge; offline unit tests
+# stub it deterministically (the real judge is exercised by live runs)
+def _judge_ok(case, final_answer):
+    return True, {"judge_verdict": "CORRECT", "stub": True}
+
+
+def _judge_wrong(case, final_answer):
+    return False, {"judge_verdict": "INCORRECT", "stub": True}
 FAKE_URL = "https://example.com/spatial-knowledge.md"
 
 INDEX_EXPR = ("((--> (looking-up windowless-room) sees-ceiling) (stv 0.9 0.8))")
@@ -39,6 +49,7 @@ FINAL_EXEC_STEP = ("(|- ((--> (looking-up windowless-room) sees-ceiling) "
 
 
 def _gate(case_id, index, query, reasoning, **kw):
+    kw.setdefault("judge_fn", _judge_ok)
     from facts import TEST_CASES
     from grading import gate_case, normalize_expression
 

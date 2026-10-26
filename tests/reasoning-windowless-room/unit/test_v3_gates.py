@@ -25,6 +25,16 @@ from grading import (
 from provenance_check import reconstruct_citation_blob
 
 
+# v15b: the A-gate substance check is the LLM judge; offline unit tests
+# stub it deterministically (the real judge is exercised by live runs)
+def _judge_ok(case, final_answer):
+    return True, {"judge_verdict": "CORRECT", "stub": True}
+
+
+def _judge_wrong(case, final_answer):
+    return False, {"judge_verdict": "INCORRECT", "stub": True}
+
+
 def _case(case_id):
     for c in TEST_CASES:
         if c["id"] == case_id:
@@ -122,6 +132,7 @@ def test_parse_facts_line():
 
 def _gate(case_id, block, **kw):
     kw.setdefault("citation_checks", OK_CITATIONS)
+    kw.setdefault("judge_fn", _judge_ok)
     return gate_case(
         _case(case_id), block,
         history_queries=[normalize_expression(block.queries[0])] if block and block.queries else [],
@@ -228,6 +239,7 @@ SOURCES: none (absence case)
         citation_checks=[],
         facts_index=INDEX,
         window_persist_receipts=1, window_archive_receipts=1,
+        judge_fn=_judge_ok,
     )
     assert r.verdict == "PASS", r.conditions
 
@@ -371,6 +383,7 @@ SOURCES: none (absence case)
         citation_checks=[],
         facts_index=INDEX,
         window_persist_receipts=1, window_archive_receipts=1,
+        judge_fn=_judge_ok,
     )
     assert r.verdict == "PASS", r.conditions
     assert "R_NOT_EXECUTED" not in r.conditions  # absence probes: nothing to execute
@@ -447,6 +460,7 @@ def test_attested_query_passes_with_informational_condition():
         window_persist_receipts=1, window_archive_receipts=1,
         attestation={"qe_pattern_match": True, "access_count": 2,
                      "write_count": 1, "archive_count": 1},
+        judge_fn=_judge_ok,
     )
     assert r.verdict == "PASS", r.conditions
     assert "Q_ATTESTED_VIA_ACCESS_LOG" in r.conditions
@@ -501,6 +515,7 @@ def test_e_ingest_attested_via_facade_log_is_informational():
         window_persist_receipts=0, window_archive_receipts=0,  # history collapsed
         attestation={"qe_pattern_match": True, "access_count": 1,
                      "write_count": 2, "archive_count": 1},
+        judge_fn=_judge_ok,
     )
     assert r.verdict == "PASS", r.conditions
     assert "E_INGEST_ATTESTED_VIA_FACADE_LOG" in r.conditions

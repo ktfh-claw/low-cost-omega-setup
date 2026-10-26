@@ -39,9 +39,14 @@ if ALL gate conditions hold (no relaxation vs v2):
           blob is reconstructed and byte-compared against the repo's
           background markdown the reasoning was extracted from.
 
-Grading is fully deterministic (regex/keyword parsing, string matching, HTTP
-re-issue, git reads, docker-log reads). NO LLM is used anywhere in the
-harness.
+Grading is deterministic (regex/keyword parsing, string matching, HTTP
+re-issue, git reads, docker-log reads) EXCEPT the A-gate answer-substance
+judge (v15b, directive 2026-10-26): one OpenAI chat-completions-compatible
+call (llm_judge.py; default https://api.asi1.ai/v1 model asi1-ultra) that
+sees ONLY the case question, the ground truth, and the FINAL ANSWER line,
+and replies CORRECT/INCORRECT. No other gate uses an LLM; a judge failure
+emits A_JUDGE_UNAVAILABLE and fails the case (an ungraded answer can
+never pass).
 
 Exit codes (grade*/report/full): 0 = gate PASS, 2 = gate FAIL (the
 expected negative signal), 1 = harness/environment error.
@@ -870,8 +875,40 @@ def _read_facts_index(args) -> str:
     return _sudo_read(paths["facts_index"]) or ""
 
 
+# ---------------------------------------------------------------------------
+# A-gate LLM judge (v15b): one chat-completions call per graded case
+# ---------------------------------------------------------------------------
+
+_BUILT_JUDGE: dict[str, object] = {}
+
+
+def _get_judge(args):
+    """A-gate judge callable; None in dry-run. Built lazily on the first
+    graded case so a missing/unresolvable key surfaces per-case as
+    A_JUDGE_UNAVAILABLE (grade_answer catches), never as a crash."""
+    if getattr(args, "dry_run", False):
+        return None
+
+    def _lazy_judge(case: dict, final_answer: str):
+        if "judge" not in _BUILT_JUDGE:
+            import llm_judge
+            _BUILT_JUDGE["judge"] = llm_judge.make_judge(
+                base_url=(getattr(args, "judge_base_url", "")
+                          or llm_judge.DEFAULT_BASE_URL),
+                model=(getattr(args, "judge_model", "")
+                       or llm_judge.DEFAULT_MODEL),
+                api_key=getattr(args, "judge_api_key", ""),
+                timeout=(float(getattr(args, "judge_timeout", 0) or 0)
+                         or llm_judge.DEFAULT_TIMEOUT),
+            )
+        return _BUILT_JUDGE["judge"](case, final_answer)
+
+    return _lazy_judge
+
+
 def grade_case(args) -> int:
-    """Grade ONE case independently (deterministic A/Q/E/R/P gate)."""
+    """Grade ONE case independently (A/Q/E/R/P gate; A-substance via the
+    LLM judge, everything else deterministic)."""
     sys.path.insert(0, str(HERE))
     import grading as grading_mod
     import history_parse
@@ -961,6 +998,7 @@ def grade_case(args) -> int:
         attestation=attestation,
         facts_index_raw=facts_index_text,
         presence_fn=reissue,
+        judge_fn=_get_judge(args),
     )
 
     # blob reconstruction lane: arrive back at the source markdown bytes
@@ -1303,6 +1341,7 @@ def grade(args) -> int:
             window_persist_receipts=len(persist_receipts),
             window_archive_receipts=len(archive_receipts),
             facts_index_raw=facts_index_text,
+            judge_fn=_get_judge(args),
         )
         results.append(r)
 
@@ -1563,6 +1602,13 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--dry-run", action="store_true")
         p.add_argument("--json", action="store_true")
         p.add_argument("--force", action="store_true")
+        # v15b: A-gate LLM judge (chat-completions compatible)
+        p.add_argument("--judge-base-url", default="https://api.asi1.ai/v1")
+        p.add_argument("--judge-model", default="asi1-ultra")
+        p.add_argument("--judge-api-key", default="",
+                       help="judge API key; default: ASIONE_API_KEY/OPENAI_API_KEY "
+                            "env or the Omega deployment runtime.env (never logged)")
+        p.add_argument("--judge-timeout", type=float, default=60.0)
         return p
 
     add_common(subparsers.add_parser("preflight"))

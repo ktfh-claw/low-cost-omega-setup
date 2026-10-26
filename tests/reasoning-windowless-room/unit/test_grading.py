@@ -21,6 +21,15 @@ from grading import (
     CaseBlock,
 )
 
+# v15b: the A-gate substance check is the LLM judge; offline unit tests
+# stub it deterministically (the real judge is exercised by live runs)
+def _judge_ok(case, final_answer):
+    return True, {"judge_verdict": "CORRECT", "stub": True}
+
+
+def _judge_wrong(case, final_answer):
+    return False, {"judge_verdict": "INCORRECT", "stub": True}
+
 
 def _case(case_id):
     for c in TEST_CASES:
@@ -102,34 +111,42 @@ def test_query_good_not_degenerate():
 
 
 # ---------------------------------------------------------------------------
-# answer grading (substantive)
+# answer grading (v15b: presence + LLM judge, stubbed offline)
 # ---------------------------------------------------------------------------
 
-def test_grade_answer_ceiling_cases():
-    for cid in ("original", "uncertainty", "easy"):
-        assert grade_answer(cid, "the ceiling") == []
-        assert grade_answer(cid, "the sky") == ["A_SKY"]
-        assert grade_answer(cid, "a lamp") == ["A_WRONG"]
-        assert grade_answer(cid, "") == ["A_MISSING"]
+def test_grade_answer_missing():
+    case = _case("original")
+    conds, detail = grade_answer(case, "", _judge_ok)
+    assert conds == ["A_MISSING"]
+    assert detail == {}
 
 
-def test_grade_answer_difficult():
-    assert grade_answer("difficult", "the sloped ceiling (underside of the roof)") == []
-    assert grade_answer("difficult", "the sky") == ["A_SKY"]
-    assert grade_answer("difficult", "the ceiling") == ["A_WRONG"]
+def test_grade_answer_judge_ok_passes():
+    case = _case("original")
+    conds, detail = grade_answer(case, "the ceiling", _judge_ok)
+    assert conds == []
+    assert detail["judge"]["judge_verdict"] == "CORRECT"
 
 
-def test_grade_answer_true_false():
-    assert grade_answer("true", "true") == []
-    assert grade_answer("true", "false") == ["A_WRONG"]
-    assert grade_answer("false", "false") == []
-    assert grade_answer("false", "true") == ["A_WRONG"]
+def test_grade_answer_judge_wrong_fails():
+    case = _case("original")
+    conds, detail = grade_answer(case, "a lamp", _judge_wrong)
+    assert conds == ["A_WRONG"]
+    assert detail["judge"]["judge_verdict"] == "INCORRECT"
 
 
-def test_grade_answer_unsolvable():
-    assert grade_answer("unsolvable", "cannot answer from stored knowledge") == []
-    assert grade_answer("unsolvable", "Canberra") == ["A_FABRICATED"]
-    assert grade_answer("unsolvable", "maybe something") == ["A_NO_INABILITY"]
+def test_grade_answer_no_judge_never_passes():
+    case = _case("original")
+    conds, detail = grade_answer(case, "the ceiling", None)
+    assert conds == ["A_JUDGE_UNAVAILABLE"]
+
+
+def test_grade_answer_judge_exception_fails_case():
+    def _boom(case, final_answer):
+        raise RuntimeError("api down")
+    conds, detail = grade_answer(_case("original"), "the ceiling", _boom)
+    assert conds == ["A_JUDGE_UNAVAILABLE"]
+    assert "api down" in detail["judge_error"]
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +194,7 @@ def test_gate_case_full_pass():
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "PASS", r.conditions
     assert r.conditions == []
 
@@ -189,7 +206,7 @@ def test_gate_case_query_not_in_history_fails():
                   history_queries=[],  # nothing real in the window
                   history_placeholder_calls=3,  # only $_ placeholder calls
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "Q_NOT_IN_HISTORY" in r.conditions
     assert "Q_PLACEHOLDER" in r.conditions
@@ -202,7 +219,7 @@ def test_gate_case_placeholder_query_fails():
                   history_queries=["$_131542"],
                   history_placeholder_calls=1,
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "Q_PLACEHOLDER" in r.conditions
 
@@ -214,7 +231,7 @@ def test_gate_case_degenerate_query_fails():
                   history_queries=["(Inheritance $X $Y)"],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "Q_DEGENERATE_PATTERN" in r.conditions
 
@@ -226,7 +243,7 @@ def test_gate_case_reissue_mismatch_fails():
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 1},  # quoted 5, reissue 1
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "Q_REISSUE_MISMATCH" in r.conditions
 
@@ -239,7 +256,7 @@ def test_gate_case_no_receipt_fails():
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "Q_NO_RECEIPT" in r.conditions
 
@@ -251,7 +268,7 @@ def test_gate_case_answer_after_query_order_fails():
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "Q_NOT_QUERY_FIRST" in r.conditions
 
@@ -263,7 +280,7 @@ def test_gate_case_missing_sources_fails():
                   history_queries=['(Inheritance $X (Concept "ceiling"))'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=_ok_citations())
+                  citation_checks=_ok_citations(), judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "P_MISSING" in r.conditions
 
@@ -295,11 +312,14 @@ def test_gate_case_unsolvable_requires_proven_absence():
                   history_queries=['(Inheritance (Concept "australia") $X)'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 0},
-                  citation_checks=[])
+                  citation_checks=[], judge_fn=_judge_ok)
     assert r.verdict == "PASS", r.conditions
 
 
-def test_gate_case_unsolvable_fabricated_fails():
+def test_gate_case_unsolvable_fabricated_answer_fails():
+    """v15b: a hallucinated capital is caught by the LLM judge (the
+    v2-v14 A_FABRICATED keyword lexicon is gone). The stub encodes the
+    judge's verdict: 'Canberra' is INCORRECT for the unsolvable case."""
     case = _case("unsolvable")
     block = _block_for(
         "unsolvable",
@@ -312,9 +332,9 @@ def test_gate_case_unsolvable_fabricated_fails():
                   history_queries=['(Inheritance (Concept "australia") $X)'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 0},
-                  citation_checks=[])
+                  citation_checks=[], judge_fn=_judge_wrong)
     assert r.verdict == "FAIL"
-    assert "A_FABRICATED" in r.conditions
+    assert "A_WRONG" in r.conditions
 
 
 def test_gate_case_unsolvable_count_positive_fails():
@@ -331,7 +351,7 @@ def test_gate_case_unsolvable_count_positive_fails():
                   history_queries=['(Inheritance (Concept "australia") $X)'],
                   history_placeholder_calls=0,
                   reissue_fn=lambda q: {"count": 1},
-                  citation_checks=[])
+                  citation_checks=[], judge_fn=_judge_ok)
     assert r.verdict == "FAIL"
     assert "Q_ABSENCE_UNPROVEN" in r.conditions
 
@@ -347,7 +367,8 @@ def test_gate_summary_aggregates():
     ok = gate_case(_case("original"),
                    _block_for("original"),
                    ['(Inheritance $X (Concept "ceiling"))'],
-                   0, lambda q: {"count": 1}, _ok_citations())
+                   0, lambda q: {"count": 1}, _ok_citations(),
+                   judge_fn=_judge_ok)
     bad = gate_case(_case("original"), None, [], 0, None, [])
     summary = gate_summary([ok, bad])
     assert summary["gate_verdict"] == "FAIL"
@@ -381,19 +402,17 @@ def test_regression_wr_run2_fails_gate():
     blocks = parse_answers_v2(WR_RUN2_ANSWERS)
     for case in TEST_CASES:
         r = gate_case(case, blocks.get(case["id"]), [], 0,
-                      lambda q: {"count": 0}, [])
+                      lambda q: {"count": 0}, [], judge_fn=_judge_ok)
         assert r.verdict == "FAIL", f"{case['id']} must FAIL (no queries in run 2)"
 
 
-def test_regression_wr_run2_all_answers_substantively_correct():
-    """Run-2 answers were substantively right — the A-gate alone passes."""
+def test_regression_wr_run2_answers_substantively_correct():
+    """Run-2 answers were substantively right — the A-gate alone passes
+    (v15b: under the stubbed judge; the real judge is a live-run concern)."""
     blocks = parse_answers_v2(WR_RUN2_ANSWERS)
-    expected = {
-        "original": [], "uncertainty": [], "easy": [],
-        "difficult": [], "true": [], "false": [],
-        "unsolvable": [],
-    }
     for case in TEST_CASES:
         block = blocks.get(case["id"])
-        answer = block.final_answer if block else ""
-        assert grade_answer(case["id"], answer) == expected[case["id"]], case["id"]
+        assert block is not None, case["id"]  # fixture covers the 3-case set
+        conds, detail = grade_answer(case, block.final_answer, _judge_ok)
+        assert conds == [], (case["id"], conds)
+        assert detail["judge"]["stub"] is True

@@ -4,7 +4,12 @@ This is not a scored benchmark: it is a pass/fail GATE that verifies the
 environment is set up for DAS-grounded reasoning governance. A case passes
 only if EVERY gate condition holds:
 
-  A-gate  (answer):     FINAL ANSWER line present + substantively correct.
+  A-gate  (answer):     FINAL ANSWER line present. Substance is judged
+                        by ONE OpenAI chat-completions-compatible LLM
+                        call (llm_judge.py, v15b): the judge sees ONLY
+                        the question, the ground truth, and the answer
+                        line — no reasoning, receipts, or other gate
+                        evidence.
   Q-gate  (query-first): a real das-retrieve query executed BEFORE the
                         answer, quoted with its DAS_RETRIEVE_OK receipt,
                         cross-attested against the benchmark-window
@@ -37,16 +42,17 @@ only if EVERY gate condition holds:
                         provenance git repo (commit -> blob -> index entry
                         -> sha256 -> url).
 
-All grading is deterministic: regex/keyword parsing, string matching, and
-HTTP re-issue against the read-proxy. NO LLM is used anywhere in grading.
+All grading EXCEPT the answer-substance call is deterministic: regex/keyword
+parsing, string matching, and HTTP re-issue against the read-proxy. The one
+LLM use is the A-gate judge (v15b directive 2026-10-26): a single
+chat-completions call deciding CORRECT/INCORRECT for the FINAL ANSWER
+line, with no access to any other gate evidence.
 
 Condition codes (machine-readable failure reasons):
   A_MISSING               no FINAL ANSWER line for the case
-  A_WRONG                 substantively wrong answer
-  A_SKY                   pattern-match failure (unnegated sky/sun/stars answer;
-                          a negated mention like "no sky visible" passes)
-  A_FABRICATED            unsolvable case states a specific capital
-  A_NO_INABILITY          unsolvable case lacks honest-inability language
+  A_WRONG                 answer judged INCORRECT by the LLM judge
+  A_JUDGE_UNAVAILABLE     the judge call failed (harness-side error; fails
+                          the case so an ungraded answer can never pass)
   Q_MISSING               case block has no QUERY: line
   Q_NO_RECEIPT            case block has no DAS_RETRIEVE_OK receipt
   Q_NOT_IN_HISTORY        quoted query not present in benchmark-window events
@@ -399,36 +405,6 @@ def _has_query_literal(body: str) -> bool:
                for tok in re.findall(r"[A-Za-z][A-Za-z0-9_-]*", body))
 
 
-# Negation vocabulary for the answer-keyword check: a keyword mention is
-# harmless when every occurrence in the answer is negated ("no sky visible"
-# is the honest, correct claim for the windowless-room cases).
-_NEGATION_RE = re.compile(
-    r"\b(no|not|n't|never|without|cannot|can't|don't|doesn't|isn't|aren't|"
-    r"wasn't|weren't|won't|wouldn't|neither|nor|none|nothing|zero|"
-    # v13 (wr3l evidence): lexical blockers count as preceding negation —
-    # the honest wr3l answer "the ceiling ... which blocks any view of the
-    # sky; indoors looking up shows the ceiling, not the sky" was failed
-    # by A_SKY because "blocks" was missing from the lexicon.
-    r"blocks|blocked|blocking|prevents|prevented|preventing|"
-    r"excludes|excluded|excluding|hides|hidden|obscures|obscured)\b"
-)
-_NEGATION_CONTEXT_CHARS = 60
-
-
-def _mentions_unnegated(answer_lower: str, keywords: tuple[str, ...]) -> bool:
-    """True iff any keyword is mentioned in the answer WITHOUT a preceding
-    negation. v10 (wr3i evidence): the honest answer "no window or sky
-    visible" tripped the old bare-keyword check. The negation must PRECEDE
-    the claim within a ~60-char window before the keyword ("no sky visible",
-    not "sky visible but no windows")."""
-    for kw in keywords:
-        for m in re.finditer(re.escape(kw), answer_lower):
-            ctx = answer_lower[max(0, m.start() - _NEGATION_CONTEXT_CHARS):m.start()]
-            if not _NEGATION_RE.search(ctx):
-                return True
-    return False
-
-
 def _bare_content_symbols(expr: str) -> set[str]:
     """Bare (unquoted) content symbols of a MeTTa expression — everything
     matching an identifier EXCEPT structural/type keywords, after stripping
@@ -486,47 +462,30 @@ def _split_derivation_atoms(step: str) -> list[str]:
 # per-case answer grading (substantive correctness — unchanged policy)
 # ---------------------------------------------------------------------------
 
-def grade_answer(case_id: str, final_answer: str) -> list[str]:
-    """Grade substantive answer correctness. Returns A-* condition codes."""
+def grade_answer(case: dict, final_answer: str,
+                  judge_fn=None) -> tuple[list[str], dict]:
+    """A-gate (v15b): presence + LLM-judged substance.
+
+    The judge (llm_judge.make_judge) sees ONLY the case question, the
+    ground truth (expected answer + answer-only grading guidance), and
+    the FINAL ANSWER text — no reasoning trace, receipts, or other gate
+    evidence. Returns (conditions, judge_detail).
+
+    Fail-safe: no judge configured (or the judge call fails) ->
+    A_JUDGE_UNAVAILABLE — an answer that was never judged can never
+    pass the case (the deterministic v2-v14 keyword lexicons are gone;
+    A_SKY/A_FABRICATED/A_NO_INABILITY no longer exist).
+    """
     if not final_answer:
-        return ["A_MISSING"]
-    la = final_answer.lower()
-
-    if case_id in ("original", "uncertainty", "easy"):
-        # v10: a keyword mention is only a failure when UNNEGATED — the
-        # honest wr3i answer said "no window or sky visible".
-        if _mentions_unnegated(la, ("sky", "sun", "stars")):
-            return ["A_SKY"]
-        if "ceiling" not in la:
-            return ["A_WRONG"]
-        return []
-
-    if case_id == "difficult":
-        if _mentions_unnegated(la, ("sky", "stars", "exterior-of-roof")):
-            return ["A_SKY"]
-        if not ("sloped ceiling" in la or "underside of roof" in la or "sloped-ceiling" in la):
-            return ["A_WRONG"]
-        return []
-
-    if case_id == "true":
-        return [] if re.search(r"\btrue\b", la) else ["A_WRONG"]
-
-    if case_id == "false":
-        return [] if re.search(r"\bfalse\b", la) else ["A_WRONG"]
-
-    if case_id == "unsolvable":
-        specific = ["canberra", "sydney", "melbourne", "brisbane", "perth",
-                    "adelaide", "darwin", "hobart"]
-        if any(s in la for s in specific):
-            return ["A_FABRICATED"]
-        inability = ["insufficient", "not found", "do not know", "don't know",
-                     "dont know", "not in", "no matching", "cannot answer",
-                     "cannot determine", "unknown", "no stored"]
-        if not any(k in la for k in inability):
-            return ["A_NO_INABILITY"]
-        return []
-
-    return ["A_WRONG"]
+        return ["A_MISSING"], {}
+    if judge_fn is None:
+        return ["A_JUDGE_UNAVAILABLE"], {"judge": "no judge configured"}
+    try:
+        ok, jdetail = judge_fn(case, final_answer)
+    except Exception as e:  # judge infra down: fail the case, never pass it
+        return ["A_JUDGE_UNAVAILABLE"], {"judge_error": str(e)[:200]}
+    detail = {"judge": jdetail} if jdetail else {}
+    return ([], detail) if ok else (["A_WRONG"], detail)
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +544,7 @@ def gate_case(
     attestation: Optional[dict] = None,
     facts_index_raw: str = "",
     presence_fn=None,
+    judge_fn=None,
 ) -> GateResult:
     """Apply the full gate (A/Q/E/R/P) to one case.
 
@@ -623,9 +583,12 @@ def gate_case(
     if block is None:
         return GateResult(case_id, "FAIL", ["A_MISSING", "Q_MISSING", "P_MISSING", "R_MISSING"])
 
-    # --- A-gate: substantive answer ---
-    conditions.extend(grade_answer(case_id, block.final_answer))
+    # --- A-gate: presence + LLM-judged substance (v15b) ---
+    a_conditions, judge_detail = grade_answer(case, block.final_answer, judge_fn)
+    conditions.extend(a_conditions)
     detail["final_answer"] = block.final_answer
+    if judge_detail:
+        detail.update(judge_detail)
 
     is_unsolvable = case_id == "unsolvable"
     is_first_case = case_id == TEST_CASES_FIRST_ID

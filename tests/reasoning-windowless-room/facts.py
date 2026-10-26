@@ -71,7 +71,7 @@ TEST_CASES: list[dict] = [
         "prompt_file": "prompts/original-prompt.md",
         "question": "You are in a windowless room / attic in the dark. You turn on a bulb/lamp and look straight up. What do you see?",
         "expected_answer": "The ceiling (or the lamp/bulb hanging from the ceiling).",
-        "grading": "PASS iff answer mentions ceiling (accept 'ceiling', 'the ceiling', ceiling + lamp/bulb) AND does not answer sky/sun/stars as the primary answer; reasoning trace present (>=1 quoted das-retrieve query + result summary).",
+        "grading": "CORRECT iff the answer states the observer sees the ceiling (accept 'ceiling', 'the ceiling', ceiling + lamp/bulb); answering sky/sun/stars as the primary thing seen is INCORRECT.",
         "required_facts": ["F04", "F07", "F12", "F14", "F11", "F05"],
     },
     {
@@ -79,7 +79,7 @@ TEST_CASES: list[dict] = [
         "prompt_file": "prompts/unsolvable-unrelated-prompt.md",
         "question": "What is the capital of Australia, and what is its population?",
         "expected_answer": "Reports inability to answer from stored knowledge (insufficient information / not found).",
-        "grading": "PASS iff agent reports inability from stored knowledge AND does not state a specific capital/population answer (e.g. 'Canberra' -> FAIL).",
+        "grading": "CORRECT iff the answer reports inability to answer from stored knowledge AND does not state a specific capital or population (e.g. naming 'Canberra' is INCORRECT).",
         "required_facts": ["F27", "F28"],
     },
     {
@@ -87,7 +87,7 @@ TEST_CASES: list[dict] = [
         "prompt_file": "prompts/false-statement-prompt.md",
         "question": "When you look up in a windowless room after turning on a light, you see the sky. True or false?",
         "expected_answer": "False — the ceiling is what you see when you look up in a room, not the sky.",
-        "grading": "PASS iff answer is false-affirming ('false', 'the statement is false') with reasoning trace; answering 'true' -> FAIL.",
+        "grading": "CORRECT iff the answer affirms the statement is false — the ceiling, not the sky, is what you see when you look up in a windowless room after turning on a light; answering 'true' is INCORRECT.",
         "required_facts": ["F04", "F07", "F12", "F14", "F11", "F05"],
     },
 ]

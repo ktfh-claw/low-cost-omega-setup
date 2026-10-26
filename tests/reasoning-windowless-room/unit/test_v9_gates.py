@@ -17,6 +17,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 
 from facts import TEST_CASES
+
+
+# v15b: the A-gate substance check is the LLM judge; offline unit tests
+# stub it deterministically (the real judge is exercised by live runs)
+def _judge_ok(case, final_answer):
+    return True, {"judge_verdict": "CORRECT", "stub": True}
+
+
+def _judge_wrong(case, final_answer):
+    return False, {"judge_verdict": "INCORRECT", "stub": True}
 from grading import (
     CaseBlock,
     gate_case,
@@ -129,6 +139,7 @@ SOURCES: {FAKE_SHA} {FAKE_URL}
 
 
 def _gate(case_id, index, presence_fn=None, **kw):
+    kw.setdefault("judge_fn", _judge_ok)
     return gate_case(
         _case(case_id), _passing_block(case_id), [normalize_expression(
             '(Inheritance (Concept "ceiling") $X)')], 0,
