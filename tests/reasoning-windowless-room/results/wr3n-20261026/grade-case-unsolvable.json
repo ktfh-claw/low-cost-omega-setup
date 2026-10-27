@@ -1,0 +1,72 @@
+{
+  "run_id": "wr3n-20261026",
+  "case_id": "unsolvable",
+  "verdict": "FAIL",
+  "conditions": [
+    "A_WRONG",
+    "Q_ATTESTED_VIA_ACCESS_LOG",
+    "Q_ABSENCE_UNPROVEN",
+    "E_NO_EXTRACTION",
+    "R_NOT_METTA",
+    "P_UNRESOLVED:COMMIT_NOT_IN_REPO"
+  ],
+  "detail": {
+    "final_answer": "Canberra is the capital of Australia; its population is approximately 431,000 (2021 census).",
+    "judge": {
+      "judge_verdict": "FALSE",
+      "model": "asi1-ultra",
+      "base_url": "https://api.asi1.ai/v1",
+      "key_source": "runtime.env",
+      "latency_s": 3.09,
+      "raw": "FALSE"
+    },
+    "query": "(Inheritance (Concept \"Australia\") $X)",
+    "quoted_count": 0,
+    "reissue_count": 1,
+    "facts_index_size": 0,
+    "trace_steps": 2
+  },
+  "history_window": {
+    "mode": "full",
+    "retrieve_calls": 0,
+    "retrieve_args": [],
+    "placeholder_calls": 0,
+    "persist_receipts": 0,
+    "archive_receipts": 0,
+    "add_atom_shas": [],
+    "attested_retrieve_calls": 6,
+    "attested_write_calls": 3,
+    "attested_archive_calls": 2
+  },
+  "facts_index_size": 0,
+  "attestation": {
+    "case_id": "unsolvable",
+    "agent_ip": "172.20.0.6",
+    "access_count": 6,
+    "qe_pattern_match": true,
+    "write_count": 3,
+    "archive_count": 2,
+    "window": [
+      "2026-10-27T01:09:27Z",
+      "2026-10-27T01:37:59Z"
+    ]
+  },
+  "citations": [
+    {
+      "sha": "git:abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "url": "https://raw.githubusercontent.com/example/australia/main/canberra.md",
+      "conditions": [
+        "COMMIT_NOT_IN_REPO"
+      ]
+    }
+  ],
+  "reconstruction": [
+    {
+      "sha": "git:abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "url": "https://raw.githubusercontent.com/example/australia/main/canberra.md",
+      "reconstructed": false,
+      "error": "commit not in repo"
+    }
+  ],
+  "timestamp": "2026-10-27T01:38:04Z"
+}

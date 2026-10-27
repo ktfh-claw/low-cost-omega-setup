@@ -1,0 +1,40 @@
+{
+  "run_id": "wr3n-20261026",
+  "case_id": "original",
+  "verdict": "FAIL",
+  "conditions": [
+    "A_MISSING",
+    "Q_MISSING",
+    "P_MISSING",
+    "R_MISSING"
+  ],
+  "detail": {},
+  "history_window": {
+    "mode": "full",
+    "retrieve_calls": 0,
+    "retrieve_args": [],
+    "placeholder_calls": 0,
+    "persist_receipts": 0,
+    "archive_receipts": 0,
+    "add_atom_shas": [],
+    "attested_retrieve_calls": 0,
+    "attested_write_calls": 0,
+    "attested_archive_calls": 11
+  },
+  "facts_index_size": 1,
+  "attestation": {
+    "case_id": "original",
+    "agent_ip": "172.20.0.6",
+    "access_count": 0,
+    "qe_pattern_match": false,
+    "write_count": 0,
+    "archive_count": 11,
+    "window": [
+      "2026-10-26T23:54:17Z",
+      "2026-10-27T01:09:24Z"
+    ]
+  },
+  "citations": [],
+  "reconstruction": [],
+  "timestamp": "2026-10-27T01:09:24Z"
+}

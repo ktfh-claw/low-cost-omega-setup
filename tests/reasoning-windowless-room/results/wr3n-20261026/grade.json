@@ -1,0 +1,39 @@
+{
+  "run_id": "wr3n-20261026",
+  "mode": "sequential",
+  "gate_verdict": "FAIL",
+  "cases_passed": 0,
+  "cases_total": 3,
+  "per_case": {
+    "original": {
+      "verdict": "FAIL",
+      "conditions": [
+        "A_MISSING",
+        "Q_MISSING",
+        "P_MISSING",
+        "R_MISSING"
+      ]
+    },
+    "unsolvable": {
+      "verdict": "FAIL",
+      "conditions": [
+        "A_WRONG",
+        "Q_ATTESTED_VIA_ACCESS_LOG",
+        "Q_ABSENCE_UNPROVEN",
+        "E_NO_EXTRACTION",
+        "R_NOT_METTA",
+        "P_UNRESOLVED:COMMIT_NOT_IN_REPO"
+      ]
+    },
+    "false": {
+      "verdict": "FAIL",
+      "conditions": [
+        "A_MISSING",
+        "Q_MISSING",
+        "P_MISSING",
+        "R_MISSING"
+      ]
+    }
+  },
+  "timestamp": "2026-10-27T02:53:14Z"
+}

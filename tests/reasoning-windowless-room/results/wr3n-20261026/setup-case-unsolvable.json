@@ -1,0 +1,7 @@
+{
+  "case_id": "unsolvable",
+  "prompt_installed": true,
+  "window_start_snapshot": "/var/lib/docker/volumes/omega-curiosity-memory/_data/history.pre-case-wr3n-20261026-unsolvable.metta",
+  "restarted_at": "2026-10-27T01:09:27Z",
+  "history_trimmed": true
+}
