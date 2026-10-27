@@ -8,22 +8,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from metta_to_atoms import MettaParseError
-from provenance_store import ArchiveError, ProvenanceStore
+from provenance_store import ArchiveError, LedgerStore
 from write_client import DasWriteRunner, WriteFailure
 
 MAX_BODY_BYTES = 16 * 1024
 
-# Archive bodies carry fetched page content: bounded well above the write
-# body but still finite (8 MiB, matching the agent-side fetch cap).
-MAX_ARCHIVE_BODY_BYTES = 8 * 1024 * 1024
+_PROVENANCE_KEYS = {"ref", "git_commit", "blob_sha256"}
 
 
 class WriteApplication:
-    def __init__(self, runner: Any, store: ProvenanceStore | None = None) -> None:
+    def __init__(self, runner: Any, store: LedgerStore | None = None) -> None:
         self.runner = runner
         self.max_metta_chars = int(os.getenv("WRITE_MAX_METTA_CHARS", "2048"))
         repo_root = os.getenv("WRITE_PROVENANCE_REPO", "")
-        self.store = store or (ProvenanceStore(repo_root) if repo_root else None)
+        self.store = store or (LedgerStore(repo_root) if repo_root else None)
         if repo_root and self.store is not None:
             self.store.ensure_repo()
 
@@ -42,20 +40,24 @@ class WriteApplication:
         if not isinstance(verify, bool):
             return 400, {"error": "verify must be a boolean"}
         provenance = payload.get("provenance")
-        if provenance is not None and not isinstance(provenance, dict):
-            return 400, {"error": "provenance must be an object"}
+        if provenance is not None and (
+            not isinstance(provenance, dict) or set(provenance) != _PROVENANCE_KEYS
+        ):
+            return 400, {"error": "provenance must contain ref, git_commit and blob_sha256"}
         tv = payload.get("tv")
         if tv is not None and not isinstance(tv, dict):
             return 400, {"error": "tv must be an object"}
         if provenance is not None:
             if self.store is None:
-                return 503, {"error": "provenance writes require the configured source archive (WRITE_PROVENANCE_REPO unset)"}
-            # Provenance v2.1 citation gate (Options A+B): the cited commit
-            # must exist in the archive repo AND archive exactly the cited
-            # URL. Hallucinated or swapped citations are rejected with an
+                return 503, {"error": "ledger requires the configured provenance repo (WRITE_PROVENANCE_REPO unset)"}
+            # Provenance v4 citation gate: the cited commit must be a real
+            # ledger commit adding exactly the cited (ref, sha256) entry.
+            # Hallucinated or swapped citations are rejected with an
             # actionable, retryable message before anything reaches DAS.
             try:
-                self.store.verify_commit(provenance.get("git_commit"), provenance.get("url"))
+                self.store.verify_commit(
+                    provenance["git_commit"], provenance["ref"], provenance["blob_sha256"]
+                )
             except ArchiveError as exc:
                 return 400, {"error": str(exc)}
         try:
@@ -70,30 +72,21 @@ class WriteApplication:
             if exc.handles:
                 failure["handles"] = exc.handles
             return 502, failure
-        response = {
+        return 200, {
             "handles": result["written"],
             "verified": result["verified"],
             "missing": result["missing"],
+            "top_handle": result["top_handle"],
         }
-        if result.get("provenance_link"):
-            response["provenance_link"] = result["provenance_link"]
-        return 200, response
 
-    def handle_archive(self, payload: Any) -> tuple[int, dict[str, Any]]:
-        """Archive fetched source content into the git provenance repo."""
+    def handle_source(self, payload: Any) -> tuple[int, dict[str, Any]]:
+        """Append one (ref, sha256) entry to the git source ledger."""
         if self.store is None:
-            return 503, {"error": "provenance archive is not configured (WRITE_PROVENANCE_REPO unset)"}
-        if not isinstance(payload, dict) or set(payload) - {"url", "content", "content_type", "fetched_at"}:
-            return 400, {"error": "body must contain url, content and optional content_type, fetched_at"}
-        if "url" not in payload or "content" not in payload:
-            return 400, {"error": "url and content are required"}
+            return 503, {"error": "ledger requires the configured provenance repo (WRITE_PROVENANCE_REPO unset)"}
+        if not isinstance(payload, dict) or set(payload) != {"ref", "sha256"}:
+            return 400, {"error": "body must contain ref and sha256"}
         try:
-            result = self.store.archive(
-                payload["url"],
-                payload["content"],
-                content_type=payload.get("content_type"),
-                fetched_at=payload.get("fetched_at"),
-            )
+            result = self.store.record(payload["ref"], payload["sha256"])
         except ArchiveError as exc:
             return 400, {"error": str(exc)}
         return 200, result
@@ -102,9 +95,7 @@ class WriteApplication:
 def make_handler(application: WriteApplication) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
-            if self.path == "/v1/archive":
-                max_body = MAX_ARCHIVE_BODY_BYTES
-            elif self.path == "/v1/write":
+            if self.path in ("/v1/write", "/v1/source"):
                 max_body = MAX_BODY_BYTES
             else:
                 self._send(404, {"error": "not found"})
@@ -122,8 +113,8 @@ def make_handler(application: WriteApplication) -> type[BaseHTTPRequestHandler]:
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self._send(400, {"error": "body must be valid JSON"})
                 return
-            if self.path == "/v1/archive":
-                self._send(*application.handle_archive(payload))
+            if self.path == "/v1/source":
+                self._send(*application.handle_source(payload))
             else:
                 self._send(*application.handle(payload))
 

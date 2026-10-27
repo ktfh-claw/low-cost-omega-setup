@@ -34,7 +34,6 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 from hyperon_das.query_answer import QueryAnswer
@@ -57,34 +56,38 @@ _MAX_WIRE_ASSIGNMENTS = 64
 
 _HANDLE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
-# ----------------------------------------------------------------- v2 helpers
-# Provenance/truth-value decoration for the write path (2026-10-21). Link and
-# node handles are computed from type+targets ONLY (verified: hyperon_das
-# hasher.py), so custom_attributes never change atom identity or dedup.
+# ----------------------------------------------------------------- v4 helpers
+# Provenance/truth-value decoration for the write path (2026-10-27, v4). Link
+# and node handles are computed from type+targets ONLY (verified:
+# hyperon_das hasher.py), so custom_attributes never change atom identity
+# or dedup.
 
 MAX_PROV_URL_CHARS = 480
 _GIT_SHA_PATTERN = re.compile(r"^git:[0-9a-f]{40}$")
-_PROV_TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+_BLOB_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _validate_provenance(provenance: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Bound and validate the optional provenance payload."""
+    """Bound and validate the optional provenance payload (v4 shape)."""
     if provenance is None:
         return None
-    if not isinstance(provenance, dict) or set(provenance) - {"url", "git_commit", "fetched_at"}:
-        raise WriteFailure("provenance must contain url, git_commit and optional fetched_at")
-    url = provenance.get("url")
-    commit = provenance.get("git_commit")
-    fetched_at = provenance.get("fetched_at")
-    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-        raise WriteFailure("provenance url must be an http(s) URL")
-    if len(url) > MAX_PROV_URL_CHARS or any(ch.isspace() for ch in url):
-        raise WriteFailure(f"provenance url must be at most {MAX_PROV_URL_CHARS} chars without whitespace")
+    if not isinstance(provenance, dict) or set(provenance) != {"ref", "git_commit", "blob_sha256"}:
+        raise WriteFailure("provenance must contain ref, git_commit and blob_sha256")
+    ref = provenance["ref"]
+    commit = provenance["git_commit"]
+    blob_sha256 = provenance["blob_sha256"]
+    if (
+        not isinstance(ref, str)
+        or not ref.startswith(("http://", "https://", "/"))
+        or len(ref) > MAX_PROV_URL_CHARS
+        or any(ch.isspace() for ch in ref)
+    ):
+        raise WriteFailure("provenance ref must be an http(s) URL or an allowed absolute path")
     if not isinstance(commit, str) or not _GIT_SHA_PATTERN.match(commit):
         raise WriteFailure("provenance git_commit must be \"git:\" + 40 hex chars")
-    if fetched_at is not None and (not isinstance(fetched_at, str) or len(fetched_at) > 64):
-        raise WriteFailure("provenance fetched_at must be a short string")
-    return {"url": url, "git_commit": commit, "fetched_at": fetched_at}
+    if not isinstance(blob_sha256, str) or not _BLOB_SHA256_PATTERN.match(blob_sha256):
+        raise WriteFailure("provenance blob_sha256 must be 64 lowercase hex characters")
+    return {"ref": ref, "git_commit": commit, "blob_sha256": blob_sha256}
 
 
 def _validate_tv(tv: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -111,32 +114,24 @@ def _decorate_top_link(
     """Attach custom_attributes to the fact's TOP link atom.
 
     Best-effort: the pinned server persists custom_attributes on link
-    documents (RedisMongoDB extracts them; live-verified on the live agent
-    write lane), so this enriches the stored document. The companion
-    WriteProvenance atom is the guaranteed queryable record either way.
+    documents (live-verified Phase 0, iteration 18) on the TOP link only;
+    a dropped attribute surfaces at reconstruction, not as a write failure.
+    Provenance is custom-attribute-primary — there is NO companion atom.
     """
     for atom in fact.atoms:
         if atom.handle == fact.top_handle:
             attributes = atom.custom_attributes
             attributes["metta_expression"] = metta
             if provenance is not None:
-                attributes["provenance_url"] = provenance["url"]
+                attributes["provenance_ref"] = provenance["ref"]
                 attributes["provenance_git_commit"] = provenance["git_commit"]
+                attributes["provenance_blob_sha256"] = provenance["blob_sha256"]
             if tv is not None:
                 attributes["stv_strength"] = tv["strength"]
                 attributes["stv_confidence"] = tv["confidence"]
             return
 
 
-def _provenance_expression(top_handle: str, provenance: dict[str, Any]) -> str:
-    """The companion WriteProvenance MeTTa fact for one written fact."""
-    fetched_at = provenance.get("fetched_at") or datetime.now(timezone.utc).strftime(_PROV_TS_FORMAT)
-    return (
-        f'(WriteProvenance "fact:{top_handle}" '
-        f'"{provenance["git_commit"]}" '
-        f'"url:{provenance["url"]}" '
-        f'"ts:{fetched_at}")'
-    )
 # Rewritten wildcard callback hosts, per bus command (refreshed on every
 # runner construction; the patch itself is installed once).
 _REWRITE_HOSTS: dict[str, str] = {}
@@ -208,36 +203,28 @@ class DasWriteRunner:
         provenance: dict[str, Any] | None = None,
         tv: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Parse, write and (by default) verify one MeTTa fact (v2).
+        """Parse, write and (by default) verify one MeTTa fact (v4).
 
         ``provenance`` (optional) decorates the fact's TOP link with
-        ``provenance_url`` / ``provenance_git_commit`` / ``metta_expression``
-        custom attributes AND writes a companion
-        ``(WriteProvenance "fact:<handle>" "git:<sha>" "url:..." "ts:...")``
-        atom; ``tv`` decorates the top link with ``stv_strength`` /
+        ``provenance_ref`` / ``provenance_git_commit`` /
+        ``provenance_blob_sha256`` custom attributes (there is NO companion
+        atom — custom-attribute-primary, verified live in Phase 0);
+        ``tv`` decorates the top link with ``stv_strength`` /
         ``stv_confidence`` (the epistemic status the campaign-import lane
         dropped). Link handles are computed from type+targets only, so
         decoration never changes atom identity or dedup.
 
         Returns ``{"written": [handles], "verified": bool | None,
-        "missing": [handles], "provenance_link": str | None}``.
-        ``verified`` is ``None`` when verification was skipped;
-        ``missing`` only ever contains link handles (nodes are verified
-        transitively through the links that reference them).
+        "missing": [handles], "top_handle": str}``. ``verified`` is
+        ``None`` when verification was skipped; ``missing`` only ever
+        contains link handles (nodes are verified transitively through
+        the links that reference them).
         """
         provenance = _validate_provenance(provenance)
         tv = _validate_tv(tv)
         fact = parse_fact(metta)
         _decorate_top_link(fact, metta, provenance, tv)
         atoms: list[Any] = list(fact.atoms)
-        seen_handles = {atom.handle for atom in fact.atoms}
-        prov_fact: ParsedFact | None = None
-        if provenance is not None:
-            prov_fact = parse_fact(_provenance_expression(fact.top_handle, provenance))
-            for atom in prov_fact.atoms:
-                if atom.handle not in seen_handles:
-                    atoms.append(atom)
-                    seen_handles.add(atom.handle)
         handles = [atom.handle for atom in atoms]
         try:
             self.add_atoms(atoms)
@@ -248,19 +235,17 @@ class DasWriteRunner:
                 "written": handles,
                 "verified": None,
                 "missing": [],
-                "provenance_link": prov_fact.top_handle if prov_fact is not None else None,
+                "top_handle": fact.top_handle,
             }
         try:
             missing = self.verify_handles(fact)
-            if prov_fact is not None:
-                missing.extend(h for h in self.verify_handles(prov_fact) if h not in missing)
         except Exception as exc:
             raise WriteFailure(f"read-back verification failed: {exc}", handles) from exc
         return {
             "written": handles,
             "verified": not missing,
             "missing": missing,
-            "provenance_link": prov_fact.top_handle if prov_fact is not None else None,
+            "top_handle": fact.top_handle,
         }
 
     def add_atoms(self, atoms: list[Any]) -> list[str]:

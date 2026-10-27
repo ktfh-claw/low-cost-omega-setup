@@ -127,7 +127,7 @@ class TestWrite:
             "written": EXPECTED_HANDLES,
             "verified": None,
             "missing": [],
-            "provenance_link": None,
+            "top_handle": TOP_HANDLE,
         }
         # One atomdb proxy, one add_atoms command with the pinned wire format.
         assert len(atom_bus.issued) == 1
@@ -145,7 +145,7 @@ class TestWrite:
             "written": EXPECTED_HANDLES,
             "verified": True,
             "missing": [],
-            "provenance_link": None,
+            "top_handle": TOP_HANDLE,
         }
         # One variable-form query per written link, bottom-up.
         assert [proxy.tokens for proxy in query_bus.issued] == [
@@ -212,6 +212,148 @@ class TestWrite:
         partial.pop(tuple(T_TOP))
         runner = make_runner(query_bus=ScriptedQueryBus(partial))
         assert runner.verify_handles(fact) == [INNER_X402_HANDLE, TOP_HANDLE]
+
+
+class TestProvenanceV4:
+    PROV = {
+        "ref": "https://example.com/source.md",
+        "git_commit": "git:" + "a" * 40,
+        "blob_sha256": "b" * 64,
+    }
+    TV = {"strength": 0.9, "confidence": 0.8}
+
+    def test_valid_v4_provenance_shape_accepted(self, bridge_env):
+        atom_bus = ScriptedAtomBus()
+        runner = make_runner(atom_bus=atom_bus)
+        result = runner.write(X402, verify=False, provenance=self.PROV)
+        assert result["top_handle"] == TOP_HANDLE
+
+    @pytest.mark.parametrize(
+        "provenance",
+        [
+            {"ref": "https://a.com"},  # missing keys
+            {"ref": "https://a.com", "git_commit": "git:" + "a" * 40},  # missing blob_sha256
+            {**PROV, "fetched_at": "x"},  # extra key
+            {**PROV, "url": "https://a.com"},  # legacy key
+            "not-a-dict",
+        ],
+    )
+    def test_provenance_shape_errors(self, bridge_env, provenance):
+        runner = make_runner()
+        with pytest.raises(WriteFailure) as excinfo:
+            runner.write(X402, verify=False, provenance=provenance)
+        assert str(excinfo.value) == "provenance must contain ref, git_commit and blob_sha256"
+
+    @pytest.mark.parametrize(
+        "provenance",
+        [
+            {**PROV, "ref": "relative/path"},
+            {**PROV, "ref": "https://a.com/a b"},  # whitespace
+            {**PROV, "ref": "x" * 481},  # too long
+            {**PROV, "ref": ""},
+            {"ref": 123, "git_commit": "git:" + "a" * 40, "blob_sha256": "b" * 64},
+        ],
+    )
+    def test_provenance_ref_errors(self, bridge_env, provenance):
+        runner = make_runner()
+        with pytest.raises(WriteFailure) as excinfo:
+            runner.write(X402, verify=False, provenance=provenance)
+        assert str(excinfo.value) == "provenance ref must be an http(s) URL or an allowed absolute path"
+
+    @pytest.mark.parametrize(
+        "provenance",
+        [
+            {**PROV, "git_commit": "not-git-prefixed"},
+            {**PROV, "git_commit": "git:" + "z" * 40},
+            {**PROV, "git_commit": "git:" + "a" * 39},
+        ],
+    )
+    def test_provenance_git_commit_errors(self, bridge_env, provenance):
+        runner = make_runner()
+        with pytest.raises(WriteFailure) as excinfo:
+            runner.write(X402, verify=False, provenance=provenance)
+        assert str(excinfo.value) == 'provenance git_commit must be "git:" + 40 hex chars'
+
+    @pytest.mark.parametrize(
+        "provenance",
+        [
+            {**PROV, "blob_sha256": "B" * 64},  # uppercase
+            {**PROV, "blob_sha256": "b" * 63},
+            {**PROV, "blob_sha256": "z" * 64},
+            {**PROV, "blob_sha256": 123},
+        ],
+    )
+    def test_provenance_blob_sha_errors(self, bridge_env, provenance):
+        runner = make_runner()
+        with pytest.raises(WriteFailure) as excinfo:
+            runner.write(X402, verify=False, provenance=provenance)
+        assert str(excinfo.value) == "provenance blob_sha256 must be 64 lowercase hex characters"
+
+    def test_validation_error_leaves_the_bus_untouched(self, bridge_env):
+        atom_bus = ScriptedAtomBus()
+        runner = make_runner(atom_bus=atom_bus)
+        with pytest.raises(WriteFailure):
+            runner.write(X402, verify=False, provenance={"ref": "x"})
+        assert atom_bus.issued == []
+
+    def test_decorate_top_link_sets_exactly_the_v4_attributes(self, bridge_env):
+        fact = parse_fact(X402)
+        expected = {
+            "metta_expression": X402,
+            "provenance_ref": self.PROV["ref"],
+            "provenance_git_commit": self.PROV["git_commit"],
+            "provenance_blob_sha256": self.PROV["blob_sha256"],
+            "stv_strength": self.TV["strength"],
+            "stv_confidence": self.TV["confidence"],
+        }
+        write_client._decorate_top_link(fact, X402, dict(self.PROV), dict(self.TV))
+        for atom in fact.atoms:
+            if atom.handle == TOP_HANDLE:
+                assert atom.custom_attributes == expected
+            else:
+                assert atom.custom_attributes == {}
+
+    def test_decorate_top_link_without_provenance_or_tv(self, bridge_env):
+        fact = parse_fact(X402)
+        write_client._decorate_top_link(fact, X402, None, None)
+        for atom in fact.atoms:
+            if atom.handle == TOP_HANDLE:
+                assert atom.custom_attributes == {"metta_expression": X402}
+            else:
+                assert atom.custom_attributes == {}
+
+    def test_write_with_provenance_sends_only_fact_atoms(self, bridge_env):
+        # NO companion WriteProvenance atoms: the single add_atoms batch is
+        # the exact fact-atoms wire format.
+        atom_bus = ScriptedAtomBus()
+        query_bus = ScriptedQueryBus()
+        runner = make_runner(atom_bus, query_bus)
+        result = runner.write(X402, verify=False, provenance=self.PROV)
+        assert result["written"] == EXPECTED_HANDLES
+        assert len(atom_bus.issued) == 1
+        assert atom_bus.issued[0].remote_calls == [("add_atoms", EXPECTED_WIRE_ARGS)]
+
+    def test_write_with_provenance_queries_only_fact_links(self, bridge_env):
+        # Exactly the 3 fact link queries — no prov_fact query.
+        query_bus = ScriptedQueryBus(ALL_LINKS_ANSWERS)
+        runner = make_runner(query_bus=query_bus)
+        result = runner.write(X402, verify=True, provenance=self.PROV)
+        assert [proxy.tokens for proxy in query_bus.issued] == [
+            T_INNER_X402,
+            T_INNER_PP,
+            T_TOP,
+        ]
+        assert result["verified"] is True
+
+    def test_result_top_handle_in_both_verify_paths(self, bridge_env):
+        runner = make_runner()
+        unverified = runner.write(X402, verify=False, provenance=self.PROV)
+        assert unverified["top_handle"] == TOP_HANDLE
+        assert "provenance_link" not in unverified
+        runner = make_runner(query_bus=ScriptedQueryBus(ALL_LINKS_ANSWERS))
+        verified = runner.write(X402, verify=True, provenance=self.PROV)
+        assert verified["top_handle"] == TOP_HANDLE
+        assert "provenance_link" not in verified
 
 
 class TestDelete:

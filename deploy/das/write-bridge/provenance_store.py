@@ -1,15 +1,21 @@
-"""Git-backed source archive for the write-bridge facade (provenance v2).
+"""Git-backed source ledger for the write-bridge facade (provenance v4).
 
-Implements the final missing provenance layer: URL content fetched at
-research time is committed into a LOCAL git repository on the host, and
-the returned commit hash is what DAS atoms refer to. Content-addressed
-blobs under ``sources/<yyyy>/<mm>/<sha256>.<ext>`` plus an append-only
-``index.jsonl``; one commit per archived source. Deduped by
-``(url, blob sha256)``: re-archiving the same content from the same URL
-returns the ORIGINAL commit (idempotent, no new commit).
+Provenance is metadata-only: source CONTENT is never archived. The ledger
+is a single ``SOURCE-LEDGER.json`` file in a local git repository — a JSON
+array with one element per line (leading-comma pinned form):
+
+    [
+    {"ref": "<url|path>", "sha256": "<64hex>", "entry_date": "<ISO-8601 UTC>"}
+    ,{"ref": ...}
+    ]
+
+Each new entry is exactly one commit appending exactly one line before the
+final ``]`` line; the commit hash is the provenance anchor cited by DAS
+atoms. Deduped by ``(ref, sha256)``: recording the same pair returns the
+ORIGINAL entry's commit (idempotent, no new commit).
 
 The store is serialized by the facade (ThreadingHTTPServer) through an
-flock on ``.archive.lock`` because git index operations are not
+flock on ``.ledger.lock`` because git index operations are not
 concurrent-safe. Git runs via subprocess with per-invocation ``-c``
 identity config (no global config; the container user is 65532).
 """
@@ -17,7 +23,6 @@ identity config (no global config; the container user is 65532).
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -25,55 +30,25 @@ import subprocess
 import threading
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
-INDEX_NAME = "index.jsonl"
-LOCK_NAME = ".archive.lock"
+LEDGER_NAME = "SOURCE-LEDGER.json"
+LOCK_NAME = ".ledger.lock"
 
-MAX_URL_CHARS = 2048
-MAX_CONTENT_TYPE_CHARS = 128
-MAX_FETCHED_AT_CHARS = 64
-
-CONTENT_TYPE_EXT = {
-    "application/json": "json",
-    "application/xml": "xml",
-    "text/html": "html",
-    "text/plain": "txt",
-    "text/markdown": "md",
-    "text/xml": "xml",
-}
-DEFAULT_EXT = "txt"
+MAX_REF_CHARS = 480
 
 GIT_AUTHOR_NAME = "omega-write-bridge"
 GIT_AUTHOR_EMAIL = "write-bridge@omega.local"
 
-# Provenance citation gate (v2.1, Options A+B): a write may only cite a
-# commit that this store itself created for exactly the cited URL.
+# Citation gate: a write may only cite a commit created by this ledger.
 _GIT_COMMIT_PATTERN = re.compile(r"^git:([0-9a-f]{40})$")
-_ARCHIVE_SUBJECT_PREFIX = "archive: "
-_RECOMMIT_SUFFIX = " (re-commit)"
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+_ENTRY_KEYS = {"ref", "sha256", "entry_date"}
 
 
 class ArchiveError(RuntimeError):
-    """The archive operation failed (validated input or git failure)."""
-
-
-def parse_archive_subject(subject: str) -> tuple[str, str] | None:
-    """Parse an archive commit subject into ``(url, blob12)``.
-
-    Subjects are ``archive: <url> <blob12>`` (or the same with a trailing
-    ``(re-commit)`` marker). Returns ``None`` when malformed. The URL never
-    contains whitespace (validated at archive time), so the final
-    whitespace-separated token is always the 12-hex blob prefix.
-    """
-    if not isinstance(subject, str) or not subject.startswith(_ARCHIVE_SUBJECT_PREFIX):
-        return None
-    body = subject[len(_ARCHIVE_SUBJECT_PREFIX):]
-    if body.endswith(_RECOMMIT_SUFFIX):
-        body = body[: -len(_RECOMMIT_SUFFIX)]
-    url, sep, blob = body.rpartition(" ")
-    if not sep or not url or not blob:
-        return None
-    return url, blob
+    """The ledger operation failed (validated input or git failure)."""
 
 
 def _commit_sha_from_citation(git_commit: str) -> str:
@@ -83,8 +58,8 @@ def _commit_sha_from_citation(git_commit: str) -> str:
     return _GIT_COMMIT_PATTERN.match(git_commit).group(1)
 
 
-class ProvenanceStore:
-    """Content-addressed, git-committed archive of fetched source content."""
+class LedgerStore:
+    """Append-only git ledger of ``(ref, sha256)`` source entries."""
 
     def __init__(self, repo_root: str) -> None:
         self.repo_root = os.path.abspath(repo_root)
@@ -93,50 +68,24 @@ class ProvenanceStore:
     # ------------------------------------------------------------------ init
 
     def ensure_repo(self) -> None:
-        """Create the git repo if missing; idempotent."""
+        """Create the git repo and empty ledger if missing; idempotent."""
         os.makedirs(self.repo_root, exist_ok=True)
         git_dir = os.path.join(self.repo_root, ".git")
         if not os.path.isdir(git_dir):
             self._git("init", "--quiet")
-        index_path = os.path.join(self.repo_root, INDEX_NAME)
-        if not os.path.exists(index_path):
-            with open(index_path, "a", encoding="utf-8"):
-                pass
+        ledger_path = os.path.join(self.repo_root, LEDGER_NAME)
+        if not os.path.exists(ledger_path):
+            with open(ledger_path, "w", encoding="utf-8", newline="") as f:
+                f.write("[\n]\n")
+            self._git("add", "--", LEDGER_NAME)
+            self._git("commit", "--quiet", "-m", "ledger: init")
 
     # ---------------------------------------------------------------- public
 
-    def archive(
-        self,
-        url: str,
-        content: str,
-        content_type: str | None = None,
-        fetched_at: str | None = None,
-    ) -> dict[str, Any]:
-        """Archive ``content`` fetched from ``url``; return commit metadata."""
-        url = _validate_url(url)
-        if not isinstance(content, str) or not content:
-            raise ArchiveError("content must be a non-empty string")
-        if content_type is not None and (
-            not isinstance(content_type, str)
-            or not content_type
-            or len(content_type) > MAX_CONTENT_TYPE_CHARS
-            or content_type.strip() != content_type
-        ):
-            raise ArchiveError("content_type must be a short trimmed string")
-        if fetched_at is not None and (
-            not isinstance(fetched_at, str)
-            or not fetched_at
-            or len(fetched_at) > MAX_FETCHED_AT_CHARS
-        ):
-            raise ArchiveError("fetched_at must be a short string")
-
-        blob_sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        ext = CONTENT_TYPE_EXT.get((content_type or "").split(";")[0].strip().lower(), DEFAULT_EXT)
-        now = datetime.now(timezone.utc)
-        path = os.path.join(
-            "sources", f"{now.year:04d}", f"{now.month:02d}", f"{blob_sha}.{ext}"
-        )
-        archived_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    def record(self, ref: str, sha256: str) -> dict[str, Any]:
+        """Append one ledger entry; return ``{commit, deduped, entry_date}``."""
+        ref = _validate_ref(ref)
+        sha256 = _validate_sha256(sha256)
 
         with self._lock:
             self.ensure_repo()
@@ -144,84 +93,45 @@ class ProvenanceStore:
             with open(lock_path, "a+b") as lock_file:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
                 try:
-                    existing = self._find_index_entry(url, blob_sha)
+                    existing = self._find_entry(ref, sha256)
                     if existing is not None:
-                        commit = self._commit_for_path(existing["path"])
-                        if commit is None:
-                            # Index line exists but the blob commit is gone
-                            # (repo tampered/restored); re-commit the line.
-                            commit = self._commit_files(
-                                [os.path.join(self.repo_root, existing["path"])],
-                                f"archive: {url} {blob_sha[:12]} (re-commit)",
-                            )
+                        element, entry = existing
+                        commit = self._original_commit_for(element)
                         return {
                             "commit": commit,
-                            "blob_sha256": blob_sha,
-                            "path": existing["path"],
                             "deduped": True,
-                            "archived_at": existing["archived_at"],
+                            "entry_date": entry["entry_date"],
                         }
 
-                    blob_abs = os.path.join(self.repo_root, path)
-                    os.makedirs(os.path.dirname(blob_abs), exist_ok=True)
-                    with open(blob_abs, "w", encoding="utf-8", newline="") as f:
-                        f.write(content)
-
-                    entry = {
-                        "url": url,
-                        "blob_sha256": blob_sha,
-                        "path": path,
-                        "content_type": content_type or DEFAULT_EXT,
-                        "fetched_at": fetched_at,
-                        "archived_at": archived_at,
-                    }
-                    index_abs = os.path.join(self.repo_root, INDEX_NAME)
-                    with open(index_abs, "a", encoding="utf-8") as f:
-                        f.write(json.dumps(entry, separators=(",", ":"), sort_keys=True) + "\n")
-
-                    commit = self._commit_files(
-                        [blob_abs, index_abs], f"archive: {url} {blob_sha[:12]}"
+                    entry_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    element = json.dumps(
+                        {"ref": ref, "sha256": sha256, "entry_date": entry_date},
+                        separators=(",", ":"),
                     )
-                    if commit is None:
-                        # Nothing changed (same url+content already committed
-                        # but the index line was pruned): return existing.
-                        commit = self._commit_for_path(path)
-                        if commit is None:
-                            raise ArchiveError("git commit produced no commit")
-                    return {
-                        "commit": commit,
-                        "blob_sha256": blob_sha,
-                        "path": path,
-                        "deduped": False,
-                        "archived_at": archived_at,
-                    }
+                    self._append_element_line(element)
+                    self._git("add", "--", LEDGER_NAME)
+                    self._git(
+                        "commit", "--quiet", "-m", f"ledger: {sha256[:12]} {ref[:96]}"
+                    )
+                    commit = self._git(
+                        "rev-parse", "HEAD", check=True, capture=True
+                    ).strip()
+                    return {"commit": commit, "deduped": False, "entry_date": entry_date}
                 finally:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
-    def lookup(self, blob_sha: str) -> dict[str, Any] | None:
-        """Return the newest index entry whose blob sha starts with ``blob_sha``."""
-        with self._lock:
-            self.ensure_repo()
-            existing = self._find_index_entry(None, blob_sha)
-            if existing is None:
-                return None
-            result = dict(existing)
-            result["commit"] = self._commit_for_path(existing["path"])
-            return result
+    def verify_commit(self, git_commit: str, ref: str, sha256: str) -> dict[str, Any]:
+        """Write-time citation gate (provenance v4).
 
-    def verify_commit(self, git_commit: str, url: str) -> dict[str, Any]:
-        """Write-time citation gate (provenance v2.1, Options A+B).
-
-        (A) The cited commit must exist in the archive repo, and (B) its
-        subject must cite exactly ``url`` — this catches both hallucinated
-        shas and right-sha-wrong-source swaps. Raises :class:`ArchiveError`
-        with an actionable, retryable message on failure; returns the
-        archived entry metadata on success. Serialized like ``archive()``
-        (flock) because it reads repo state.
+        The cited commit must exist in the ledger repo, touch only
+        ``SOURCE-LEDGER.json``, add exactly one entry-shaped line, and that
+        entry's ``(ref, sha256)`` must equal the cited pair — this catches
+        hallucinated shas and right-sha-wrong-source swaps. Raises
+        :class:`ArchiveError` with an actionable, retryable message on
+        failure; returns the cited entry's metadata on success. Serialized
+        like ``record()`` (flock) because it reads repo state.
         """
         sha = _commit_sha_from_citation(git_commit)
-        if not isinstance(url, str) or not url:
-            raise ArchiveError("provenance url is required to verify the cited commit")
 
         with self._lock:
             self.ensure_repo()
@@ -234,90 +144,100 @@ class ProvenanceStore:
                     ).strip()
                     if not resolved:
                         raise ArchiveError(
-                            f'provenance git commit "{git_commit}" not found in the '
-                            f'archive — run (archive-source "{url}") and use the sha '
-                            "from its ARCHIVE-OK return, then retry"
+                            f'provenance git_commit "{git_commit}" not found in the '
+                            "ledger — write the source first via the skill, then retry"
                         )
-                    subject = self._git(
-                        "show", "-s", "--format=%s", sha, capture=True
-                    ).strip()
-                    parsed = parse_archive_subject(subject)
-                    if parsed is None:
+                    names = [
+                        line.strip()
+                        for line in self._git(
+                            "show", "--name-only", "--format=", sha, capture=True
+                        ).splitlines()
+                        if line.strip()
+                    ]
+                    if names != [LEDGER_NAME]:
                         raise ArchiveError(
-                            f'provenance git commit "{git_commit}" exists but is not '
-                            f'an archive commit — run (archive-source "{url}") and use '
-                            "the sha from its ARCHIVE-OK return, then retry"
+                            f'provenance git_commit "{git_commit}" is not a ledger '
+                            f"commit (touching only {LEDGER_NAME})"
                         )
-                    archived_url, _blob12 = parsed
-                    if archived_url != url:
+                    diff = self._git(
+                        "show", sha, "--", LEDGER_NAME, capture=True
+                    )
+                    entries = _entry_shaped_lines(diff)
+                    if (
+                        len(entries) != 1
+                        or (entries[0]["ref"], entries[0]["sha256"]) != (ref, sha256)
+                    ):
                         raise ArchiveError(
-                            f'provenance git commit "{git_commit}" archives a different '
-                            f'source: "{archived_url}", not "{url}" — run '
-                            f'(archive-source "{url}") and use the sha from its '
-                            "ARCHIVE-OK return, then retry"
+                            f'provenance git_commit "{git_commit}" does not add the '
+                            "cited source entry — re-run the skill write, then retry"
                         )
-                    # Resolve the archived blob sha from the commit's tree so
-                    # the returned metadata is grounded in the commit itself.
-                    names = self._git(
-                        "show", "--name-only", "--format=", sha, capture=True
-                    )
-                    blob_path = next(
-                        (ln.strip() for ln in names.splitlines() if ln.strip().startswith("sources/")),
-                        "",
-                    )
-                    result: dict[str, Any] = {"commit": sha, "url": archived_url}
-                    if blob_path:
-                        blob_sha = os.path.basename(blob_path).rsplit(".", 1)[0]
-                        result["blob_sha256"] = blob_sha
-                        entry = self._find_index_entry(archived_url, blob_sha)
-                        if entry is not None:
-                            result["path"] = entry.get("path")
-                            result["archived_at"] = entry.get("archived_at")
-                    return result
+                    entry = entries[0]
+                    return {
+                        "commit": sha,
+                        "ref": entry["ref"],
+                        "sha256": entry["sha256"],
+                        "entry_date": entry["entry_date"],
+                    }
                 finally:
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     # --------------------------------------------------------------- helpers
 
-    def _find_index_entry(self, url: str | None, blob_sha: str) -> dict[str, Any] | None:
-        index_abs = os.path.join(self.repo_root, INDEX_NAME)
-        found: dict[str, Any] | None = None
-        with open(index_abs, "r", encoding="utf-8") as f:
+    def _find_entry(self, ref: str, sha256: str) -> tuple[str, dict[str, Any]] | None:
+        """The first ledger element whose ``(ref, sha256)`` matches.
+
+        Returns ``(element line text, parsed entry)`` or ``None``.
+        """
+        ledger_abs = os.path.join(self.repo_root, LEDGER_NAME)
+        with open(ledger_abs, "r", encoding="utf-8") as f:
             for line in f:
-                line = line.strip()
-                if not line:
+                element = _element_text(line)
+                if element is None:
                     continue
                 try:
-                    entry = json.loads(line)
+                    entry = json.loads(element)
                 except json.JSONDecodeError:
                     continue
-                if url is not None:
-                    if entry.get("url") == url and entry.get("blob_sha256") == blob_sha:
-                        found = entry
-                else:
-                    sha = str(entry.get("blob_sha256", ""))
-                    if sha.startswith(blob_sha):
-                        found = entry
-        return found
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("ref") == ref and entry.get("sha256") == sha256:
+                    return element, entry
+        return None
 
-    def _commit_for_path(self, rel_path: str) -> str | None:
-        """The OLDEST commit touching ``rel_path`` (= the one that added it)."""
+    def _original_commit_for(self, element: str) -> str:
+        """The OLDEST commit that introduced ``element`` (pickaxe)."""
         result = self._git(
-            "log", "--format=%H", "--", rel_path, check=True, capture=True
+            "log", "--reverse", "--format=%H", f"-S{element}", "--", LEDGER_NAME,
+            capture=True,
         )
         lines = [line for line in result.splitlines() if line.strip()]
         if not lines:
-            return None
-        return lines[-1].strip()
+            raise ArchiveError(
+                "ledger entry exists but no commit adds its line — the repo is "
+                "inconsistent; inspect SOURCE-LEDGER.json and the git log"
+            )
+        return lines[0].strip()
 
-    def _commit_files(self, abs_paths: list[str], message: str) -> str | None:
-        for path in abs_paths:
-            self._git("add", "--", os.path.relpath(path, self.repo_root))
-        staged = self._git("diff", "--cached", "--name-only", capture=True) or ""
-        if not staged.strip():
-            return None
-        self._git("commit", "--quiet", "-m", message)
-        return self._git("rev-parse", "HEAD", check=True, capture=True).strip()
+    def _append_element_line(self, element: str) -> None:
+        """Insert ``element`` as one line immediately before the final ``]``.
+
+        Pinned form: the FIRST element line starts ``{``, every subsequent
+        element line starts ``,{`` (leading commas — each append is a pure
+        +1-line diff and the file stays a valid JSON array).
+        """
+        ledger_abs = os.path.join(self.repo_root, LEDGER_NAME)
+        with open(ledger_abs, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        last = max(index for index, line in enumerate(lines) if line.strip())
+        if lines[last].strip() != "]":
+            raise ArchiveError(f"{LEDGER_NAME} is malformed: no closing ] line")
+        has_elements = any(
+            _element_text(line) is not None for line in lines[:last]
+        )
+        prefix = "" if not has_elements else ","
+        lines.insert(last, prefix + element + "\n")
+        with open(ledger_abs, "w", encoding="utf-8", newline="") as f:
+            f.write("".join(lines))
 
     def _git(self, *args: str, check: bool = False, capture: bool = False) -> str:
         cmd = [
@@ -351,17 +271,59 @@ class ProvenanceStore:
         return proc.stdout
 
 
-def _validate_url(url: str) -> str:
-    from urllib.parse import urlsplit
+def _element_text(line: str) -> str | None:
+    """The comma-stripped element text of one ledger line, else ``None``."""
+    text = line.strip()
+    if text.startswith(","):
+        text = text[1:]
+    if not text.startswith("{"):
+        return None
+    return text
 
-    if not isinstance(url, str) or not url or len(url) > MAX_URL_CHARS:
-        raise ArchiveError("url must be a non-empty string of at most 2048 characters")
-    if url.strip() != url or any(ch.isspace() for ch in url):
-        raise ArchiveError("url must not contain whitespace")
+
+def _entry_shaped_lines(diff: str) -> list[dict[str, Any]]:
+    """Entry-shaped objects added by a ``git show`` diff.
+
+    Added lines only (leading ``+``, never the ``+++`` header), one leading
+    comma stripped, kept when they parse as JSON objects with the exact
+    three-field key set. The ``ledger: init`` commit's ``[``/``]`` lines and
+    any non-entry additions are filtered out.
+    """
+    entries: list[dict[str, Any]] = []
+    for line in diff.splitlines():
+        if line.startswith("+++") or not line.startswith("+"):
+            continue
+        element = _element_text(line[1:])
+        if element is None:
+            continue
+        try:
+            entry = json.loads(element)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict) and set(entry) == _ENTRY_KEYS:
+            entries.append(entry)
+    return entries
+
+
+def _validate_ref(ref: str) -> str:
+    if not isinstance(ref, str) or not ref or len(ref) > MAX_REF_CHARS:
+        raise ArchiveError(
+            "ref must be a non-empty string of at most 480 characters"
+        )
+    if any(ch.isspace() for ch in ref):
+        raise ArchiveError("ref must not contain whitespace")
+    if ref.startswith("/"):
+        return ref
     try:
-        parsed = urlsplit(url)
+        parsed = urlsplit(ref)
     except ValueError as exc:
-        raise ArchiveError("url is invalid") from exc
+        raise ArchiveError("ref must be an http(s) URL or an absolute path") from exc
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ArchiveError("url must be an http(s) URL")
-    return url
+        raise ArchiveError("ref must be an http(s) URL or an absolute path")
+    return ref
+
+
+def _validate_sha256(sha256: str) -> str:
+    if not isinstance(sha256, str) or _SHA256_PATTERN.match(sha256) is None:
+        raise ArchiveError("sha256 must be 64 lowercase hex characters")
+    return sha256
