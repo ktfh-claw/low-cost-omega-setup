@@ -11,27 +11,64 @@ upstream sources are forked or modified.
 
 ```
 POST /v1/write {"metta": "(Inheritance (Concept \"x402\") (Concept \"payment-protocol\"))", "verify": true}
-    -> 200 {"handles": ["..."], "verified": true, "missing": []}
+    -> 200 {"handles": ["..."], "verified": true, "missing": [], "top_handle": "<fact top-link handle>"}
 ```
 
-### Provenance citation gate (v2.1, 2026-10-21)
+### Provenance ledger (v4, 2026-10-27)
 
-When a `/v1/write` payload carries a `provenance` object, the facade gates
-the citation **before anything reaches DAS** (live campaign failure mode:
-the agent inventing commit shas after `ARCHIVE-FAILED` fetches):
+Provenance is **metadata-only and transparent to the agent**: source content
+is never archived; the facade keeps a git **ledger** of
+`(ref, sha256)` pairs, and the fact's TOP link carries the provenance as
+`custom_attributes` (there is NO companion atom). Two endpoints:
 
-- **(A) Commit existence** — the cited `git_commit` must resolve to a real
-  commit in the archive repo (`WRITE_PROVENANCE_REPO`).
-- **(B) URL cross-check** — the commit's subject must archive exactly the
-  cited `provenance.url` (catches right-sha-wrong-source swaps).
+- **`POST /v1/source {"ref", "sha256"}`** — append one entry to
+  `SOURCE-LEDGER.json` in the git repo at `WRITE_PROVENANCE_REPO` and
+  return `{"commit", "deduped", "entry_date"}`. The ref is an http(s) URL
+  or an absolute path (≤480 chars, no whitespace); the sha256 is 64
+  lowercase hex (of the source content, computed by the agent-side plugin
+  — content never crosses to the facade). **Dedup:** recording a
+  `(ref, sha256)` pair already present returns the ORIGINAL entry's commit
+  (`deduped: true`, no new commit); the entry identity is `(ref, sha256)`,
+  never a line number. Same ref + different content = a new entry.
+- **`POST /v1/write {"metta", "verify", "provenance", "tv"}`** — the
+  optional `provenance` object carries exactly
+  `{"ref", "git_commit", "blob_sha256"}` (the `git_commit` is the ledger
+  commit returned by `/v1/source`, cited as `"git:<40hex>"`). A
+  **citation gate** runs BEFORE anything reaches DAS: the cited commit
+  must exist in the ledger repo, touch only `SOURCE-LEDGER.json`, add
+  exactly one entry-shaped line, and that entry's `(ref, sha256)` must
+  equal the payload's. Failures return `400` with an actionable,
+  retryable message (`not found in the ledger — write the source first
+  via the skill, then retry`, `is not a ledger commit (touching only
+  SOURCE-LEDGER.json)`, `does not add the cited source entry — re-run the
+  skill write, then retry`); a legacy `{url, git_commit}` payload is
+  rejected with `provenance must contain ref, git_commit and
+  blob_sha256`. Provenance without a configured ledger is `503`. The 200
+  response carries `top_handle` (the fact's top-link handle) alongside
+  `handles`/`verified`/`missing` — the plugin's write receipt quotes it.
 
-Both failures return `400` with an actionable retry message
-(`run (archive-source "<url>") and use the sha from its ARCHIVE-OK return,
-then retry`); the agent-side plugin surfaces it verbatim as
-`BRIDGE-PERSIST-WRITE-FAILED`, which the campaign prompt's read-reason-fix
-rule turns into the re-archive-and-retry loop. Provenance writes without a
-configured archive are rejected with `503`. Gate implementation:
-`provenance_store.verify_commit()` (serialized like `archive()`, flock).
+**`SOURCE-LEDGER.json` format** — a single JSON array file, one element
+per line, leading-comma pinned form (each append is a pure +1-line diff
+and the file stays valid JSON); each element has exactly three fields:
+
+```json
+[
+{"ref": "https://example.com/source.md", "sha256": "9f2c1d0a…64hex", "entry_date": "2026-10-28T09:00:00Z"}
+,{"ref": "/var/lib/sources/other.md", "sha256": "1ab3e57f…64hex", "entry_date": "2026-10-28T09:00:01Z"}
+]
+```
+
+One commit per new entry; the commit subject (`ledger: <sha12> <ref[:96]>`)
+is informational only and never parsed by verification. A fresh repo
+starts as `[\n]` with a single `ledger: init` commit (citing it correctly
+fails the gate — it adds no entry line).
+
+**Top-link custom_attributes** (best-effort persistence, live-verified
+Phase 0): `metta_expression` always; with provenance `provenance_ref`,
+`provenance_git_commit`, `provenance_blob_sha256`; with `tv` `stv_strength`,
+`stv_confidence`. A dropped attribute surfaces at reconstruction (case
+FAIL), not as a write failure. Attributes ride the mongo link document and
+are invisible to pattern-engine answers — mongo is THE provenance channel.
 
 - `metta_to_atoms.py` — client-side parse of ONE small parenthesized MeTTa
   fact into the pinned client's `Node`/`Link` atoms (data only, no
@@ -46,9 +83,14 @@ configured archive are rejected with `503`. Gate implementation:
   use_streaming=False)` (the proxy's built-in `COMMAND_SIZE_LIMIT` chunking
   applies), then verifies by ground structural `LINK_TEMPLATE` queries
   through `PatternMatchingQueryProxy` against the query engine. Returns
-  `{"written": [handles], "verified": bool|null, "missing": [handles]}`.
+  `{"written": [handles], "verified": bool|null, "missing": [handles],
+  "top_handle": str}`.
+- `provenance_store.py` — `LedgerStore`: the git ledger
+  (`ensure_repo`/`record`/`verify_commit`), flock-serialized on
+  `.ledger.lock`.
 - `app.py` — bounded HTTP facade (mirrors `deploy/das/proxy/app.py`): body
-  cap 16 KiB, metta cap 2048 chars, single-expression rule, same hardening.
+  cap 16 KiB on both `/v1/write` and `/v1/source`, metta cap 2048 chars,
+  single-expression rule, same hardening.
 - `cleanup.py` — canary cleanup: deletes a fact's atoms by handle and
   verifies the deletion by read-back returning no answers.
 - `compose.write-bridge.yaml` — one `write-bridge` service on the existing
@@ -67,6 +109,7 @@ configured archive are rejected with `503`. Gate implementation:
 | `DAS_PEER_JOIN_TIMEOUT_SECONDS` | wait for the broker callback peer (default 10) | `10` |
 | `WRITE_HTTP_HOST/PORT` | facade bind (default `0.0.0.0:8080`) | `0.0.0.0`/`8080` |
 | `WRITE_MAX_METTA_CHARS` | metta size cap (default 2048) | `2048` |
+| `WRITE_PROVENANCE_REPO` | host path of the git source ledger repo (unset = provenance endpoints return 503) | `/var/lib/omega-provenance` |
 
 ## The three deployment invariants (live-discovered; violating any breaks the lane)
 
@@ -100,8 +143,10 @@ each written `Expression` link is queried with a fully ground
   transitively (every node in a parsed fact is a target of at least one
   written link, and a link template only matches when its target handles
   match).
-- Atoms written via the bus carry **no `custom_attributes.metta_expression`**
-  (that's a db_loader feature); verification uses handles/targets only.
+- The TOP link's `custom_attributes` (`metta_expression`,
+  `provenance_*`, `stv_*`) ride the mongo link document (live-verified
+  Phase 0) and are invisible to pattern-engine answers; verification uses
+  handles/targets only and never reads attributes back.
 - Verification uses the structural token form. Variable-bearing MeTTa-form
   queries work through the query engine with
   `use_metta_as_query_tokens=true`, but ground (variable-free) MeTTa
