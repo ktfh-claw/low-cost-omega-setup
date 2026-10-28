@@ -275,8 +275,7 @@ def _count_query_posts(logs: str, agent_ip: str) -> int:
     v10 (wr3i evidence): the previous rf-string pattern was over-escaped
     (``HTTP/1\\\\.1`` and ``2\\\\d\\\\d`` demand literal backslashes in the
     log line), so the attested-retrieve lane read 0 for every window that
-    contained real query traffic. Single-escaped form — byte-identical to
-    the working facade pattern in ``_posts_in_window`` — matches the real
+    contained real query traffic. Single-escaped form — matches the real
     log line ``... "POST /v1/query HTTP/1.1" 200 -``.
     """
     pat = re.compile(
@@ -300,24 +299,17 @@ def _qe_pattern_in_window(since_iso: str, until_iso: str, query: str) -> bool:
     return False
 
 
-def _posts_in_window(container: str, since_iso: str, until_iso: str,
-                     path: str, agent_ip: str) -> int:
-    """Count 2xx POSTs to a facade path from the agent IP in the window."""
-    logs = _docker_logs_since(container, since_iso, until_iso)
-    pat = re.compile(
-        rf"http {re.escape(agent_ip)} \"POST {re.escape(path)} HTTP/1\.1\" 2\d\d"
-    )
-    return len(pat.findall(logs))
-
-
 def collect_attestation(args, case_id: str, since_iso: str, until_iso: str,
                         query: str) -> dict:
     """Harness-side attestation for one case window + query.
 
-    Covers the known history-channel observability gap (PeTTa superpose/
-    collapse collapses tool tuples to $_): the read-proxy/QE logs attest
-    das-retrieve calls; the write-bridge facade logs attest real write and
-    archive calls (E_NO_INGEST evidence when history receipts collapsed).
+    QUERY-ONLY (resolution 6): the attestation lane is the read-proxy
+    access log + QE pattern log attesting das-retrieve calls
+    (Q_ATTESTED_VIA_ACCESS_LOG), covering the known history-channel
+    observability gap (PeTTa superpose/collapse collapses tool tuples to
+    $_). The write/archive facade-log census is dropped — E_NO_INGEST has
+    been receipts-only since item 2 (BRIDGE-PERSIST-OK receipts extracted
+    from the history window).
     """
     agent_ip = _container_ip(CONTAINER_AGENT)
     return {
@@ -325,10 +317,6 @@ def collect_attestation(args, case_id: str, since_iso: str, until_iso: str,
         "agent_ip": agent_ip,
         "access_count": _agent_query_count_in_window(since_iso, until_iso, agent_ip),
         "qe_pattern_match": _qe_pattern_in_window(since_iso, until_iso, query),
-        "write_count": _posts_in_window(CONTAINER_WRITE_BRIDGE, since_iso,
-                                         until_iso, "/v1/write", agent_ip),
-        "archive_count": _posts_in_window(CONTAINER_WRITE_BRIDGE, since_iso,
-                                           until_iso, "/v1/archive", agent_ip),
         "window": [since_iso, until_iso],
     }
 
@@ -989,8 +977,10 @@ def grade_case(args) -> int:
 
     # attestation lane: window = [setup restart, now]. v9: ALWAYS
     # collected — the history channel collapses tool calls to $_ (wr3h:
-    # 100% placeholder tuples), so the retrieve/persist/archive censuses
-    # come from the tamper-resistant facade + read-proxy access logs. The
+    # 100% placeholder tuples), so the attestation lane is QUERY-ONLY
+    # (read-proxy access log + QE pattern log ->
+    # Q_ATTESTED_VIA_ACCESS_LOG; the write/archive facade-log census is
+    # dropped, resolution 6 — E_NO_INGEST is receipts-only). The
     # query-specific qe_pattern_match stays conditional on the block
     # naming a query (empty query -> False, so Q_NOT_IN_HISTORY semantics
     # are unchanged).
@@ -1058,8 +1048,6 @@ def grade_case(args) -> int:
             "archive_receipts": len(archive_receipts),
             "add_atom_shas": add_atom_shas[:20],
             "attested_retrieve_calls": attestation["access_count"],
-            "attested_write_calls": attestation["write_count"],
-            "attested_archive_calls": attestation["archive_count"],
         },
         "facts_index_size": len(facts_index),
         "attestation": attestation,
