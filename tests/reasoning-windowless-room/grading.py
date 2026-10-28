@@ -285,6 +285,7 @@ def parse_reasoning_trace(reasoning_raw: str) -> tuple[list[str], bool]:
     parenthesized s-expression; any other content is prose (has_prose=True
     -> R_NOT_METTA). Generated text instead of the MeTTa trace fails the
     R-gate — that is the campaign-grade standard (2026-10-24 directive).
+    # v17: stv-annotated interpreter outputs and trailing prose annotations are legitimate live trace shapes (mirrored by reconstruct_sources._strip_stv; prose → has_prose → R_NOT_METTA).
     """
     steps: list[str] = []
     has_prose = False

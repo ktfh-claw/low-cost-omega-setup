@@ -457,7 +457,7 @@ def test_json_shape_and_determinism(tmp_path, monkeypatch, ledger_repo):
     payload = json.loads(out1.read_text())
     assert set(payload) == {
         "per_expression", "per_predicate", "handles_check",
-        "missing", "conditions", "source_paths"}
+        "missing", "conditions", "source_paths", "prose_segments"}
 
 
 def test_mongo_seam_raising_exits_1(tmp_path, monkeypatch, ledger_repo):
@@ -479,12 +479,15 @@ def test_ledger_repo_missing_exits_1(tmp_path, monkeypatch):
 
 
 def test_trace_unparseable_exits_1(tmp_path, monkeypatch, ledger_repo):
+    # A parenthesized segment whose CONTENT fails parse_fact — the preserved
+    # harness-error shape (with prose-skip, non-parenthesized segments are
+    # prose: skipped, recorded in prose_segments, never an error).
     repo, _, _ = ledger_repo
     rc, _, stderr = _run(
-        ["--trace", "(match &self $X);plain prose segment", "--ledger-repo", repo],
+        ["--trace", '((A) (B))', "--ledger-repo", repo],
         monkeypatch)
     assert rc == 1
-    assert "trace unparseable" in stderr and "prose segment" in stderr
+    assert "trace unparseable" in stderr and "'((A) (B))'" in stderr
 
 
 @pytest.mark.parametrize("argv", [
@@ -511,3 +514,62 @@ def test_empty_trace_vacuous_pass(tmp_path, monkeypatch, ledger_repo):
     assert rc == 0
     assert payload["per_expression"] == []
     assert payload["conditions"] == [] and payload["missing"] == []
+
+
+# --------------------------------------------------- live stv/prose tolerances
+
+
+def test_live_stv_shapes_full_pipeline(tmp_path, monkeypatch, ledger_repo):
+    # The live failure shapes (wr3o-20261028), end-to-end: a trailing-stv
+    # fact step, a wrapped-stv derivation component, and a prose tail —
+    # all must grade rc 0 with clean exprs in per_expression, prose
+    # recorded in prose_segments, and handles derived from the CLEAN exprs.
+    repo, first, second = ledger_repo
+    other_handle = _other_handle()
+    trace = (
+        f"{X402} (stv 1.0 0.81);"
+        f"{X402} => ({OTHER} (stv 1.0 0.9));"
+        "this is prose"
+    )
+    docs = {
+        TOP_HANDLE: _attrs(first["commit"]),
+        other_handle: _attrs(second["commit"], ref=REF2, sha=SHA2),
+    }
+    rc, payload, _, stderr = _run_json(
+        tmp_path, ["--trace", trace, "--ledger-repo", repo],
+        monkeypatch, docs=docs)
+    assert rc == 0, stderr
+    rows = payload["per_expression"]
+    # the trailing-stv fact: clean expr + the clean fact's handle
+    assert rows[0]["classification"] == "stored_fact"
+    assert rows[0]["expr"] == X402
+    assert rows[0]["top_handle"] == TOP_HANDLE
+    # the wrapped-stv derivation: the component handles are derived from
+    # the CLEAN component exprs (the wrapped stv never reaches parse_fact)
+    assert rows[1]["classification"] == "derivation"
+    assert rows[1]["stored"] is True
+    assert rows[1]["top_handle"] is None
+    assert {s["ref"] for s in rows[1]["sources"]} == {REF, REF2}
+    # the clean component exprs are the per_predicate aggregation keys
+    assert payload["per_predicate"]["Inheritance"]["expressions"] == [X402]
+    assert payload["per_predicate"]["Evaluation"]["expressions"] == [OTHER]
+    # the prose tail is recorded, never a harness error
+    assert "prose_segments" in payload
+    assert payload["prose_segments"] == ["this is prose"]
+    assert payload["missing"] == [] and payload["conditions"] == []
+
+
+def test_prose_segment_json_field(tmp_path, monkeypatch, ledger_repo):
+    # A prose-only tail: the JSON payload gains the prose_segments key
+    # (informational only — R_NOT_METTA still fires upstream via
+    # parse_reasoning_trace; no gate condition is added here).
+    repo, first, _ = ledger_repo
+    trace = f"{X402};this is a prose tail"
+    rc, payload, _, stderr = _run_json(
+        tmp_path, ["--trace", trace, "--ledger-repo", repo],
+        monkeypatch, docs={TOP_HANDLE: _attrs(first["commit"])})
+    assert rc == 0, stderr
+    assert "prose_segments" in payload
+    assert payload["prose_segments"] == ["this is a prose tail"]
+    assert payload["per_expression"][0]["classification"] == "stored_fact"
+    assert payload["missing"] == [] and payload["conditions"] == []
