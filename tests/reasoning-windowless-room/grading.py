@@ -131,7 +131,14 @@ def parse_exec_outputs(text: str) -> list[str]:
     record's `exec <call> => <output>` lines (scenario-A/A2 lesson,
     2026-10-25). The outputs are executed derivation atoms with their
     (stv ...) truth values; they count as grounded trace steps (existing
-    atoms produced by the interpreter, recorded verbatim)."""
+    atoms produced by the interpreter, recorded verbatim).
+
+    v17 note (wr3o-20261028): the live exec lines record the output with
+    ONE EXTRA outer paren layer (``exec (|~ ...) => (((Evaluation ...)
+    (stv 1.0 0.81)))``) while the trace quotes the single-wrapped product.
+    This function keeps the recorded form VERBATIM (unchanged); the
+    R-gate grounds both shapes via ``exec_grounding_set`` (call side +
+    raw and single-redundant-paren-stripped output variants)."""
     outputs: list[str] = []
     for line in text.splitlines():
         line = line.strip()
@@ -140,6 +147,66 @@ def parse_exec_outputs(text: str) -> list[str]:
             if out.startswith("(") and out.endswith(")"):
                 outputs.append(normalize_expression(out))
     return outputs
+
+
+def _strip_redundant_outer_paren(expr: str) -> str:
+    """Strip ONE redundant outer paren layer from a balanced s-expression
+    (v17, wr3o-20261028). The live extraction-record exec lines wrap the
+    interpreter product in an extra paren pair — ``(((Evaluation ...)
+    (stv 1.0 0.81)))`` — while the REASONING trace quotes the normal form
+    ``((Evaluation ...) (stv 1.0 0.81))``. CONSERVATIVE single-strip rule:
+    the outer layer is stripped only when the content it wraps is itself
+    exactly ONE balanced parenthesized s-expression. Two-product outputs
+    (``((A ...) (B ...))``) and the normal atom+stv pair keep their outer
+    layer — a paired product is never mistaken for one redundant wrap.
+    Returns the input unchanged when no redundant layer is present."""
+    s = expr.strip()
+    if not (s.startswith("(") and s.endswith(")")):
+        return s
+    inner = s[1:-1].strip()
+    if not (inner.startswith("(") and inner.endswith(")")):
+        return s
+    if len(_top_level_sexprs(inner)) != 1:
+        return s
+    return normalize_expression(inner)
+
+
+def exec_grounding_set(record_text: str) -> set[str]:
+    """The R-gate grounding set minted from the extraction record's
+    ``exec <call> => <output>`` lines (v17 harness iteration 2,
+    wr3o-20261028).
+
+    The executed-derivation trace step carries TWO atoms — the CALL and
+    the CONCLUSION — and BOTH must ground. The live record shapes:
+
+    - CALL side  ``(|~ premiseA premiseB)`` — an executed artifact in
+      its own right; its literals include the agent-authored rule
+      predicate, which is present in no stored atom, so it must enter
+      the grounding set verbatim or the step can never ground.
+    - OUTPUT side — recorded with ONE EXTRA outer paren layer
+      (``(((Evaluation ...) (stv 1.0 0.81)))``) while the trace quotes
+      the single-wrapped product; BOTH the raw recorded form and the
+      single-redundant-paren-stripped variant enter the set
+      (``_strip_redundant_outer_paren``).
+
+    Every element is whitespace-normalized (the established comparison
+    standard). No exec lines -> empty set (no phantom grounding)."""
+    grounded: set[str] = set()
+    if not record_text:
+        return grounded
+    for line in record_text.splitlines():
+        line = line.strip()
+        if not (line.startswith("exec ") and "=>" in line):
+            continue
+        left, _, right = line.partition("=>")
+        call = left[len("exec"):].strip()
+        if call.startswith("(") and call.endswith(")"):
+            grounded.add(normalize_expression(call))
+        out = right.strip()
+        if out.startswith("(") and out.endswith(")"):
+            grounded.add(normalize_expression(out))
+            grounded.add(normalize_expression(_strip_redundant_outer_paren(out)))
+    return grounded
 QUOTED_LITERAL_RE = re.compile(r'"([^"]+)"')
 
 # The first case of the sequential run (facts.TEST_CASES order). After a
@@ -785,9 +852,13 @@ def gate_case(
             if not is_unsolvable and facts_index is not None:
                 idx = [normalize_expression(e) for e in facts_index]
                 idx_set = set(idx)
-                # executed derivation outputs are existing atoms (the
-                # interpreter produced them; the record preserves them)
-                idx_set |= set(exec_outputs)
+                # executed derivation artifacts are existing atoms (the
+                # interpreter produced them; the record preserves them).
+                # v17 (wr3o-20261028): the grounding set mints BOTH the
+                # call side and the output side (raw + single-redundant-
+                # paren-stripped) — the trace's derivation step carries
+                # call AND conclusion atoms, and both must ground.
+                idx_set |= exec_grounding_set(facts_index_raw)
                 vocab = index_literals(idx)
                 # v10: the agent's real dialect (NAL arrow syntax) uses bare
                 # content symbols, not quoted literals — the derived
