@@ -265,6 +265,57 @@ def _docker_logs_since(container: str, since_iso: str, until_iso: str) -> str:
     return r.stdout + r.stderr
 
 
+# v17 harness iteration 2 (wr3o-20261028): the STRICT v4 persist-receipt
+# shape emitted by the plugin (das_write_bridge.py:549,
+# ``STATUS_OK + f": verified={n} top={top_handle}"``). Deliberately NOT
+# matched: v2-era echo narrations (``... handles=<hex> provenance=<hex>
+# source=archived ...``, pre-transparent-era receipts echoed through the
+# history channel) and the plugin banner's placeholder form
+# (``verified=<n> top=<handle>`` — angle brackets, no hex) — the live
+# standby container carries both and a lenient substring census would
+# count them (live-verified 2026-10-28: 374 strict matches on the
+# run-instance container, 0 on the standby container despite 593 loose
+# BRIDGE-PERSIST-OK matches).
+PERSIST_RECEIPT_RE = re.compile(
+    r"BRIDGE-PERSIST-OK: verified=\d+ top=[0-9a-f]{32}")
+
+
+def _census_persist_receipts(since_iso: str, until_iso: str) -> dict:
+    """Count STRICT v4 persist receipts in the AGENT container's docker
+    logs bounded by [since, until] (v17 harness iteration 2,
+    wr3o-20261028).
+
+    E_NO_INGEST census surface (spec §8 item 2 DEVIATION — recorded in
+    GATES-REFERENCE §5): under v17 transparency the agent no longer
+    narrates provenance receipts (by design — unaware) AND the
+    serialized history collapses tool calls to ``$_`` tuples, so the
+    history-window census carries ZERO receipts even on a fully-ingesting
+    run; the receipts live on the AGENT container's stdout (374 live lines
+    in wr3o-20261028). This mirrors the Q-gate access-log lane (the
+    retrieve-side answer to the SAME history-collapse defect).
+
+    PER-INSTANCE-CONTAINER CAVEAT: the agent container is REPLACED at every
+    setup/teardown restart (start.sh trap ``rm -f``), so its docker logs
+    are per-instance: the census is valid LIVE (grade right after the
+    case) but a retroactive re-grade of a dead container's window reads
+    ZERO — grade-time MUST persist the matched lines into the run dir
+    (persist-receipts-<case>.json) as the durable evidence.
+
+    Docker/log errors are NOT gate evidence: count 0 + ``error`` recorded
+    (the gate then sees a zero census — conservative, same failure mode
+    as the lossy window it replaces)."""
+    out = {"count": 0, "matched": [], "window": [since_iso, until_iso]}
+    try:
+        logs = _docker_logs_since(CONTAINER_AGENT, since_iso, until_iso)
+    except Exception as e:  # docker down / container gone: not gate evidence
+        out["error"] = str(e)[:200]
+        return out
+    out["matched"] = [ln.strip() for ln in logs.splitlines()
+                      if PERSIST_RECEIPT_RE.search(ln)]
+    out["count"] = len(out["matched"])
+    return out
+
+
 def _agent_query_count_in_window(since_iso: str, until_iso: str, agent_ip: str) -> int:
     """Count real POST /v1/query 200s from the agent IP in the window."""
     logs = _docker_logs_since(CONTAINER_READ_PROXY, since_iso, until_iso)
@@ -1396,12 +1447,29 @@ def grade_case(args) -> int:
     attestation = collect_attestation(
         args, args.case, since_iso, _now_iso(), att_query)
 
+    # E_NO_INGEST census (v17 harness iteration 2, wr3o-20261028): the
+    # STRICT v4 receipt census over the AGENT container's docker logs,
+    # bounded [setup restarted_at, grade-now] — the PRIMARY census surface
+    # (spec §8 item 2 DEVIATION, GATES-REFERENCE §5: transparency removed
+    # receipt narration AND the serialized history collapses tool calls
+    # to $_, so the history-window extract_persist_receipts census reads
+    # ZERO even on a fully-ingesting run). PER-INSTANCE CAVEAT: the agent
+    # container is rm -f'd at every setup/teardown restart, so this census
+    # is valid LIVE only — the matched lines are PERSISTED into the run
+    # dir here as the durable evidence (retroactive re-grades of a dead
+    # container's window read zero and fall back to the history census).
+    receipt_census = _census_persist_receipts(since_iso, _now_iso())
+    _write_json(rd / f"persist-receipts-{args.case}.json", receipt_census)
+    window_receipt_count = len(persist_receipts)
+    if receipt_census.get("count", 0) > 0:
+        window_receipt_count = receipt_census["count"]
+
     r = grading_mod.gate_case(
         case, block, history_queries, placeholder_calls, reissue,
         reconstruction=recon_payload,
         case_source_refs=_case_source_refs(args.case),
         facts_index=facts_index,
-        window_persist_receipts=len(persist_receipts),
+        window_persist_receipts=window_receipt_count,
         attestation=attestation,
         facts_index_raw=facts_index_text,
         presence_fn=reissue,
@@ -1428,6 +1496,13 @@ def grade_case(args) -> int:
             "persist_receipts": len(persist_receipts),
             "attested_retrieve_calls": attestation["access_count"],
         },
+        # E_NO_INGEST census evidence (v17 harness iteration 2): the
+        # docker-log census that gated this case + the count actually
+        # used. The matched lines are persisted separately in
+        # persist-receipts-<case>.json (per-instance-container caveat:
+        # the census is valid live; the run-dir artifact is durable).
+        "persist_receipts_census": receipt_census,
+        "window_persist_receipts_used": window_receipt_count,
         "facts_index_size": len(facts_index),
         "attestation": attestation,
         "reconstruction": reconstruction_lane,
@@ -1670,6 +1745,15 @@ def grade(args) -> int:
 
     history_queries = history_parse.extract_retrieve_args(window_text)
     placeholder_calls = history_parse.count_placeholder_retrieves(window_text)
+    # LEGACY batch path (v2 all-at-once flow, --batch): history-window
+    # receipt census only. The v17 E_NO_INGEST docker-log census
+    # (_census_persist_receipts) is a grade-case feature — the sequential
+    # per-case flow windows it by [setup restarted_at, grade-now], which
+    # has no batch equivalent (one shared window, no per-case restart),
+    # and the batch path is retired from the live flow (spec §8 item 6
+    # resolution 4). Under v17 transparency the window census reads zero
+    # on a fully-ingesting run (GATES-REFERENCE §5 deviation note), so
+    # batch E_NO_INGEST verdicts carry that caveat.
     persist_receipts = history_parse.extract_persist_receipts(window_text)
 
     facts_index_text = _read_facts_index(args)

@@ -73,6 +73,12 @@ Condition codes (machine-readable failure reasons):
   Q_ABSENCE_UNPROVEN      unsolvable: no truthful count=0 probe (quoted + reissued)
   E_NO_EXTRACTION         facts index empty: no clauses were extracted at all
   E_NO_INGEST             first case: no real persistence receipts in the window
+                          (v17 receipts-only, resolution 6; the census
+                          surface is the AGENT-CONTAINER docker logs in
+                          the case window — run_benchmark.py, deviation
+                          noted in GATES-REFERENCE §5 — because
+                          transparency removed receipt narration AND the
+                          serialized history collapses tool calls to $_)
   E_NO_FACTS              knowledge case block has no FACTS: line
   E_FACTS_NOT_IN_INDEX    a FACTS: line expression is not in the facts index
   E_LITERAL_NOT_EXTRACTED a query literal does not come from the extracted
