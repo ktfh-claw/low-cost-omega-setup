@@ -211,13 +211,16 @@ def test_ledger_repo_dir_missing_exits_1():
 
 
 def test_trace_unparseable_exits_1():
+    # A parenthesized segment whose CONTENT fails parse_fact — the preserved
+    # harness-error shape (with prose-skip, non-parenthesized segments are
+    # prose: skipped, recorded in prose_segments, never an error).
     with tempfile.TemporaryDirectory() as root:
         repo, _ = _make_ledger_repo(root, [_ledger_entry()])
-        bad = "(match &self $X); this is prose, not metta"
+        bad = '((A) (B))'
         rc, _, err = _run_cli(["--trace", bad, "--ledger-repo", repo])
         assert rc == 1
         assert "trace unparseable" in err
-        assert "prose, not metta" in err  # names the offending segment
+        assert "'((A) (B))'" in err  # names the offending segment
 
 
 def test_mongo_seam_raising_exits_1():
@@ -748,7 +751,7 @@ def test_json_shape_and_determinism():
         payload = json.load(open(out1))
         assert set(payload) == {
             "per_expression", "per_predicate", "handles_check",
-            "missing", "conditions", "source_paths"}
+            "missing", "conditions", "source_paths", "prose_segments"}
         assert set(payload["per_expression"][1]) == {
             "expr", "top_handle", "stored", "classification", "sources", "conditions"}
         assert set(payload["handles_check"]) == {"claimed", "derived", "conditions"}
@@ -785,6 +788,141 @@ def test_case_key_only_when_given():
             mongo=_scripted_mongo({TOP_HANDLE: _attrs(commits[0])}),
         )
         assert rc == 0 and payload["case"] == "k1"
+
+
+# -------------------------------------------------------- stv/prose tolerances
+
+
+def test_stv_trailing_step_stripped():
+    # The interpreter's canonical output pairs the expression with its
+    # executed truth value: `<X402> (stv 1.0 0.81)`. The stripped expr must
+    # classify as a fact and derive the SAME handle as the clean fact.
+    with tempfile.TemporaryDirectory() as root:
+        repo, commits = _make_ledger_repo(root, [_ledger_entry()])
+        trace = f"{X402} (stv 1.0 0.81)"
+        rc, payload, _ = _run_case(
+            ["--trace", trace, "--ledger-repo", repo],
+            mongo=_scripted_mongo({TOP_HANDLE: _attrs(commits[0])}),
+        )
+        assert rc == 0
+        row = payload["per_expression"][0]
+        assert row["classification"] == "stored_fact"
+        assert row["expr"] == X402
+        assert row["top_handle"] == TOP_HANDLE
+        assert payload["missing"] == []
+
+
+def test_stv_wrapped_step_stripped():
+    # The interpreter's canonical wrapped output: `((<expr>) (stv s c))`.
+    # The stripped expr must classify as a fact and derive the SAME handle
+    # as the clean fact.
+    with tempfile.TemporaryDirectory() as root:
+        repo, commits = _make_ledger_repo(root, [_ledger_entry()])
+        trace = f"({X402} (stv 1.0 0.9))"
+        rc, payload, _ = _run_case(
+            ["--trace", trace, "--ledger-repo", repo],
+            mongo=_scripted_mongo({TOP_HANDLE: _attrs(commits[0])}),
+        )
+        assert rc == 0
+        row = payload["per_expression"][0]
+        assert row["classification"] == "stored_fact"
+        assert row["expr"] == X402
+        assert row["top_handle"] == TOP_HANDLE
+        assert payload["missing"] == []
+
+
+def test_stv_trailing_derivation_component():
+    # A derivation component arriving as the wrapped stv shape: the right
+    # side of `=>` reaches _split_derivation_atoms via the wrapped form.
+    # The stripped component exprs must derive clean handles.
+    with tempfile.TemporaryDirectory() as root:
+        repo, commits = _make_ledger_repo(root, [_ledger_entry()])
+        premise1 = X402
+        premise2 = '(Inheritance (Concept "payment-protocol") (Concept "internet-money"))'
+        premise2_handle = rs._parse_fact(
+            premise2, *rs._factories()).top_handle
+        step = f"{premise1} {premise2} => (stv 1.0 0.9)"
+        rc, payload, _ = _run_case(
+            ["--trace", step, "--ledger-repo", repo],
+            mongo=_scripted_mongo({TOP_HANDLE: _attrs(commits[0])}),
+        )
+        assert rc == 0
+        derivation = payload["per_expression"][0]
+        assert derivation["classification"] == "derivation"
+        assert derivation["top_handle"] is None
+        assert derivation["stored"] is True  # components found in db.links
+        assert len(derivation["sources"]) == 1  # union of stored components' sources
+        assert payload["missing"] == []
+
+
+def test_prose_segment_skipped_not_error():
+    # A prose segment is skipped (not a harness error); the prose is
+    # recorded in prose_segments.
+    with tempfile.TemporaryDirectory() as root:
+        repo, _ = _make_ledger_repo(root, [_ledger_entry()])
+        trace = "(match &self (Inheritance $X (Concept \"x402\"));this segment is prose"
+        rc, payload, _ = _run_case(["--trace", trace, "--ledger-repo", repo])
+        assert rc == 0
+        assert payload["prose_segments"] == ["this segment is prose"]
+
+
+def test_live_prose_shape_skipped():
+    # The live shape 3: a prose annotation appended after a balanced s-expr.
+    # The annotated segment is skipped as prose (recorded in prose_segments,
+    # never a harness error); the clean canberra fact in the same trace is
+    # still classified + graded normally.
+    canberra = '(Inheritance "canberra" "capital-of-australia")'
+    annotated = f'{canberra} [reverse-direction probe count=0]'
+    canberra_handle = rs._parse_fact(canberra, *rs._factories()).top_handle
+    with tempfile.TemporaryDirectory() as root:
+        repo, _ = _make_ledger_repo(root, [_ledger_entry()])
+        # the exact live single-segment shape: rc 0, prose recorded
+        rc, payload, _ = _run_case(
+            ["--trace", annotated, "--ledger-repo", repo])
+        assert rc == 0
+        assert payload["prose_segments"] == [annotated]
+        assert payload["per_expression"] == []
+        # multi-segment: the clean canberra fact still classified + graded
+        rc, payload, _ = _run_case(
+            ["--trace", f"{canberra};{annotated}", "--ledger-repo", repo])
+        assert rc == 0
+        assert payload["prose_segments"] == [annotated]
+        row = payload["per_expression"][0]
+        assert row["classification"] == "unstored"
+        assert row["expr"] == canberra
+        assert row["top_handle"] == canberra_handle
+        assert payload["missing"] == [] and payload["conditions"] == []
+
+
+def test_strip_stv_malformed_falls_through():
+    # Malformed stv annotations fall through to normal parsing, which
+    # raises MettaParseError — the existing HarnessError path is preserved.
+    # `((A) (stv 1.0))` is a wrapped shape with a MALFORMED stv (only one
+    # number) → falls through → parse_fact raises.
+    with tempfile.TemporaryDirectory() as root:
+        repo, _ = _make_ledger_repo(root, [_ledger_entry()])
+        rc, _, err = _run_cli(
+            ["--trace", '((A) (stv 1.0))', "--ledger-repo", repo])
+        assert rc == 1
+        assert "trace unparseable" in err
+
+
+def test_segment_loop_strip_before_paren_check():
+    # Integrated: the segment loop strips the stv FIRST (before the
+    # paren check), so a trailing-stv fact step is classified normally.
+    with tempfile.TemporaryDirectory() as root:
+        repo, commits = _make_ledger_repo(root, [_ledger_entry()])
+        trace = f"{X402} (stv 1.0 0.81);this is prose"
+        rc, payload, _ = _run_case(
+            ["--trace", trace, "--ledger-repo", repo],
+            mongo=_scripted_mongo({TOP_HANDLE: _attrs(commits[0])}),
+        )
+        assert rc == 0
+        row = payload["per_expression"][0]
+        assert row["classification"] == "stored_fact"
+        assert row["expr"] == X402
+        assert row["top_handle"] == TOP_HANDLE
+        assert payload["prose_segments"] == ["this is prose"]
 
 
 def _run_module_tests():

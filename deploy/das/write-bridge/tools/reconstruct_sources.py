@@ -69,6 +69,44 @@ if str(_BRIDGE_DIR) not in sys.path:
 import metta_to_atoms
 from metta_to_atoms import MettaParseError
 
+# v17: the (stv s c) truth-value annotation tolerances for live trace shapes
+# (verbatim copy of grading.py:126 — STV_RE).
+STV_RE = re.compile(r"\(stv\s+-?[0-9]+(?:\.[0-9]+)?\s+-?[0-9]+(?:\.[0-9]+)?\)")
+
+
+def _strip_stv(step: str) -> tuple[str, bool]:
+    """Strip a trailing or wrapped ``(stv s c)`` annotation from a trace step.
+
+    Live evidence (wr3o-20261028): the interpreter's canonical outputs are
+    atom-exprs wrapped in an ``(stv s c)`` pair — the two shapes the
+    R_NOT_EXECUTED gate REQUIRES as executed-derivation evidence:
+
+      (i) TRAILING: ``<balanced s-expr> (stv s c)`` — two top-level s-exprs,
+          the second a full stv match.
+      (ii) WRAPPED: ``((<expr>) (stv s c))`` — a parenthesized pair whose first
+          inner balanced prefix is ``<expr>`` and whose remainder fullmatches
+          the stv pattern.
+
+    Returns ``(clean_expr, True)`` on either live shape; ``(step, False)``
+    otherwise. Malformed/degenerate cases (1 output; 2 outputs but [1] not a
+    full stv match; inner prefix empty) fall through to normal parsing
+    (parse_fact raises MettaParseError -> existing HarnessError path
+    preserved).
+    """
+    stripped = step.strip()
+    # Shape (ii) WRAPPED: ((expr) (stv s c)) — the whole step is one
+    # parenthesized pair; strip the outer parens and split the inner.
+    if stripped.startswith("((") and stripped.endswith("))"):
+        inner = _top_level_sexprs(stripped[1:-1])
+        if len(inner) == 2 and STV_RE.fullmatch(inner[1]):
+            return (inner[0], True)
+    # Shape (i) TRAILING: <balanced s-expr> (stv s c) — two top-level outputs.
+    top = _top_level_sexprs(stripped)
+    if len(top) == 2 and STV_RE.fullmatch(top[1]):
+        return (top[0], True)
+    return (step, False)
+
+
 LEDGER_NAME = "SOURCE-LEDGER.json"
 DEFAULT_MONGO_CONTAINER = "omega-das-integration-mongodb-1"
 MONGO_BATCH_SIZE = 50
@@ -481,32 +519,37 @@ def _plan_step(step: str, index: int, node_cls, link_cls) -> dict:
     FIRST step, exempt; (c) derivation = any step containing ``=>``, split
     into component atoms (grading._split_derivation_atoms); (a) every other
     ground step (and ground derivation components) = stored-fact candidate.
+    stv-annotated steps (trailing or wrapped) are stripped before
+    parse_fact — the handle is derived from the clean expr so the chain
+    matches the clean fact's stored handle.
     """
     if index == 0 and _is_variable_bearing(step):
         return {"kind": "query_clause", "step": step, "atoms": []}
     if "=>" in step:
         atoms: list[dict] = []
         for atom_expr in _split_derivation_atoms(step):
-            if _is_variable_bearing(atom_expr):
+            clean, _stripped = _strip_stv(atom_expr)
+            if _is_variable_bearing(clean):
                 continue  # variable-bearing component atoms are exempt
             try:
-                handle = _parse_fact(atom_expr, node_cls, link_cls).top_handle
+                handle = _parse_fact(clean, node_cls, link_cls).top_handle
             except MettaParseError as exc:
                 raise HarnessError(
                     f"trace unparseable: step {index + 1} component "
-                    f"{atom_expr[:80]!r}: {exc}"
+                    f"{clean[:80]!r}: {exc}"
                 )
-            atoms.append({"expr": atom_expr, "handle": handle})
+            atoms.append({"expr": clean, "handle": handle})
         return {"kind": "derivation", "step": step, "atoms": atoms}
     if _is_variable_bearing(step):
         return {"kind": "variable", "step": step, "atoms": []}
+    stripped, _had_stv = _strip_stv(step)
     try:
-        handle = _parse_fact(step, node_cls, link_cls).top_handle
+        handle = _parse_fact(stripped, node_cls, link_cls).top_handle
     except MettaParseError as exc:
         raise HarnessError(
-            f"trace unparseable: step {index + 1} {step[:80]!r}: {exc}"
+            f"trace unparseable: step {index + 1} {stripped[:80]!r}: {exc}"
         )
-    return {"kind": "fact", "step": step, "atoms": [{"expr": step, "handle": handle}]}
+    return {"kind": "fact", "step": stripped, "atoms": [{"expr": stripped, "handle": handle}]}
 
 
 def _no_attrs_source(legacy_repo: str | None) -> dict:
@@ -655,17 +698,22 @@ def _run(argv: list[str], sudo: bool) -> int:
     node_cls, link_cls = _factories()
 
     # Steps 1-2: split/validate the trace, classify steps, derive handles.
+    # Strip the stv FIRST on every non-empty segment (trailing or wrapped)
+    # — the interpreter's canonical output pairs the expression with its
+    # executed truth value. Segments that are not parenthesized after
+    # stripping are prose annotations — skipped as prose (recorded in
+    # prose_segments), never a harness error.
     steps: list[str] = []
+    prose_segments: list[str] = []
     for position, segment in enumerate(trace_raw.split(";")):
         part = segment.strip()
         if not part:
             continue
-        if not (part.startswith("(") and part.endswith(")")):
-            raise HarnessError(
-                "trace unparseable: segment "
-                f"{position + 1} is not a parenthesized s-expression: {part[:120]!r}"
-            )
-        steps.append(normalize_expression(part))
+        clean, _ = _strip_stv(part)
+        if not (clean.startswith("(") and clean.endswith(")")):
+            prose_segments.append(part)
+            continue
+        steps.append(normalize_expression(clean))
     plans = [_plan_step(step, i, node_cls, link_cls) for i, step in enumerate(steps)]
 
     # Step 3: ONE logical mongo query for ALL distinct handles.
@@ -804,6 +852,7 @@ def _run(argv: list[str], sudo: bool) -> int:
     }
     if args.case:
         payload["case"] = args.case
+    payload["prose_segments"] = prose_segments
 
     # Step 10: human summary always; JSON / source-paths files when asked.
     _print_summary(payload)
