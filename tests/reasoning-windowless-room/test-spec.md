@@ -1,10 +1,12 @@
-# Windowless Room Gating Test — Test Specification (v6)
+# Windowless Room Gating Test — Test Specification (v17)
 
 ## Overview
 
 This specification defines the windowless-room **gating test** for the Omega agent (DAS-backed persistent-knowledge agent on the OVH server). v2 re-scoped the test from a scored benchmark to a strict pass/fail GATE that verifies the environment is set up for DAS-grounded reasoning governance: the agent must answer **query-first** (real `das-retrieve` calls before every answer) with **provable provenance** (every citation resolves to the provenance git repo).
 
 v15 (2026-10-26 22:56 UTC directive) simplifies the case set to **three cases** — `original`, `unsolvable`, `false` — (removed: `uncertainty`, `true`, `easy`, `difficult`, with their prompt files; gates and the e2e procedure otherwise NOT relaxed) and re-scopes answer-substance grading to an LLM judge; v16 (same-directive follow-up) settles the judge's final form: **one simple prompt** — the test prompt (case question) + the Omega agent's final answer + the expected correct answer, sent as a single OpenAI-compatible chat-completions request — and the endpoint replies **TRUE or FALSE**, which the script parses and uses as the blocking A-gate. The endpoint is configurable (`--judge-base-url/--judge-model/--judge-api-key/--judge-timeout`); defaults reuse the Omega agent's own ASI:One `https://api.asi1.ai/v1` / `asi1-ultra` and the same API key (resolved from the Omega deployment `runtime.env`). Everything else (Q/E/R/P gates, attestation, provenance, reconstruction) remains deterministic regex/string/git logic.
+
+v17 (2026-10-28, issue #2 — "transparent provenance") makes provenance fully TRANSPARENT to the agent: the das-write v3 grammar resolves + sha256-hashes the source ref automatically (no archive step, no SOURCES line, no source records — the agent is unaware of provenance), the offline provenance repo is a single-file `SOURCE-LEDGER.json` git ledger (one commit per entry; the commit hash is the provenance anchor), the P-gate is a deterministic reconstruction chain (`reconstruct_sources.py`: trace → re-derived handles → mongo `custom_attributes` → ledger commit → entry), and the answers block gains a `HANDLES:` line (blocking cross-check, decision D4). **`GATES-REFERENCE.md` (v17) is the exhaustive machine-readable reference for the current gate surface** — every condition code, attestation lane, and phase-artifact JSON field; the body sections below are retained as the historical v2-v16 record (statements are corrected in place only where they directly contradict v17 — see Requirement Reconciliation (v17) and History).
 
 v3 (2026-10-23 directive) makes **sequential standalone-question mode the default** — one prompt = one question, graded independently — and adds: an **E-gate** on clause extraction, harness-side **attestation lanes** for the known-lossy history channel, a pre-run **cleanup-das** phase, **blob reconstruction** back to the source markdown bytes, and explicit **environment requirements** (das-retrieve skill-description upgrade, pin working-memory plugin, chroma_db memory dir). `--batch` keeps the v2 all-at-once flow.
 
@@ -14,7 +16,7 @@ A gate FAIL is a valid, expected signal: it means the environment/agent did not 
 
 ## Scope
 
-- **In scope:** background ingestion (agent-driven in sequential mode), fact extraction + persistence with provenance, query-first answering, strict grading (A-gate answer substance via the single LLM judge call; Q/E/R/P gates deterministic), harness re-issue verification, provenance git resolution + blob reconstruction, harness-side log attestation, pre-run DAS residue cleanup, reporting, teardown, exit-code signaling, and **agent-environment configuration deployed from this repo** (das-retrieve skill description upgrade, pin plugin rebind, chroma_db memory dir) — explicitly authorized by the v3 directive.
+- **In scope:** background ingestion (agent-driven in sequential mode), fact extraction + persistence with provenance, query-first answering, strict grading (A-gate answer substance via the single LLM judge call; Q/E/R/P gates deterministic), harness re-issue verification, provenance ledger-chain reconstruction + background byte-compare, harness-side log attestation, pre-run DAS residue cleanup, reporting, teardown, exit-code signaling, and **agent-environment configuration deployed from this repo** (das-retrieve skill description upgrade, pin plugin rebind, chroma_db memory dir) — explicitly authorized by the v3 directive.
 - **Out of scope:** LLM-based grading of anything OTHER than the FINAL ANSWER line's substance (the Q/E/R/P gates stay fully deterministic; the judge never sees reasoning, receipts, queries, or citations). At run time the harness modifies only test-controlled files (prompt.txt, omega_state.md, benchmark/ inside the memory volume) — plus, in v4, the **per-case history trim**: history.metta is reset to a comment-only marker before each case window and restored byte-identically from the run-start backup at teardown (no-trace contract; prior content is always archived in the pre-case snapshots + `results/<run-id>/history.pre-run.metta` before any reset). The trim is the wr3b post-mortem lever 3, explicitly authorized by the 2026-10-24 directive; `--no-trim-history` restores the v3 file-touch set exactly. Agent plugin/skill configuration is deployed and validated before the run (preflight + the das-read plugin validation driver), never edited by the harness mid-run.
 
 ## Modes
@@ -29,7 +31,7 @@ One prompt contains exactly ONE case question. The harness drives the sequence; 
 
 Sequential-mode properties:
 
-- **Agent-driven ingestion.** The harness does NOT archive the background sources; the agent must ingest them itself (archive-source → ARCHIVE-OK; add-atom → BRIDGE-PERSIST-OK). The E-gate's first-case ingest check (below) verifies this actually happened.
+- **Agent-driven ingestion.** The harness does NOT archive the background sources; the agent must ingest them itself (add-atom (v3) → BRIDGE-PERSIST-OK; the agent is unaware of provenance — the das-write plugin resolves + hashes the source ref automatically). The E-gate's first-case ingest check (below) verifies this actually happened.
 - **Independent grading.** Every case is graded regardless of the previous case's verdict; the sequence continues after a FAIL. Overall gate: PASS iff every selected case passes and no harness error occurred.
 - **`--cases` subset filter** (iteration mode): relaunch only the cases under test, e.g. `--cases original,false`. Unknown ids are a harness error.
 - The first case in `facts.TEST_CASES` order (`original`) is the ingest-required case (E-gate).
@@ -59,7 +61,7 @@ Orchestrated by `run_benchmark.py` (phases independently runnable over SSH):
 
 ## The Gate (per case)
 
-A case PASSES iff it has NO blocking conditions. Failure reasons are machine-readable condition codes. Two conditions are **informational** — `Q_ATTESTED_VIA_ACCESS_LOG` and `E_INGEST_ATTESTED_VIA_FACADE_LOG` — they record that the harness-side attestation lanes (below) proved the evidence and do NOT fail a case; the evidence standard is unchanged, only the observation channel differs.
+A case PASSES iff it has NO blocking conditions. Failure reasons are machine-readable condition codes. Three conditions are **informational** — `Q_ATTESTED_VIA_ACCESS_LOG`, `E_INDEXED_NOT_PERSISTED`, and `P_SOURCE_SET_MISMATCH` — they record evidence visibility (the query attestation lane proved the query; recorded-but-never-persisted extraction claims; out-of-set source refs) and do NOT fail a case; the evidence standard is unchanged, only the observation channel differs.
 
 **A-gate (answer):** `FINAL ANSWER (<case>)` present + judged substantively CORRECT by the LLM judge (`llm_judge.py`; one OpenAI chat-completions-compatible call per case, default ASI:One `asi1-ultra`, temperature 0). The judge payload carries ONLY the question, the ground truth (`expected_answer` + answer-only `grading` guidance from `facts.py`), and the answer text — never the reasoning trace, receipts, queries, or citations.
 - `A_MISSING` (no answer line), `A_WRONG` (judge replies INCORRECT), `A_JUDGE_UNAVAILABLE` (judge call/parse/key failure — blocking: an unjudged answer can never pass).
@@ -74,7 +76,7 @@ A case PASSES iff it has NO blocking conditions. Failure reasons are machine-rea
 
 **E-gate (extraction)** — active whenever a facts index is supplied (sequential grade-case and batch grade both supply it; `facts_index=None` = legacy grading, gate off):
 - `E_NO_EXTRACTION` — the extraction record (`facts-index.md`) is empty: no clauses were extracted at all (fails every case)
-- `E_NO_INGEST` — FIRST case only, when the index is non-empty: the case window must show real ingestion (≥1 `ARCHIVE-OK` AND ≥1 `BRIDGE-PERSIST-OK` receipt) — after a DAS cleanup, later cases may legitimately reuse already-persisted facts without new writes. If both receipts are missing from the (lossy) history, the facade-log attestation lane may prove the ingest instead (informational `E_INGEST_ATTESTED_VIA_FACADE_LOG`)
+- `E_NO_INGEST` — FIRST case only, when the index is non-empty: the case window must show real ingestion (≥1 `BRIDGE-PERSIST-OK` receipt — v17 receipts-only; the archive half and the facade-log attestation substitute are retired) — after a DAS cleanup, later cases may legitimately reuse already-persisted facts without new writes
 - `E_NO_FACTS` — knowledge case block has no `FACTS:` line (unsolvable exempt)
 - `E_FACTS_NOT_IN_INDEX` — a `FACTS:` line expression is not verbatim (whitespace-normalized) in the extraction record
 - `E_LITERAL_NOT_EXTRACTED` — a quoted literal of the executed query does not come from the extracted predicate vocabulary (unsolvable exempt; only checked when a QUERY line exists). This is the extracted-predicate-awareness rule: queries must REUSE the exact extracted spellings — a reformulated query matches nothing and produces a false absence (mechanical trap)
@@ -87,17 +89,18 @@ A case PASSES iff it has NO blocking conditions. Failure reasons are machine-rea
 - The unsolvable case keeps the shape requirements (question clause + absence probes) but is exempt from index grounding (no facts to ground against)
 - Zero LLM: trace parsing, exec-record parsing, and grounding are pure string/set operations
 
-**P-gate (provenance):**
-- knowledge cases must cite `git:<40hex> <url>` sources (`P_MISSING`; unsolvable exempt)
-- every citation resolves in the provenance repo: commit exists → exactly one `sources/` blob among its changes → `index.jsonl` at that commit has an entry for that blob path → sha256(blob at that commit) == entry.blob_sha256 → entry.url == cited url (`P_UNRESOLVED:<COND>` with COMMIT_NOT_IN_REPO, COMMIT_UNREADABLE, COMMIT_NOT_AN_ARCHIVE_COMMIT, COMMIT_MULTIPLE_SOURCE_BLOBS, INDEX_UNREADABLE_AT_COMMIT, INDEX_ENTRY_MISSING_FOR_BLOB, BLOB_UNREADABLE_AT_COMMIT, BLOB_SHA_MISMATCH, URL_MISMATCH)
-- the harness also resolves every `git:<sha>` the agent persisted in-window (add-atom calls in the window) and records the results; only citations on the case's SOURCES line can fail the gate
+**P-gate (provenance, v17):** knowledge cases must be grounded in provenance-carrying stored facts, verified by the deterministic reconstruction chain — the harness runs `reconstruct_sources.py` (trace + FACTS + HANDLES in) and maps its JSON to gate conditions (`grading.py` + `run_benchmark.py`; full reference: GATES-REFERENCE §7):
+- `P_MISSING` — knowledge case where reconstruction finds no used stored facts carrying any provenance attributes (nothing citable; unsolvable exempt)
+- `P_UNRESOLVED:<expr12>:<COND>` — a used stored fact's source failed resolution in the ledger repo: COND ∈ {NO_PROVENANCE_ATTRS, COMMIT_NOT_IN_REPO, COMMIT_UNREADABLE, COMMIT_NOT_A_LEDGER_COMMIT, COMMIT_TOUCHES_OTHER_FILES, COMMIT_ADDS_NOT_ONE_LINE, ENTRY_PARSE_FAILED, REF_SHA_MISMATCH}
+- `P_SOURCE_SET_MISMATCH` — informational: a source ref attached to the case's facts is outside the case's background source set
+- the byte-compare lane records `sha256(background file) == entry.sha256` per resolved (commit, ref, sha256) — evidence, not a condition (a failed resolution already blocks via `P_UNRESOLVED`)
 
 ## Harness-side Attestation Lanes (informational)
 
-**The history channel is known-lossy:** an upstream PeTTa defect (superpose/collapse) collapses tool tuples in `history.metta` to `$_`, so history evidence can silently vanish even when the tool call really happened. Receipts must therefore be echoed to durable files (facts-index.md, answers.md) at once, and the harness keeps two independent, tamper-resistant log lanes (docker logs, window = [case setup restart, grade time]):
+**The history channel is known-lossy:** an upstream PeTTa defect (superpose/collapse) collapses tool tuples in `history.metta` to `$_`, so history evidence can silently vanish even when the tool call really happened. Receipts must therefore be echoed to durable files (facts-index.md, answers.md) at once, and the harness keeps an independent, tamper-resistant query-attestation lane (read-proxy access log + query-engine pattern log; docker logs, window = [case setup restart, grade time]):
 
 - `Q_ATTESTED_VIA_ACCESS_LOG` — when the quoted query is absent from the window history: the query-engine log carried the exact pattern (space-stripped comparison) in the window AND the read-proxy access log shows ≥1 successful `POST /v1/query` from the agent container IP. Replaces blocking `Q_NOT_IN_HISTORY`.
-- `E_INGEST_ATTESTED_VIA_FACADE_LOG` — first case with no persist/archive receipts in the window: the write-bridge facade log shows ≥1 successful `POST /v1/write` AND ≥1 `POST /v1/archive` from the agent IP. Replaces blocking `E_NO_INGEST`.
+- `E_INGEST_ATTESTED_VIA_FACADE_LOG` — RETIRED in v17 (resolution 6): the facade-log ingest-attestation lane is gone; `E_NO_INGEST` is receipts-only (`BRIDGE-PERSIST-OK` receipts are extractable from history windows). The query lane above survives because it serves the DIFFERENT gate `Q_ATTESTED_VIA_ACCESS_LOG`.
 
 Verdict logic is unchanged: informational conditions never fail a case; receipt, re-issue, degenerate and provenance checks still apply.
 
@@ -105,16 +108,16 @@ Verdict logic is unchanged: informational conditions never fail a case; receipt,
 
 Runs BEFORE the test so prior-run benchmark predicates do not contaminate counts. Discovers benchmark residue in the DAS mongo store with two read-only nets (union):
 
-- **N1 (provenance):** links whose `custom_attributes.provenance_url` matches the benchmark source URL base — every facade add-atom write is provenance-decorated, so this catches all agent-written benchmark facts, old and new.
+- **N1 (provenance):** links whose `custom_attributes.provenance_ref` (v4 writes — the ref IS the source URL) OR `custom_attributes.provenance_url` (pre-migration v2.1 residue) matches the benchmark source URL base (v17: a mongo `$or` of two `$regex` nets) — catches all agent-written benchmark facts, old and new.
 - **N2 (literal):** links whose `custom_attributes.metta_expression` contains a high-confidence benchmark-ONLY literal (windowless-room, sloped-ceiling, observer-inside-room, ...; full set in `run_benchmark.py`). Generic words plausible in campaign atoms are deliberately excluded, as are generic meta-reasoning spellings (undecorated writes are impossible anyway — the facade always decorates).
 
-Each discovered expression is deleted via the write-bridge `cleanup.py --metta <expr>` — **links-only, NEVER `--delete-nodes`** (symbol nodes are shared across the campaign DB). Deletion is eventual; the bridge oracle (alternate-pattern absence check + bounded standby) handles it. Zero residue is proven by re-running the discovery nets (must come back empty).
+Each discovered expression is deleted via the write-bridge `cleanup.py --metta <expr>` — **links-only, NEVER `--delete-nodes`** (symbol nodes are shared across the campaign DB). Deletion is eventual; the bridge oracle (alternate-pattern absence check + bounded standby) handles it. Zero residue is proven by re-running the discovery nets (must come back empty). v17 adds the one-time **N3 companion sweep**: the OLD `WriteProvenance` companion links of the discovered benchmark facts are re-derived client-side (scoped by construction to benchmark fact-handle targets under a `WriteProvenance` leading symbol — live research companions and `CampaignProvenance` links are never touched) and deleted via the same links-only tool; `cleanup-das.json` records the sweep (`companion_sweep`) and the residue invariant extends to remaining companions == 0.
 
 **Canaries:** `(Inheritance (Concept "Fetch.ai") $X)` — a live campaign atom, deliberately NOT benchmark vocabulary — is queried before and after; counts must be unchanged and ≥ 1. Non-empty residue or changed canary counts → exit 1 (harness error, aborts the sequential run). Artifacts: `results/<run-id>/cleanup-das.json` (mongo counts, discovered expressions, per-expression cleanup results, canaries, remaining, `canaries_intact`).
 
-## P-gate Blob Reconstruction Lane
+## P-gate Byte-Compare Lane (v17)
 
-For every `git:<sha>` citation on a case's SOURCES line, the grader reconstructs the archived source blob from the provenance repo (`provenance_check.reconstruct_citation_blob`: commit → its one `sources/` blob → `git show`), byte-compares it against the repo's background markdown (`tests/reasoning-windowless-room/background/<url basename>`, `matches_repo_file`), and persists the reconstructed bytes under `results/<run-id>/reconstructed/`. Recorded per citation in the grade-case JSON and the report. This is an evidence lane, not an extra blocking condition: a tampered blob already fails the P-gate sha256 check (`BLOB_SHA_MISMATCH`); the byte-compare additionally proves the archived bytes are exactly the background markdown the agent's reasoning was extracted from.
+For every unique `(commit, ref, sha256)` the reconstruction chain resolved (stored-fact rows plus derivation rows, whose sources are their stored components'), the harness hashes the repo background file the ref names and compares it to the entry's sha256 (`sha256(background file) == entry.sha256`). Refs mapping to no background file record `byte_match=null` (informational). Recorded per row in the grade-case JSON `reconstruction.byte_compare` and summarized in the report. This is an evidence lane, not an extra blocking condition: a failed resolution already blocks via `P_UNRESOLVED`; the byte-compare additionally proves the ledger's write-time fetch is the background markdown the harness holds (the accepted URL-drift bound — the ledger proves what was fetched at write time, not what the agent saw at read time).
 
 ## Test Cases
 
@@ -128,7 +131,7 @@ The case set is 3 cases as of v15 (was 7 through v14; removed: `uncertainty`, `t
 
 Sequential mode renders each case's `question` (facts.py) into the per-case prompt.
 
-## Answers.md Contract (v5)
+## Answers.md Contract (v5; block shape updated in v17)
 
 Per case, the gate parses blocks of exactly this shape (deviation = FAIL):
 
@@ -138,16 +141,16 @@ Per case, the gate parses blocks of exactly this shape (deviation = FAIL):
 QUERY: <the exact metta pattern you executed>
 DAS_RETRIEVE_OK untrusted=true count=<n> truncated=<bool> results=[...]
 FACTS: <extraction-record expressions used, semicolon-separated>
+HANDLES: <the atom handles of the FACTS expressions, in the same order — one handle per expression, each copied verbatim from a receipt you hold (the write receipt's top= or a das-retrieve receipt's results=)>
 REASONING: <the executed MeTTa reasoning trace — question clause; fact steps; executed derivation steps with interpreter (stv ...) outputs — semicolon-separated s-expressions, NOT prose>
 FINAL ANSWER (<id>): <answer>
-SOURCES: git:<40-hex-sha> <source-url> [git:<40-hex-sha> <source-url> ...]
 ```
 
 - `FACTS:` is required for knowledge cases (E-gate); the unsolvable case is exempt.
 - `REASONING:` is required for every case (R-gate): a semicolon-separated MeTTa trace — first step = the executed question clause, then verbatim extraction-record fact steps, then the executed derivation steps with their interpreter `(stv ...)` outputs. Prose (scene descriptions, narrative text) fails (`R_NOT_METTA`). No interpreter `(stv ...)` evidence anywhere (record `exec` lines or trace-quoted outputs) fails (`R_NOT_EXECUTED`). The unsolvable case is exempt from execution evidence and index grounding but still needs the trace shape (question clause + absence probes).
-- `SOURCES:` is required for knowledge cases; the unsolvable case may cite none.
+- `HANDLES:` is required for knowledge cases (one handle per FACTS expression, same order — blocking cross-check, decision D4; the unsolvable case is exempt, no FACTS means no HANDLES).
 - Backward compatibility: bare `FINAL ANSWER (case):` lines still parse, but they fail the Q/R/P gates (and, for knowledge cases, the E-gate's FACTS check).
-- Block-line parsing is line-anchored (`QUERY:`/`FACTS:`/`REASONING:`/`SOURCES:` labels match horizontal whitespace only; an empty value is a genuinely empty value, not the next line's content).
+- Block-line parsing is line-anchored (`QUERY:`/`FACTS:`/`REASONING:`/`HANDLES:` labels match horizontal whitespace only; an empty value is a genuinely empty value, not the next line's content).
 
 ## The Benchmark Prompt (v6)
 
@@ -169,9 +172,9 @@ Per-case template (`agent_prompt_template.md`), de-leaked: **no example queries,
 - **Agent-extracted (primary):** the agent derives and persists its own predicates with provenance.
 - **Seed-canonical (oracle mode):** `CANONICAL_FACTS` in facts.py remains the design-time oracle for coverage diffing. The `--seed-canonical` flag is retained for CLI compatibility but is currently a NO-OP in the harness (the v2 seeding code was removed); it is not the default test mode and must not be relied on.
 
-## Provenance Chain
+## Provenance Chain (v17)
 
-background file → raw URL → `/v1/archive` (AGENT-initiated in sequential mode via archive-source; harness-initiated in batch) → git commit (ARCHIVE-OK) → add-atom suffix → DAS atom (BRIDGE-PERSIST-OK verified) → extraction record + quoted evidence in answers.md → **resolved against the provenance git repo by the grader** → **blob reconstructed and byte-compared against the repo background markdown**.
+background file → its URL (`urls.txt`, decision D5) → the agent's `add-atom` (v3) call carries the URL ref (the agent is unaware of provenance) → the das-write plugin fetches + sha256-hashes the content → facade `POST /v1/source {ref, sha256}` appends `SOURCE-LEDGER.json` (one commit per entry; dedup on `(ref, sha256)`) → `POST /v1/write` provenance-cited `{ref, git_commit, blob_sha256}` (citation gate BEFORE any DAS write) → DAS fact top link `custom_attributes` (`metta_expression`, `provenance_ref`, `provenance_git_commit`, `provenance_blob_sha256`) + receipt `BRIDGE-PERSIST-OK: verified=<n> top=<handle>` → extraction record `expr <expression> top=<handle>` lines + the block's `HANDLES:` line → **resolved at grade time by `reconstruct_sources.py`** (trace → re-derived handle → mongo attrs → ledger commit → entry) → **byte-compared against the repo background markdown** (`sha256(file) == entry.sha256`).
 
 ## Grading Determinism (v16 scope)
 
@@ -181,11 +184,11 @@ All gates EXCEPT the A-gate answer-substance check are deterministic: regex/keyw
 
 `results/<run-id>/`:
 
-- `grade-case-<case>.json` (sequential): run_id, case_id, verdict, conditions, detail, history_window {mode, retrieve_calls, retrieve_args, placeholder_calls, persist/archive receipts, add_atom_shas}, facts_index_size, attestation, citations, reconstruction, timestamp.
+- `grade-case-<case>.json` (sequential): run_id, case_id, verdict, conditions, detail (incl. `p_gate` {stored_expressions, handles_check}), history_window {mode, retrieve_calls, retrieve_args, placeholder_calls, persist_receipts, attested_retrieve_calls}, facts_index_size, attestation (query-only), reconstruction {script_exit, payload, byte_compare[]}, timestamp (v17 shape — no citations keys; no archive/sha census fields).
 - `grade.json`: run_id, mode (sequential|batch), gate_verdict, cases_passed/total, per_case {verdict, conditions[]}, timestamp.
 - `report.json`: run_id, grade, per-case grade-case files (rich detail), cleanup summary, timestamp.
 - `windows/<case>/{pre,post}.metta` — per-case history snapshot copies (kept after teardown).
-- `reconstructed/` — reconstructed citation blobs.
+- `reconstruction-<case>.json` / `reconstruction-<case>.paths` — the per-case reconstruction script artifacts (`--json` payload + source-path list).
 - `cleanup-das.json`, `preflight.json`, `setup-case-*.json`, `agent-case-*.json`, `teardown.json`.
 
 `report.md`: gate verdict header, per-case table (Case | Verdict | Conditions | Attested | Reconstruction), cleanup summary line, condition-code reference (A_* answer, Q_* query-first with the informational note, E_* extraction, P_* provenance).
@@ -204,7 +207,7 @@ The gate is only meaningful on an environment that passes these; preflight check
 
 1. Read-proxy: variable-form patterns only (ground patterns hang/400).
 2. Agent restart: systemd, NEVER docker restart (start.sh trap rm -f's the container).
-3. Receipts: `BRIDGE-PERSIST-OK verified=` (write), `ARCHIVE-OK` (archive), `DAS_RETRIEVE_OK count=` (retrieve) are the only success signals.
+3. Receipts: `BRIDGE-PERSIST-OK verified=… top=` (write), `DAS_RETRIEVE_OK count=` (retrieve) are the only success signals (`ARCHIVE-OK` retired in v17 with the archive skill).
 4. Memory-volume and provenance-repo operations need sudo (root-owned / 65532-owned).
 5. Benchmark dir must be chowned 65534:65534 (agent runs as nobody:nogroup).
 6. DAS deletion is links-only, NEVER `--delete-nodes` (symbol nodes are shared across the campaign DB).
@@ -297,6 +300,10 @@ Contradictions between this spec at v2 and (a) the v3 directive / original requi
 1. **Single-prompt TRUE/FALSE judge (22:56 UTC directive follow-up: "instead of that, just construct a simple prompt...").** The v15b judge (system prompt + JSON payload + grading guidance, CORRECT/INCORRECT) is replaced by the simpler directed form: ONE user message containing the test prompt (case question), the Omega agent's FINAL ANSWER, and the expected correct answer, ending with "Reply with exactly one word: TRUE or FALSE"; `max_tokens` 512 (live evidence: a 16-token cap returned finish_reason=length with empty content on asi1-ultra); verdict = first TRUE/FALSE token; the parsed boolean is the blocking A-gate (`A_WRONG` on FALSE). Input isolation preserved (no reasoning/receipts/queries/citations — the judge cannot reward evidence it cannot see). Endpoint configurable per run via `--judge-base-url/--judge-model/--judge-api-key/--judge-timeout`; defaults reuse the Omega agent's own endpoint and key (ASI:One `https://api.asi1.ai/v1`, `asi1-ultra`, `ASIONE_API_KEY` from the Omega deployment `runtime.env`). No other gate changed. Applied.
 2. **Judge smoke in preflight.** A dead or mis-keyed judge would burn every 75-minute case window on `A_JUDGE_UNAVAILABLE`; preflight now makes one trivial judge call ("What is 2 + 2?" -> TRUE) and fails the run before launch when the judge is unavailable or answers incorrectly. Applied.
 
+## Requirement Reconciliation (v17)
+
+1. **Transparent provenance vs the v2-v16 citation contract.** The body above prescribes the pre-v17 provenance surface the v17 design removes by directive (issue #2 resolutions: the agent is unaware of provenance; the direct verification evidence is the executed MeTTa trace + the deterministic reconstruction chain — log-census attestation crutches are retired). **Resolution:** statements that directly contradict v17 are corrected in place minimally — the agent-driven-ingest receipt vocabulary (Modes), the informational set and receipts-only `E_NO_INGEST` (The Gate), the P-gate (reconstruction chain with the 8-value COND set), the retired ingest-attestation lane, the N1 `$or` net + N3 companion sweep + extended residue invariant (cleanup-das), the byte-compare lane, the answers-block `HANDLES:` line, the provenance chain, the report schema, and the receipt invariants — everything else is retained as the historical v2-v16 record, and `GATES-REFERENCE.md` (v17) is the exhaustive normative reference for the current gate surface. Applied.
+
 ## History
 
 - v1 (2026-10-21): scored benchmark; live run wr-20261021-2355 — 7/7 substantively correct, 1/7 trace-PASS (no real das-retrieve calls; answers from context).
@@ -315,3 +322,4 @@ Contradictions between this spec at v2 and (a) the v3 directive / original requi
 - v14 (2026-10-26): full-provenance extraction records (22:52 UTC directive — "following your proposal… save also the urls, git hash, etc. — whatever is necessary to reconstruct the provenance"; wr3m close-out): the record's `source` line previously stored only `<filename> git:<sha>`; the SOURCES sha/url pairs therefore had to be rebuilt from memory at answer time (the ARCHIVE-OK receipt does not survive wake cycles), producing wr3i's one-position pair shift, wr3m true/difficult's hand-corrupted sha (`P_UNRESOLVED:COMMIT_NOT_IN_REPO`), and wr3m easy's fabricated URL on a valid sha (`P_UNRESOLVED:URL_MISMATCH`). Prompt-side fix, gates unchanged: step 1 records the FULL receipt verbatim (`source <filename> git:<sha> sha256:<blob> path=<repo path> <raw-github-url>`); the record becomes the "query, answer AND SOURCES vocabulary"; step 5 extends the v12 copy-not-compose rule to SOURCES (pairs copied character-for-character from recorded `source` lines — never re-typed, never re-paired, never guessed); format-block gate rules name the record's `source` lines as the only legitimate origin of citation pairs. 193 offline unit tests (5 new v14 prompt tests in `unit/test_v14_prompt.py`; 2 pre-existing wording pins updated to the v14 contract: v10's citation-pair pin, v12's vocabulary-binding pin).
 - v15 (2026-10-26): case-set simplification + A-gate LLM judge (22:56 UTC directive — simplify to three cases, keep original/false/unsolvable; use a simple OpenAI chat-completions compatible LLM call to judge whether the answer line is correct): (a) case set = `original`, `unsolvable`, `false`; removed `uncertainty`/`true`/`easy`/`difficult` + prompt files + difficult-only facts F08/F09, `requires` lists pruned; gates/e2e procedure otherwise NOT relaxed; (b) `llm_judge.py` — one chat-completions call per graded case (default ASI:One `asi1-ultra`, temperature 0, CORRECT/INCORRECT first-token verdict, one HTTP retry), payload restricted to question + ground truth + answer line; `grade_answer(case, final_answer, judge_fn)` returns `A_MISSING`/`A_WRONG`/`A_JUDGE_UNAVAILABLE`; `gate_case` gained `judge_fn` (harness builds it lazily via `run_benchmark._get_judge`; offline unit tests stub it); CLI `--judge-base-url/--judge-model/--judge-api-key/--judge-timeout`; judge metadata recorded in grade JSON `detail.judge` (key never logged); `A_SKY`/`A_FABRICATED`/`A_NO_INABILITY` and the `_NEGATION_RE`/`_mentions_unnegated` lexicons removed with their tests (`test_v13_gates.py` deleted; v10 fix-1 A_SKY block removed). 195 offline unit tests (13 new v15 judge tests in `unit/test_v15_judge.py`; 5 grade_answer contract tests rewritten; gate-case fixtures stub the judge).
 - v16 (2026-10-26): single-prompt TRUE/FALSE judge (22:56 UTC directive follow-up): `llm_judge.py` rebuilt — ONE user message (question + agent final answer + expected answer, "Reply with exactly one word: TRUE or FALSE"), verdict = first TRUE/FALSE token, `max_tokens` 512 (16 consumed pre-content live), temperature 0, one HTTP retry; endpoint configurable (`--judge-base-url/--judge-model/--judge-api-key/--judge-timeout`), defaults = the Omega agent's ASI:One asi1-ultra + runtime.env key; `A_WRONG` = judge FALSE; preflight `judge_smoke` check (trivial call; fail-fast before case windows); tests updated to the TRUE/FALSE contract (test_v15_judge.py rewritten, grade stubs, template pin). 198 offline unit tests.
+- v17 (2026-10-28): transparent provenance (issue #2; the agent is UNAWARE of provenance — fully config-driven): prompt slim v17 (archive step, SOURCES line + copy rules, and `source …` record lines removed; `HANDLES:` line + `expr <expression> top=<handle>` record lines added; das-write v3 grammar — URL ref, the plugin resolves + sha256-hashes; receipts `BRIDGE-PERSIST-OK: verified=<n> top=<handle>`); item-0 gate audit (24 KEEP / 4 MODIFY / 8 RETIRE over 27 condition codes + 21 attestation/census/history-parse lane fields — GATES-REFERENCE §12); E-gate receipts-only (`E_NO_INGEST` blocks iff first case AND `window_persist_receipts == 0`; the facade-log ingest-attestation lane `E_INGEST_ATTESTED_VIA_FACADE_LOG` retired); attestation census query-only (`collect_attestation` = case_id/agent_ip/access_count/qe_pattern_match/window); P-gate rewired via `deploy/das/write-bridge/tools/reconstruct_sources.py` (trace + FACTS + HANDLES → JSON conditions mapped to `P_UNRESOLVED:<expr12>:<COND>` 8-value COND set / `P_MISSING` / informational `P_SOURCE_SET_MISMATCH`; background byte-compare lane replaces blob reconstruction); H-gate added (`H_MISSING`/`H_COUNT_MISMATCH`/`H_MISMATCH` blocking per D4; unsolvable exempt); preflight full-v4 (`ledger_repo_format` via `migrate_ledger_repo.sh --check`; `das_write_grammar_v3`; full-v4 `write_bridge_smoke` validating `top_handle`); cleanup N1 → mongo `$or` of `provenance_ref` + `provenance_url` + N3 one-time WriteProvenance companion sweep (residue invariant: remaining companions == 0); history_parse legacy lanes retired from the v4 grade path (functions kept for legacy history texts). 309 offline unit tests.
