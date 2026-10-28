@@ -595,10 +595,11 @@ def _discover_benchmark_expressions() -> list[str]:
     """Discover benchmark-residue fact expressions in the DAS mongo store.
 
     Two nets (union), both read-only:
-      N1: links whose custom_attributes.provenance_url contains the
-          benchmark source URL base — every benchmark add-atom write is
-          provenance-decorated by the facade (provenance v2.1), so this
-          catches all agent-written benchmark facts, old and new.
+      N1: links whose custom_attributes.provenance_ref (v4 writes — the
+          ref IS the source URL, D5) OR custom_attributes.provenance_url
+          (pre-migration v2.1 residue) contains the benchmark source URL
+          base — a mongo $or of two $regex nets, so this catches all
+          agent-written benchmark facts, old and new (spec §8 item 8).
       N2: links whose custom_attributes.metta_expression contains a
           high-confidence benchmark-ONLY literal (windowless-room,
           sloped-ceiling, observer-inside-room, ...) — catches undecorated
@@ -612,8 +613,11 @@ def _discover_benchmark_expressions() -> list[str]:
     url_base = facts.SOURCE_URL_BASE
 
     js_n1 = (
-        'const out = db.links.find({"custom_attributes.provenance_url": '
-        '{$regex: ' + json.dumps(url_base) + '}}).toArray();'
+        'const out = db.links.find({$or: '
+        '[{"custom_attributes.provenance_ref": '
+        '{$regex: ' + json.dumps(url_base) + '}}, '
+        '{"custom_attributes.provenance_url": '
+        '{$regex: ' + json.dumps(url_base) + '}}]}).toArray();'
         'print(JSON.stringify(out.map(d => d.custom_attributes.metta_expression)));'
     )
     n1_raw = _mongo_eval(js_n1)
@@ -690,20 +694,201 @@ def _canary_counts() -> dict:
     return out
 
 
+# ---------------------------------------------------------------------------
+# N3 companion sweep (v17 item 8, decision D2): one-time deletion of the OLD
+# WriteProvenance companion links of the discovered benchmark facts. The v4
+# facade no longer emits companions (Phase 1 deleted the emission), but
+# pre-migration v2.1 writes did — the OLD data shape is fixed (git show
+# 5d978ec~1:deploy/das/write-bridge/write_client.py):
+#   (WriteProvenance "fact:<top_handle>" "git:<sha>" "url:<url>" "ts:<ts>")
+# Scoping is BY CONSTRUCTION (spec §11 residual risk 7): ONLY links whose
+# targets include the Symbol node named "fact:<top_handle>" of a DISCOVERED
+# benchmark expression AND whose leading target (targets.0) is the Symbol
+# node "WriteProvenance" are matched — live research companions
+# (docs/status.md:239) and CampaignProvenance links
+# (deploy/das/import-wrapper/import_wrapper.py:249-256) can never match.
+# Handles are computed client-side WITHOUT hyperon_das (the gateway/OVH
+# harness hosts lack it) via the Phase-4 mirror (reconstruct_sources.py).
+# ---------------------------------------------------------------------------
+
+
+def _handle_helpers():
+    """The Phase-4 handle helpers (reconstruct_sources), imported lazily.
+
+    run_benchmark runs on hosts WITHOUT hyperon_das, so handles must be
+    computed with the formula-identical fallback mirror (md5("type name")
+    for nodes, md5(" ".join([md5(type), *targets])) for links — conftest
+    MirrorNode/MirrorLink, live-verified iter16/iter18). The mirror is
+    imported from the already-validated Phase-4 script rather than
+    duplicated: the formula stays identical by construction (the same
+    import path unit/test_reconstruct_sources.py uses).
+    """
+    tools_dir = RECONSTRUCT_SCRIPT.parent
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    import reconstruct_sources
+    return reconstruct_sources
+
+
+def _symbol_node_handle(node_cls, name: str) -> str:
+    """Handle of the Symbol node named ``name`` (mirror factories).
+
+    Quoted-literal node names KEEP their quotes (metta_to_atoms storage
+    convention), so the companion fact-target node is named
+    ``"fact:<top_handle>"`` — quotes included.
+    """
+    return node_cls(type="Symbol", name=name).handle
+
+
+def _fact_top_handles(exprs: list[str]) -> tuple[dict[str, str], list[dict]]:
+    """top_handle per benchmark expression, computed client-side (Phase-4
+    mirror — parse_fact + fallback factories, no hyperon_das). An
+    expression that fails parse_fact is recorded as drift and skipped:
+    the sweep must not crash the phase."""
+    rs = _handle_helpers()
+    node_cls, link_cls = rs._factories()
+    handles: dict[str, str] = {}
+    errors: list[dict] = []
+    for expr in exprs:
+        try:
+            handles[expr] = rs._parse_fact(expr, node_cls, link_cls).top_handle
+        except rs.MettaParseError as exc:
+            errors.append({"metta": expr, "error": str(exc)})
+    return handles, errors
+
+
+def _companion_census(fact_symbol_handles: list[str],
+                      wp_symbol_handle: str) -> list[dict]:
+    """N3 discovery/census (read-only, ONE bounded mongo find): link docs
+    whose targets include one of the benchmark fact-symbol handles AND
+    whose leading target (targets.0) is the WriteProvenance symbol handle.
+    Returns docs as [{_id, targets}]."""
+    if not fact_symbol_handles:
+        return []
+    query = {"targets": {"$in": fact_symbol_handles},
+              "targets.0": wp_symbol_handle}
+    js = (
+        'const q = ' + json.dumps(query) + '; '
+        'const out = db.links.find(q, {_id: 1, targets: 1}).toArray(); '
+        'print(JSON.stringify(out));'
+    )
+    raw = _mongo_eval(js)
+    try:
+        docs = json.loads(raw.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        docs = []
+    return [d for d in docs if isinstance(d, dict) and "_id" in d]
+
+
+def _companion_node_names(targets: list[str]) -> dict[str, str]:
+    """Node names for one companion doc's targets (db.nodes find $in)."""
+    js = (
+        'const out = db.nodes.find({_id: {$in: ' + json.dumps(list(targets))
+        + '}}, {_id: 1, name: 1}).toArray(); '
+        'print(JSON.stringify(out));'
+    )
+    raw = _mongo_eval(js)
+    try:
+        docs = json.loads(raw.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        docs = []
+    return {d["_id"]: d.get("name") for d in docs
+            if isinstance(d, dict) and "_id" in d}
+
+
+def _sweep_write_provenance_companions(exprs: list[str]) -> dict:
+    """The one-time N3 sweep (spec §8 item 8, decision D2).
+
+    For each discovered benchmark fact expression: compute top_handle
+    client-side, census the old WriteProvenance companion links scoped to
+    that fact handle, rebuild each companion's stored expression from its
+    target node names, and delete it via the bridge's validated cleanup.py
+    (links-only, absence oracle — the same invocation pattern the
+    expression lane uses). Recorded drift (unparseable rebuild, missing
+    node names, handle re-derivation mismatch) is recorded per entry and
+    skipped — never a crash. Returns the cleanup-das.json record:
+    {"discovered", "cleanup_results", "remaining_count", "handle_errors"}.
+    """
+    data: dict = {"discovered": [], "cleanup_results": [],
+                  "remaining_count": 0, "handle_errors": []}
+    handles, errors = _fact_top_handles(exprs)
+    data["handle_errors"] = errors
+    rs = _handle_helpers()
+    node_cls, link_cls = rs._factories()
+    wp_symbol = _symbol_node_handle(node_cls, "WriteProvenance")
+    fact_symbols = [_symbol_node_handle(node_cls, '"fact:' + h + '"')
+                    for h in handles.values()]
+
+    discovered = _companion_census(fact_symbols, wp_symbol)
+    data["discovered"] = discovered
+    print(f"[cleanup-das] companion sweep: {len(discovered)} old "
+          f"WriteProvenance links (of {len(handles)} benchmark fact handles)")
+
+    results: list[dict] = []
+    for doc in discovered:
+        targets = [str(t) for t in doc.get("targets") or []]
+        entry: dict = {"targets": targets}
+        names = _companion_node_names(targets) if targets else {}
+        expr = ("(" + " ".join(names[t] for t in targets) + ")"
+                if targets and all(names.get(t) for t in targets) else None)
+        if expr is None:
+            entry["error"] = "companion target names unavailable (drift)"
+            results.append(entry)
+            continue
+        entry["metta"] = expr
+        try:
+            parsed = rs._parse_fact(expr, node_cls, link_cls)
+        except rs.MettaParseError as exc:
+            entry["parse_error"] = str(exc)
+            results.append(entry)
+            continue
+        if parsed.top_handle != doc["_id"]:
+            entry["parse_error"] = (
+                f"rebuilt expression re-derives handle {parsed.top_handle}, "
+                f"doc _id {doc['_id']} (drift)")
+            results.append(entry)
+            continue
+        r = _run(["docker", "exec", "-w", "/app", CONTAINER_WRITE_BRIDGE,
+                  "python", "cleanup.py", "--metta", expr], timeout=600.0)
+        entry["returncode"] = r.returncode
+        entry["stdout"] = r.stdout.strip()[-2000:]
+        entry["stderr"] = r.stderr.strip()[-2000:]
+        results.append(entry)
+        if r.returncode != 0:
+            print(f"[cleanup-das]   companion FAILED rc={r.returncode}: "
+                  f"{r.stderr.strip()[:200]}")
+    data["cleanup_results"] = results
+
+    remaining = _companion_census(fact_symbols, wp_symbol)
+    data["remaining_count"] = len(remaining)
+    return data
+
+
 def cleanup_das(args) -> int:
     """cleanup-das phase: delete previous-run benchmark predicates from DAS.
 
     Uses the bridge's cleanup.py (links-only deletion, alternate-pattern
     absence oracle, bounded standby — validated tooling) per discovered
-    expression. Canaries + campaign atoms must be untouched (verified
-    before/after). The delete apply is EVENTUAL; the oracle handles it.
+    expression, then runs the one-time N3 companion sweep (v17 item 8,
+    decision D2): the OLD WriteProvenance companion links of the
+    discovered benchmark facts are re-derived client-side (Phase-4 handle
+    mirror) and deleted with the same cleanup.py tool, scoped by
+    construction to fact-handle targets under a WriteProvenance leading
+    symbol — never all WriteProvenance links (live research companions
+    exist, docs/status.md:239) and never CampaignProvenance
+    (deploy/das/import-wrapper/import_wrapper.py:249-256). Canaries +
+    campaign atoms must be untouched (verified before/after). The delete
+    apply is EVENTUAL; the oracle handles it. Residue invariant: no
+    discovered expressions remain AND no companions remain.
     """
     _resolve_endpoints(args)
     print("[cleanup-das] discovering benchmark-residue expressions in mongo...")
 
     if args.dry_run:
         print("[cleanup-das] [dry-run] would: discover expressions, cleanup.py each "
-              "(links-only), verify absence, verify canaries untouched")
+              "(links-only), sweep old WriteProvenance companions (compute fact "
+              "handles, discover companion links, cleanup.py each, verify absence), "
+              "verify absence, verify canaries untouched")
         return 0
 
     data: dict = {"started": _now_iso()}
@@ -731,6 +916,13 @@ def cleanup_das(args) -> int:
 
     data["cleanup_results"] = results
 
+    # N3 (v17 item 8, decision D2): one-time sweep of the OLD
+    # WriteProvenance companion links of the discovered benchmark facts —
+    # AFTER the expression cleanup loop (companions are separate link
+    # docs; the fact-symbol scoping needs the pre-cleanup discovery list),
+    # BEFORE the residue re-check.
+    data["companion_sweep"] = _sweep_write_provenance_companions(exprs)
+
     data["mongo_counts_after"] = _mongo_eval(
         'print(JSON.stringify({nodes: db.nodes.countDocuments({}), links: db.links.countDocuments({})}));'
     ).strip()
@@ -748,11 +940,17 @@ def cleanup_das(args) -> int:
     data["finished"] = _now_iso()
 
     _write_json(RESULTS_DIR / args.run_id / "cleanup-das.json", data)
+    sweep = data["companion_sweep"]
     print(f"[cleanup-das] done: {len(exprs)} cleaned, {len(remaining)} remaining, "
-          f"canaries_intact={data['canaries_intact']}")
+          f"companions swept={len(sweep['discovered'])} remaining="
+          f"{sweep['remaining_count']}, canaries_intact={data['canaries_intact']}")
 
     if remaining:
         print("[cleanup-das] WARNING: residue still discoverable — inspect cleanup-das.json")
+        return 1
+    if sweep["remaining_count"]:
+        print("[cleanup-das] WARNING: WriteProvenance companion links still "
+              "discoverable — inspect cleanup-das.json")
         return 1
     if not data["canaries_intact"]:
         print("[cleanup-das] WARNING: canary counts changed — campaign atoms may be damaged")
