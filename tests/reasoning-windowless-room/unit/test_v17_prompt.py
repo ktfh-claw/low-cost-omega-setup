@@ -220,6 +220,64 @@ def test_gate_rules_facts_and_handles_pair_discipline():
     assert "Copy each handle TOGETHER with its expression" in fmt
 
 
+# ---------------------------------------------------------------------------
+# wr3p lesson (2026-10-28 live run): unsolvable step-0 verbatim discipline.
+# The agent wrote trace step 0 as the question clause WRAPPED in a
+# hand-annotated absence truth value `(( QUERY ) (stv 0.0 0.9))`; the gate
+# matches the first trace step against the executed QUERY (grading.py
+# R_TRACE_NOT_GROUNDED fires BEFORE the unsolvable index-grounding
+# exemption), so a rewritten first step fails the whole case. The prompt
+# must make the bare-first-step discipline explicit.
+# ---------------------------------------------------------------------------
+
+def test_step4_unsolvable_trace_opens_with_bare_question_clause():
+    # step 4: the trace's FIRST step is the question clause EXACTLY as
+    # executed — identical to the QUERY: line, no stv pair, no wrapper
+    seg = _segment(_template(), "4. **EXECUTE", "5. **WRITE")
+    assert "the question clause EXACTLY as you executed it" in seg
+    assert "identical to the `QUERY:` line" in seg
+    assert "NO `(stv ...)` pair attached" in seg
+    assert "NO wrapping parentheses" in seg
+    assert "`R_TRACE_NOT_GROUNDED`" in seg
+    # the absence probe's stv output belongs in exec lines, never on step 0
+    assert "never a wrapper on the first trace step" in seg
+
+
+def test_gate_rule_reasoning_first_step_is_bare_query():
+    # the block's REASONING gate rule carries the same bare-first-step
+    # discipline (wr3p lesson named)
+    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
+    assert "the bare clause exactly as it stands on your `QUERY:` line" in fmt
+    assert "never wrapped in an extra parenthesis layer" in fmt
+    assert "never carrying an attached `(stv ...)` pair" in fmt
+    assert "wr3p lesson" in fmt
+    assert "failed the whole case" in fmt
+
+
+def test_gate_rule_unsolvable_trace_still_opens_with_query():
+    # the unsolvable bullet: probes' stv outputs stay in exec lines
+    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
+    assert "The trace still opens with the bare executed question clause" in fmt
+    assert "stays in the exec lines, never on the question clause" in fmt
+
+
+def test_rendered_prompt_carries_wr3p_step0_discipline_for_every_case():
+    # the discipline renders for every case and introduces no banned
+    # vocabulary
+    cases = run_benchmark._facts_mod().TEST_CASES
+    assert cases
+    for case in cases:
+        rendered = _render(case)
+        assert "the question clause EXACTLY as you executed it" in rendered, case["id"]
+        assert "never carrying an attached `(stv ...)` pair" in rendered, case["id"]
+        assert "The trace still opens with the bare executed question clause" in rendered, case["id"]
+        assert "provenance" not in rendered.lower(), case["id"]
+        assert "archive" not in rendered.lower(), case["id"]
+        assert "SOURCES" not in rendered, case["id"]
+        assert "git:" not in rendered, case["id"]
+        assert "sha256" not in rendered, case["id"]
+
+
 def test_rendered_prompt_carries_wr3o_lessons_for_every_case():
     # the discipline additions render for every case and introduce no banned
     # vocabulary
