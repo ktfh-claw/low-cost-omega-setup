@@ -278,6 +278,83 @@ def test_rendered_prompt_carries_wr3p_step0_discipline_for_every_case():
         assert "sha256" not in rendered, case["id"]
 
 
+# ---------------------------------------------------------------------------
+# wr3q lesson (2026-10-28 live run, false case): the agent skipped the
+# step-5 terminal ledger pin; a later wake cycle re-answered from the stale
+# (step-4) ledger and appended a SECOND, degenerate `### CASE false` block —
+# parse_answers_v2's last-wins made THAT block the graded one
+# (Q_DEGENERATE_PATTERN + Q_NOT_IN_HISTORY + Q_REISSUE_ERROR). Iterate #4:
+# the close-out ordering and one-block idempotency become explicit prompt
+# contract — pin BEFORE append, and a cycle finding an existing block
+# pins-and-idles instead of re-answering.
+# ---------------------------------------------------------------------------
+
+def test_ledger_closeout_pins_terminal_line_before_append():
+    # the terminal pin comes FIRST: a cycle waking between the append and
+    # the pin re-answers the case from a stale ledger (wr3q duplicate block)
+    t = _template()
+    seg = t[t.index("## PINNED LEDGER"):t.index("1. **EXTRACT")]
+    assert "pin BEFORE append" in seg
+    assert ("LEDGER: step 5 | done: answer block written | next: none — "
+            "case complete, idle silently") in seg
+
+
+def test_ledger_existing_block_pins_and_idles():
+    # one block per case: a cycle finding an existing CASE block must
+    # pin-and-idle, never re-answer or append a second block
+    t = _template()
+    seg = t[t.index("## PINNED LEDGER"):t.index("1. **EXTRACT")]
+    assert "EXISTING `### CASE {{CASE_ID}}` block" in seg
+    assert "NOT answer again" in seg
+    assert "second block" in seg
+    # the pinned-but-unappended gap: copy the record, never re-run steps
+    assert "terminal ledger is pinned but" in seg
+    assert "never re-run" in seg.lower()
+
+
+def test_step5_closeout_order_binding():
+    # step 5's tail carries the same binding close-out order plus the
+    # pre-append duplicate check
+    seg = _segment(_template(), "5. **WRITE", "### REQUIRED FORMAT")
+    assert "Close-out order is BINDING" in seg
+    assert "FIRST" in seg
+    assert ("LEDGER: step 5 | done: answer block written | next: none — "
+            "case complete, idle silently") in seg
+    assert "already carries a `### CASE {{CASE_ID}}` block" in seg
+    assert "NEVER append a second block" in seg
+
+
+def test_stop_rule_names_both_completion_conditions():
+    # DONE = block appended AND terminal pin pinned; a found-block cycle
+    # may pin the missing terminal line and NOTHING else; a duplicate
+    # block fails the run (wr3q: the duplicate was the graded block)
+    stop = _template()
+    stop = stop[stop.index("## STOP rule"):]
+    assert "BOTH" in stop
+    assert "terminal ledger" in stop
+    assert "must do NOTHING" in stop
+    assert "second `### CASE {{CASE_ID}}` block" in stop
+    assert "wr3q lesson" in stop
+
+
+def test_rendered_prompt_carries_wr3q_closeout_discipline_for_every_case():
+    # the close-out discipline renders for every case and introduces no
+    # banned vocabulary
+    cases = run_benchmark._facts_mod().TEST_CASES
+    assert cases
+    for case in cases:
+        rendered = _render(case)
+        assert "Close-out order is BINDING" in rendered, case["id"]
+        assert "pin BEFORE append" in rendered, case["id"]
+        assert "NEVER append a second block" in rendered, case["id"]
+        assert "EXISTING `### CASE " + case["id"] + "` block" in rendered, case["id"]
+        assert "provenance" not in rendered.lower(), case["id"]
+        assert "archive" not in rendered.lower(), case["id"]
+        assert "SOURCES" not in rendered, case["id"]
+        assert "git:" not in rendered, case["id"]
+        assert "sha256" not in rendered, case["id"]
+
+
 def test_rendered_prompt_carries_wr3o_lessons_for_every_case():
     # the discipline additions render for every case and introduce no banned
     # vocabulary
