@@ -276,6 +276,15 @@ def _docker_logs_since(container: str, since_iso: str, until_iso: str) -> str:
 # count them (live-verified 2026-10-28: 374 strict matches on the
 # run-instance container, 0 on the standby container despite 593 loose
 # BRIDGE-PERSIST-OK matches).
+#
+# wr3q-20261028 (defect ledger item 3), third excluded shape — at the
+# CENSUS level, not the regex: the agent PINS receipts, so receipt text is
+# ECHOED inside the system prompt of later LLM REQUEST log lines and the
+# regex DOES match those prompt echoes (a real receipt string, verbatim).
+# _census_persist_receipts excludes ``LLMRequest[`` lines from the matched
+# set — COMMAND_RETURN is the EMISSION lane (das_write_bridge.py:549;
+# live wr3q: false 5 real + 5 echo -> count 10, unsolvable 1 real + 1
+# echo -> 2).
 PERSIST_RECEIPT_RE = re.compile(
     r"BRIDGE-PERSIST-OK: verified=\d+ top=[0-9a-f]{32}")
 
@@ -301,6 +310,14 @@ def _census_persist_receipts(since_iso: str, until_iso: str) -> dict:
     ZERO — grade-time MUST persist the matched lines into the run dir
     (persist-receipts-<case>.json) as the durable evidence.
 
+    REQUEST-ECHO EXCLUSION (wr3q-20261028, defect ledger item 3): the
+    agent PINS receipts, so receipt text re-appears inside the system
+    prompt of later LLM REQUEST log lines — ``LLMRequest[`` lines are
+    prompt echoes, NOT emissions, and are excluded from the matched set
+    (the regex still matches them; the EMISSION lane is COMMAND_RETURN,
+    das_write_bridge.py:549 — live wr3q: false 5 real + 5 echo,
+    unsolvable 1 real + 1 echo).
+
     Docker/log errors are NOT gate evidence: count 0 + ``error`` recorded
     (the gate then sees a zero census — conservative, same failure mode
     as the lossy window it replaces)."""
@@ -311,7 +328,8 @@ def _census_persist_receipts(since_iso: str, until_iso: str) -> dict:
         out["error"] = str(e)[:200]
         return out
     out["matched"] = [ln.strip() for ln in logs.splitlines()
-                      if PERSIST_RECEIPT_RE.search(ln)]
+                      if PERSIST_RECEIPT_RE.search(ln)
+                      and "LLMRequest[" not in ln]
     out["count"] = len(out["matched"])
     return out
 
