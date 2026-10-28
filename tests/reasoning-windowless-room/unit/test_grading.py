@@ -377,6 +377,84 @@ def test_gate_summary_aggregates():
 
 
 # ---------------------------------------------------------------------------
+# E_NO_INGEST (v17 receipts-only, resolution 6): the first case must show
+# a real ingest — a BRIDGE-PERSIST-OK receipt in its window; the retired
+# facade-log census never substitutes for it
+# ---------------------------------------------------------------------------
+
+_E_INDEX = ['(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))']
+
+
+def test_e_no_ingest_first_case_zero_persist_receipts():
+    # (a) first case, no in-window BRIDGE-PERSIST-OK receipt, no
+    # attestation -> blocking E_NO_INGEST
+    r = gate_case(
+        _case("original"), _block_for("original"),
+        history_queries=['(Inheritance $X (Concept "ceiling"))'],
+        history_placeholder_calls=0,
+        reissue_fn=lambda q: {"count": 1},
+        citation_checks=_ok_citations(),
+        facts_index=_E_INDEX,
+        window_persist_receipts=0,
+        attestation=None,
+        judge_fn=_judge_ok,
+    )
+    assert "E_NO_INGEST" in r.conditions
+
+
+def test_e_no_ingest_census_attestation_no_longer_substitutes():
+    # (b) the retired write/archive facade-log census no longer attests
+    # the ingest — E_NO_INGEST is receipts-only
+    r = gate_case(
+        _case("original"), _block_for("original"),
+        history_queries=['(Inheritance $X (Concept "ceiling"))'],
+        history_placeholder_calls=0,
+        reissue_fn=lambda q: {"count": 1},
+        citation_checks=_ok_citations(),
+        facts_index=_E_INDEX,
+        window_persist_receipts=0,
+        attestation={"qe_pattern_match": True, "access_count": 1,
+                     "write_count": 2, "archive_count": 2},
+        judge_fn=_judge_ok,
+    )
+    assert "E_NO_INGEST" in r.conditions
+    assert "E_INGEST_ATTESTED_VIA_FACADE_LOG" not in r.conditions
+
+
+def test_e_no_ingest_first_case_with_persist_receipt_absent():
+    # (c) first case with >= 1 in-window BRIDGE-PERSIST-OK receipt ->
+    # no E_NO_INGEST
+    r = gate_case(
+        _case("original"), _block_for("original"),
+        history_queries=['(Inheritance $X (Concept "ceiling"))'],
+        history_placeholder_calls=0,
+        reissue_fn=lambda q: {"count": 1},
+        citation_checks=_ok_citations(),
+        facts_index=_E_INDEX,
+        window_persist_receipts=1,
+        judge_fn=_judge_ok,
+    )
+    assert "E_NO_INGEST" not in r.conditions
+
+
+def test_e_no_ingest_later_case_absent():
+    # (d) a non-first case may reuse already-persisted facts: no fresh
+    # ingest required even with zero in-window receipts
+    r = gate_case(
+        _case("false"),
+        _block_for("false", answer="false — you see the ceiling, not the sky"),
+        history_queries=['(Inheritance $X (Concept "ceiling"))'],
+        history_placeholder_calls=0,
+        reissue_fn=lambda q: {"count": 1},
+        citation_checks=_ok_citations(),
+        facts_index=_E_INDEX,
+        window_persist_receipts=0,
+        judge_fn=_judge_ok,
+    )
+    assert "E_NO_INGEST" not in r.conditions
+
+
+# ---------------------------------------------------------------------------
 # regression: the real wr-20261021-2355 answers must FAIL the gate
 # (they were substantively correct but had NO real queries — only prose)
 # ---------------------------------------------------------------------------

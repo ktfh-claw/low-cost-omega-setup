@@ -130,8 +130,8 @@ URL_RE = re.compile(r"(https?://\S+)")
 QUOTED_LITERAL_RE = re.compile(r'"([^"]+)"')
 
 # The first case of the sequential run (facts.TEST_CASES order). After a
-# DAS cleanup this is the case that MUST show real ingestion receipts
-# (ARCHIVE-OK + BRIDGE-PERSIST-OK) — later cases may legitimately reuse
+# DAS cleanup this is the case that MUST show a real ingest receipt
+# (BRIDGE-PERSIST-OK) — later cases may legitimately reuse
 # already-persisted facts without new writes.
 TEST_CASES_FIRST_ID = "original"
 
@@ -528,7 +528,6 @@ def parse_citations(sources_raw: str) -> list[tuple[str, str]]:
 
 INFORMATIONAL_CONDITIONS = {
     "Q_ATTESTED_VIA_ACCESS_LOG",
-    "E_INGEST_ATTESTED_VIA_FACADE_LOG",
     "E_INDEXED_NOT_PERSISTED",
 }
 
@@ -542,7 +541,6 @@ def gate_case(
     citation_checks: list[tuple[str, str, list[str]]],
     facts_index: Optional[list[str]] = None,
     window_persist_receipts: int = 0,
-    window_archive_receipts: int = 0,
     attestation: Optional[dict] = None,
     facts_index_raw: str = "",
     presence_fn=None,
@@ -555,9 +553,9 @@ def gate_case(
     facts_index: normalized expressions from the agent's facts index
     (extraction record); None = E-gate not applicable (legacy grading),
     [] = no clauses were extracted (fails every case).
-    window_persist_receipts / window_archive_receipts: BRIDGE-PERSIST-OK /
-    ARCHIVE-OK receipts in this case's benchmark window (E_NO_INGEST
-    applies to the first case only: it must show a real ingest).
+    window_persist_receipts: BRIDGE-PERSIST-OK receipts in this case's
+    benchmark window (E_NO_INGEST applies to the first case only: it
+    must show a real ingest).
     attestation: harness-side attestation lane for the known history
     observability gap (PeTTa superpose/collapse collapses tool tuples to
     $_ in history): {"qe_pattern_match": bool, "access_count": int} —
@@ -673,23 +671,14 @@ def gate_case(
             # No clauses were ever extracted from the reasoning text.
             conditions.append("E_NO_EXTRACTION")
         else:
-            if is_first_case and (window_persist_receipts == 0 or window_archive_receipts == 0):
-                # After a DAS cleanup the first case MUST show real ingestion:
-                # at least one ARCHIVE-OK and one BRIDGE-PERSIST-OK receipt.
-                # The history channel is lossy (tool outputs collapse to $_),
-                # so when both receipts are missing from history the harness-
-                # side facade-log lane may attest the ingest instead (real
-                # 2xx POST /v1/write + POST /v1/archive from the agent IP):
-                # recorded as the informational E_INGEST_ATTESTED_VIA_FACADE_LOG.
-                attested_ingest = bool(
-                    attestation
-                    and attestation.get("write_count", 0) >= 1
-                    and attestation.get("archive_count", 0) >= 1
-                )
-                if attested_ingest:
-                    conditions.append("E_INGEST_ATTESTED_VIA_FACADE_LOG")
-                else:
-                    conditions.append("E_NO_INGEST")
+            if is_first_case and window_persist_receipts == 0:
+                # After a DAS cleanup the first case MUST show a real
+                # ingest: a BRIDGE-PERSIST-OK receipt in the case window.
+                # Receipts ARE extractable from history windows
+                # (history_parse.extract_persist_receipts,
+                # history_parse.py:119-121), so no facade-log census is
+                # needed (resolution 6).
+                conditions.append("E_NO_INGEST")
             if not is_unsolvable:
                 # FACTS: line must exist and resolve against the index.
                 facts_line = parse_facts_line(block.facts_raw)

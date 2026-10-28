@@ -103,7 +103,6 @@ SOURCES: {FAKE_SHA} {FAKE_URL}
         [(FAKE_SHA, FAKE_URL, [])],
         facts_index=index,
         window_persist_receipts=1,
-        window_archive_receipts=1,
         **kw,
     )
 

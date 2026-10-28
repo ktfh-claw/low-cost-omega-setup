@@ -29,7 +29,7 @@ if ALL gate conditions hold (no relaxation vs v2):
           the informational condition Q_ATTESTED_VIA_ACCESS_LOG; the
           evidence standard is unchanged, the channel is not.
   E-gate  extraction: the facts index is non-empty, the first case shows a
-          real ingest (ARCHIVE-OK + BRIDGE-PERSIST-OK in its window), the
+          real ingest (a BRIDGE-PERSIST-OK receipt in its window), the
           case's FACTS line resolves against the index, and every quoted
           literal of the query comes from the extracted vocabulary.
   P-gate  every git:<sha> source citation resolves against the provenance
@@ -1007,7 +1007,6 @@ def grade_case(args) -> int:
         citation_checks,
         facts_index=facts_index,
         window_persist_receipts=len(persist_receipts),
-        window_archive_receipts=len(archive_receipts),
         attestation=attestation,
         facts_index_raw=facts_index_text,
         presence_fn=reissue,
@@ -1352,7 +1351,6 @@ def grade(args) -> int:
             reissue, citation_checks,
             facts_index=facts_index,
             window_persist_receipts=len(persist_receipts),
-            window_archive_receipts=len(archive_receipts),
             facts_index_raw=facts_index_text,
             judge_fn=_get_judge(args),
         )
