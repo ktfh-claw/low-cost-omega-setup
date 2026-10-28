@@ -57,7 +57,9 @@ def test_step5_facts_copy_before_write():
     assert "E_FACTS_NOT_IN_INDEX" in seg
     assert "wr3k lesson" in seg
     assert "answer-time glosses" in seg
-    assert seg.index("VERBATIM") < seg.index("Append the block")
+    # copy rule before the write order (iterate #4 re-point: the close-out
+    # tail now renders the append as move (3) of the binding sequence)
+    assert seg.index("VERBATIM") < seg.index("append the block")
     assert "either persist it first" in seg
 
 
