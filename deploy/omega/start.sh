@@ -27,7 +27,7 @@ cleanup
   --env-file /home/ubuntu/omega-curiosity/runtime.env \
   "$image" \
   commchannel=telegram provider=ASIOne model=asi1-ultra embeddingprovider=Local telegramAutonomousWake \
-  dasWriteEnabled=1 dasWriteOrigin=http://write-bridge:8080 \
+  dasWriteEnabled=1 dasWriteOrigin=http://write-bridge:8080 dasWriteRequireRef=1 \
   >/dev/null
 
 # The default bridge supplies outbound Telegram/ASI:One connectivity. The

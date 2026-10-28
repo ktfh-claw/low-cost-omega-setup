@@ -30,12 +30,15 @@ computes sha256 of the content itself, appends the ``(ref, sha256)``
 pair to the git source ledger via the facade's ``POST /v1/source``
 (the commit hash is the provenance anchor), and then performs the
 gated DAS write via ``POST /v1/write``. The agent never handles a git
-commit, no separate source-capture skill is needed, and the agent is unaware
+commit, no separate source-capture skill is needed, and the agent is
+unaware
 of the provenance mechanics. A per-process cache (ref → sha256 +
 commit) skips the fetch and the ledger append for subsequent writes
 citing the same source. The v2 shape (quoted ``git:<sha>`` citations)
 is rejected with an actionable message. Without any suffix the v1
-behavior is unchanged.
+behavior is unchanged when ``dasWriteRequireRef`` is unset; when it is
+set to 1 (this deployment), suffix-less writes are rejected with an
+actionable message and never reach DAS.
 
 Contract:
     ``is_enabled() -> bool`` gates the whole path on the Omega configuration
@@ -53,7 +56,12 @@ Contract:
     - ``BRIDGE-PERSIST-WRITE-FAILED: ...`` — any failure routing to
       the facade (parse/shape violations, size violations, origin
       violations, source fetch/read failures, ledger append failures,
-      HTTP errors, timeouts, JSON errors)
+      HTTP errors, timeouts, JSON errors); under ``dasWriteRequireRef=1``
+      a suffix-less (v1) write is rejected with the pinned ``a source
+      reference is required on persistent writes — append the source
+      URL or allowed path after the expression, e.g. (add-atom
+      &persistent <expr> "<ref>")`` reason (missing source reference)
+      before any facade POST
     - ``BRIDGE-PERSIST-OK: verified=<n> top=<handle> [stv=(s,c)]`` —
       verified DAS write (``top=`` is the fact's top-link handle from
       the facade response)
@@ -121,6 +129,9 @@ STATUS_REMOVE_UNSUPPORTED = "BRIDGE-PERSIST-REMOVE-UNSUPPORTED"
 GIT_REJECTED = "git citations are no longer accepted — pass the source reference; archiving is automatic"
 BAD_REF = "source ref must be an http(s) URL or an allowed absolute path (≤480 chars, no whitespace)"
 
+# v1 rejection under dasWriteRequireRef=1 (pinned status reason).
+REF_REQUIRED = "a source reference is required on persistent writes — append the source URL or allowed path after the expression, e.g. (add-atom &persistent <expr> \"<ref>\")"
+
 # Per-process source cache: ref -> {"sha256": <64hex>, "commit": <40hex>}.
 # A cache hit skips BOTH the source fetch and the ledger append; dedup on
 # the facade makes cross-process re-POSTs idempotent end-to-end.
@@ -138,6 +149,16 @@ def is_enabled() -> bool:
     stock persistence behavior untouched.
     """
     return str(config_get_by_key("dasWriteEnabled", "")) == "1"
+
+
+def _require_ref() -> bool:
+    """Return true when the dasWriteRequireRef opt-in is set.
+
+    Reads the ``dasWriteRequireRef`` configuration key through the stock
+    Omega config machinery. When ``1``, suffix-less (v1) persistent
+    writes are rejected with the REF_REQUIRED failure reason.
+    """
+    return str(config_get_by_key("dasWriteRequireRef", "")) == "1"
 
 
 def _validate_origin(origin: str) -> str:
@@ -469,6 +490,11 @@ def intercept(text: Any) -> list[str]:
         after_expr = remainder[span[1]:]
         # v1 shape: nothing but the closing paren after the expression.
         if after_expr.strip() == ")":
+            # dasWriteRequireRef=1 gate: a suffix-less write reaches DAS
+            # with no provenance attrs and no ledger commit — reject
+            # BEFORE the size check so the actionable guidance always wins.
+            if _require_ref():
+                return [STATUS_WRITE_FAILED + ": " + REF_REQUIRED]
             # Payload size check.
             if len(expr) > MAX_METTA_CHARS:
                 return [STATUS_WRITE_FAILED + ": expression exceeds 2048 characters"]
@@ -479,6 +505,10 @@ def intercept(text: Any) -> list[str]:
         ref, tv, error = _parse_suffix(after_expr)
         if error is not None:
             return [STATUS_WRITE_FAILED + ": " + error]
+        # stv-alone suffix parses to ref=None — the same dasWriteRequireRef
+        # gate, again BEFORE the size check so the guidance always wins.
+        if ref is None and _require_ref():
+            return [STATUS_WRITE_FAILED + ": " + REF_REQUIRED]
         if len(expr) > MAX_METTA_CHARS:
             return [STATUS_WRITE_FAILED + ": expression exceeds 2048 characters"]
         return _post_to_facade(expr, ref=ref, tv=tv)
@@ -497,6 +527,12 @@ def _post_to_facade(
     POST /v1/source (unless cached), then POST /v1/write with the
     provenance payload ``{ref, git_commit, blob_sha256}``.
     """
+    if ref is None and _require_ref():
+        # Defensive double gate (the dasWriteEnabled pattern): intercept()
+        # rejects suffix-less writes under dasWriteRequireRef=1 before the
+        # size checks; this guard keeps the invariant local to the POSTing
+        # function in case a future caller bypasses intercept().
+        return [STATUS_WRITE_FAILED + ": " + REF_REQUIRED]
     origin = config_get_by_key("dasWriteOrigin", DEFAULT_ORIGIN)
     try:
         endpoint = _validate_origin(origin)
