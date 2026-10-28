@@ -494,3 +494,58 @@ def test_regression_wr_run2_answers_substantively_correct():
         conds, detail = grade_answer(case, block.final_answer, _judge_ok)
         assert conds == [], (case["id"], conds)
         assert detail["judge"]["stub"] is True
+
+
+# ---------------------------------------------------------------------------
+# T022 attestation census drop (resolution 6): collect_attestation is
+# QUERY-ONLY (access_count + qe_pattern_match -> Q_ATTESTED_VIA_ACCESS_LOG);
+# the write/archive/source-count facade-log census is dropped from the grade
+# path — E_NO_INGEST is receipts-only (item 2)
+# ---------------------------------------------------------------------------
+
+def _run_benchmark_source():
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "run_benchmark.py"),
+              encoding="utf-8") as f:
+        return f.read()
+
+
+def test_attestation_census_dropped_from_grade_path():
+    src = _run_benchmark_source()
+    # the ingest census lanes, their facade-log helper, and the grade-JSON
+    # census fields are gone
+    assert "write_count" not in src
+    assert "archive_count" not in src
+    assert "source_count" not in src
+    assert "_posts_in_window" not in src
+    assert "attested_write_calls" not in src
+    assert "attested_archive_calls" not in src
+    # the query attestation lanes survive (Q_ATTESTED_VIA_ACCESS_LOG)
+    assert "collect_attestation" in src
+    assert "access_count" in src
+    assert "qe_pattern_match" in src
+    assert "attested_retrieve_calls" in src
+    # the grader consumes only the query lanes
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "grading.py"), encoding="utf-8") as f:
+        gsrc = f.read()
+    assert "write_count" not in gsrc
+    assert "archive_count" not in gsrc
+    assert "source_count" not in gsrc
+
+
+def test_collect_attestation_return_shape_query_only():
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "run_benchmark.py"),
+              encoding="utf-8") as f:
+        src = f.read()
+    start = src.index("def collect_attestation")
+    end = src.find("\ndef ", start + 1)
+    body = src[start:end]
+    # keeps the identity + query lanes + window
+    for field in ("case_id", "agent_ip", "access_count",
+                  "qe_pattern_match", "window"):
+        assert f'"{field}"' in body, field
+    # no write/archive census survives in the returned dict
+    assert '"write_count"' not in body
+    assert '"archive_count"' not in body
