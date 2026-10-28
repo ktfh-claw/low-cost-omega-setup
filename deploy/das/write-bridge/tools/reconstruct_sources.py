@@ -22,7 +22,10 @@ self-contained in the bridge dir:
   here prose is a harness error, exit 1);
 - ``grading._split_derivation_atoms`` (:447-460) + ``grading._top_level_sexprs``
   (:422-444 — a step containing ``=>`` splits into left+right component
-  atoms; a step without ``=>`` is a single atom);
+  atoms; a step without ``=>`` is a single atom) — plus the harness-side
+  extension (wr3q-20261028): an operator-headed bare call (``(|-`` /
+  ``(|~`` head, no ``=>``) is a derivation CALL whose components are the
+  call's premise atoms (grading keeps the single-atom rule);
 - ``provenance_check._git`` (tests/reasoning-windowless-room/provenance_check.py:58-63
   — sudo default, per-invocation ``-c safe.directory=<repo>``, ``-C repo``,
   ``--no-pager``, timeout) and the LEGACY chain ``provenance_check.resolve_citation``
@@ -115,6 +118,11 @@ MONGO_TIMEOUT = 60.0
 ENTRY_KEYS = {"ref", "sha256", "entry_date"}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _VAR_RE = re.compile(r"\$[A-Za-z0-9_-]")
+# wr3q-20261028 (defect ledger item 2): an operator-headed bare call step —
+# the agent records the PLN call ``(|- <p1> <p2>)`` / ``(|~ ...)`` WITHOUT
+# ``=>`` (the output lands in the NEXT trace step). The head check anchors
+# on the operator symbol as the step's first token.
+_OPERATOR_HEAD_RE = re.compile(r"^\(\s*\|[-~]\s")
 
 # Blocking P-gate conditions (spec §2.6); legacy-informational entries never
 # contribute to exit 2 (resolution 4 / decision D6).
@@ -243,6 +251,19 @@ def _split_derivation_atoms(step: str) -> list[str]:
         return [step]
     left, right = step.split("=>", 1)
     return _top_level_sexprs(left) + _top_level_sexprs(right)
+
+
+def _split_operator_call(step: str) -> list[str]:
+    """Premise components of an operator-headed call step (no ``=>``).
+
+    wr3q-20261028 live shape: the bare PLN call ``(|- <p1> <p2>)`` recorded
+    as its own trace step. Strip the outer parens and the leading operator
+    token, then split the argument text into top-level s-exprs — the call's
+    premise atoms.
+    """
+    inner = step.strip()[1:-1].strip()
+    inner = re.sub(r"^\|[-~]\s*", "", inner, count=1)
+    return _top_level_sexprs(inner)
 
 
 def _is_variable_bearing(expr: str) -> bool:
@@ -516,18 +537,22 @@ def _plan_step(step: str, index: int, node_cls, link_cls) -> dict:
     """Classify one trace step and pre-derive its ground atoms' handles.
 
     Classification (spec §2.4/§7): (b) query clause = variable-bearing
-    FIRST step, exempt; (c) derivation = any step containing ``=>``, split
-    into component atoms (grading._split_derivation_atoms); (a) every other
-    ground step (and ground derivation components) = stored-fact candidate.
-    stv-annotated steps (trailing or wrapped) are stripped before
-    parse_fact — the handle is derived from the clean expr so the chain
-    matches the clean fact's stored handle.
+    FIRST step, exempt; (c) derivation = any step containing ``=>`` (split
+    into left+right component atoms, grading._split_derivation_atoms) AND
+    operator-headed calls without ``=>`` (``(|-``/``(|~`` head — the bare
+    PLN call whose output lands in the NEXT trace step; components = the
+    call's premises); (a) every other ground step (and ground derivation
+    components) = stored-fact candidate. stv-annotated steps (trailing or
+    wrapped) are stripped before parse_fact — the handle is derived from
+    the clean expr so the chain matches the clean fact's stored handle.
     """
     if index == 0 and _is_variable_bearing(step):
         return {"kind": "query_clause", "step": step, "atoms": []}
-    if "=>" in step:
+    if "=>" in step or _OPERATOR_HEAD_RE.match(step):
+        components = (_split_derivation_atoms(step) if "=>" in step
+                      else _split_operator_call(step))
         atoms: list[dict] = []
-        for atom_expr in _split_derivation_atoms(step):
+        for atom_expr in components:
             clean, _stripped = _strip_stv(atom_expr)
             if _is_variable_bearing(clean):
                 continue  # variable-bearing component atoms are exempt

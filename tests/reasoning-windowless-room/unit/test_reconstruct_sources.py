@@ -925,6 +925,118 @@ def test_segment_loop_strip_before_paren_check():
         assert payload["prose_segments"] == ["this is prose"]
 
 
+# --------------------------------- operator-headed calls (wr3q-20261028)
+
+# wr3q-20261028 original case (answers.md), VERBATIM: the agent recorded the
+# derivation as TWO trace steps — the bare PLN CALL (step 4, NO `=>` in it)
+# and the OUTPUT as its own wrapped-stv ground step (step 5). On HEAD the
+# bare call fell to the ground-fact lane -> parse_fact raised "expression
+# must start with a symbol" -> HarnessError rc 1 -> the whole case aborted
+# ungraded (defect ledger item 2).
+CEILING_OVERHEAD = ('(Inheritance (Concept "ceiling") '
+                    '(Concept "overhead-surface-of-room"))')
+CEILING_OVERHEAD_HANDLE = "99088059d4c09b185e35fe42a0af6dc9"  # live wr3q
+WR3Q_STEP4_BARE_CALL = (
+    '(|- ((Inheritance (Concept "ceiling") (Concept "overhead-surface-of-room")) (stv 1.0 0.9)) '
+    '((Inheritance (Concept "ceiling") (Concept "overhead-surface-of-room")) (stv 0.9 0.8)))'
+)
+WR3Q_STEP5_OUTPUT = (
+    '((Inheritance (Concept "ceiling") (Concept "overhead-surface-of-room")) '
+    '(stv 0.9692307692307692 0.9285714285714286))'
+)
+WR3Q_ORIGINAL_TRACE = ";".join([
+    '(Inheritance (Concept "ceiling") $X)',
+    CEILING_OVERHEAD,
+    '(Inheritance (Concept "illuminated-room") (Concept "visible-surfaces"))',
+    WR3Q_STEP4_BARE_CALL,
+    WR3Q_STEP5_OUTPUT,
+])
+
+
+def _pipeline_step(segment):
+    """Segment-loop preprocessing exactly as _run applies it."""
+    return rs.normalize_expression(rs._strip_stv(segment.strip())[0])
+
+
+def test_operator_headed_bare_call_classifies_derivation():
+    # wr3q original step 4 VERBATIM (segment-loop preprocessing applied):
+    # kind derivation, atoms = the two stv-stripped premises (same
+    # expression -> same derived handle; BOTH entries present), no exception.
+    step = _pipeline_step(WR3Q_STEP4_BARE_CALL)
+    plan = rs._plan_step(step, 3, *rs._factories())
+    assert plan["kind"] == "derivation"
+    assert plan["step"] == step
+    assert plan["atoms"] == [
+        {"expr": CEILING_OVERHEAD, "handle": CEILING_OVERHEAD_HANDLE},
+        {"expr": CEILING_OVERHEAD, "handle": CEILING_OVERHEAD_HANDLE},
+    ]
+
+
+def test_operator_headed_trace_end_to_end():
+    # THE regression pin for the wr3q original abort: the COMPLETE verbatim
+    # original REASONING trace (all 5 steps) through the CLI path, mongo
+    # stubbed EMPTY (all atoms unstored -> vacuous pass): exit 0, NO harness
+    # error (HEAD: rc 1 "trace unparseable ... step 4 '(|- ...'").
+    with tempfile.TemporaryDirectory() as root:
+        repo, _ = _make_ledger_repo(root, [_ledger_entry()])
+        rc, payload, err = _run_case(
+            ["--trace", WR3Q_ORIGINAL_TRACE, "--ledger-repo", repo,
+             "--case", "original"])
+        assert rc == 0
+        assert "harness error" not in err
+        assert [r["classification"] for r in payload["per_expression"]] == [
+            "query_clause", "unstored", "unstored", "derivation", "unstored"]
+        assert payload["missing"] == [] and payload["conditions"] == []
+        derivation = payload["per_expression"][3]
+        assert derivation["stored"] is False and derivation["sources"] == []
+
+
+def test_operator_headed_with_arrow_keeps_arrow_split():
+    # A `(|~ <premises>) => <output>` step keeps the EXISTING `=>` split
+    # (grading-mirror fidelity): the call stays ONE component; a
+    # variable-bearing call is exempt. Live wr3q unsolvable step 5 VERBATIM
+    # — its GROUND premise must NOT leak into atoms (that would be the
+    # bare-call premise split, wrong on the `=>` side).
+    unsolvable_step = (
+        '(|~ ((Inheritance $X (Concept "Australia")) (stv 1.0 0.9)) '
+        '((Inheritance (Concept "Australia") (Concept "opaque")) (stv 1.0 0.9))) '
+        '=> ((Inheritance (Concept "opaque") (Concept "Australia")) '
+        '(stv 1.0 0.44751381215469616))'
+    )
+    plan = rs._plan_step(_pipeline_step(unsolvable_step), 4, *rs._factories())
+    assert plan["kind"] == "derivation"
+    output = '(Inheritance (Concept "opaque") (Concept "Australia"))'
+    assert plan["atoms"] == [{"expr": output, "handle": rs._parse_fact(
+        output, *rs._factories()).top_handle}]
+    # live wr3q false step 4 VERBATIM — same `=>` shape (Implication premise)
+    false_step = (
+        '(|~ ((Implication (Inheritance $X (Concept "enclosed-by-ceiling")) '
+        '(Inheritance $X (Concept "cannot-see-sky"))) (stv 1.0 0.9)) '
+        '((Inheritance (Concept "windowless-room") (Concept "enclosed-by-ceiling")) (stv 0.9 0.8))) '
+        '=> ((Inheritance (Concept "windowless-room") (Concept "cannot-see-sky")) '
+        '(stv 0.902 0.6480000000000001))'
+    )
+    plan = rs._plan_step(_pipeline_step(false_step), 3, *rs._factories())
+    assert plan["kind"] == "derivation"
+    output = '(Inheritance (Concept "windowless-room") (Concept "cannot-see-sky"))'
+    assert plan["atoms"] == [{"expr": output, "handle": rs._parse_fact(
+        output, *rs._factories()).top_handle}]
+
+
+def test_operator_headed_variable_premise_exempt():
+    # A bare call with a variable premise: the variable premise is skipped
+    # (exempt), the ground one is kept (on HEAD the whole step fell to the
+    # variable lane and BOTH premises were dropped).
+    step = (
+        '(|- ((Inheritance $X (Concept "ceiling")) (stv 1.0 0.9)) '
+        '((Inheritance (Concept "ceiling") (Concept "overhead-surface-of-room")) (stv 0.9 0.8)))'
+    )
+    plan = rs._plan_step(_pipeline_step(step), 1, *rs._factories())
+    assert plan["kind"] == "derivation"
+    assert plan["atoms"] == [
+        {"expr": CEILING_OVERHEAD, "handle": CEILING_OVERHEAD_HANDLE}]
+
+
 def _run_module_tests():
     passed = failed = 0
     for name in sorted(list(globals())):
