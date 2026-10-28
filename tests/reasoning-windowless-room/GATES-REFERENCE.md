@@ -179,3 +179,122 @@ History census (grade JSON `history_window`): `mode` (window mode; `full` = curr
 - v14 (2026-10-26): prompt-side full-provenance extraction records — every `source` line now records the complete archive receipt (sha + sha256 blob + repo path + raw-github URL) and SOURCES pairs are verbatim copies of recorded pairs; gates unchanged.
 - v15 (2026-10-26): case set reduced to `original`, `unsolvable`, `false` (removed `uncertainty`, `true`, `easy`, `difficult` + prompt files; nothing else relaxed); A-gate substance → single OpenAI-compatible LLM judge; `A_SKY`/`A_FABRICATED`/`A_NO_INABILITY` removed, `A_JUDGE_UNAVAILABLE` added (fail-safe).
 - v16 (2026-10-26): judge simplified to the single-prompt TRUE/FALSE form — ONE user message with the test question, the agent's answer, and the expected answer; verdict = first TRUE/FALSE token; configurable endpoint (`--judge-base-url/--judge-model/--judge-api-key/--judge-timeout`), defaults reuse the Omega agent's ASI:One asi1-ultra + runtime.env key; preflight smoke-checks the judge.
+
+---
+
+## 12. Item-0 gate audit — v17 transition (Phase 5)
+
+This section is the normative item-0 gate-condition audit (owner resolution 4, spec §8 item 0, `docs/issue-2-implementation-spec.md`): every condition code emitted in the grade paths (`grading.py`, cross-checked against its `history_parse.py` lanes and `run_benchmark.py` callers) is classified KEEP / MODIFY / RETIRE against the v4 source-ledger design (spec §2.6). The Phase 5 code milestones that follow implement this table; codes retired from the active paths disappear from §2–§10 at the corresponding code milestone. Preflight checks are OUT OF SCOPE here — they are audited in the Phase 5 preflight milestone (spec §8 item 7); run-level verdicts and exit-code semantics are unchanged (spec §2.6).
+
+**(a) Blocking condition codes (current grade path):**
+
+| Code | Classification | Current trigger (v15 source) | v4 disposition + rationale (spec anchor) |
+|---|---|---|---|
+| `A_MISSING` | KEEP | No `FINAL ANSWER (<case>)` line in the block, or no block at all (`grading.py:482`, `:586`). | Unchanged — the FINAL ANSWER line stays in the v4 answers block (spec §2.7) and `A_*` is listed unchanged (spec §2.6). |
+| `A_WRONG` | KEEP | The LLM judge replies FALSE for the answer line (`grading.py:490`). | Unchanged — the v16 judge contract is untouched by provenance (spec §2.6: `A_*` unchanged). |
+| `A_JUDGE_UNAVAILABLE` | KEEP | No judge configured (`grading.py:484`) or the judge call failed / replied unparseably (`grading.py:488`). | Unchanged — the fail-safe stays: an unjudged answer can never pass (spec §2.6: `A_*` unchanged). |
+| `Q_MISSING` | KEEP | No `QUERY:` line in the case block (`grading.py:600`; missing-block shorthand `:586`). | Unchanged — the QUERY line stays (spec §2.7); `Q_*` unchanged (spec §2.6). |
+| `Q_NOT_QUERY_FIRST` | KEEP | `QUERY:` line appears after the FINAL ANSWER line (`grading.py:609`). | Unchanged (spec §2.6: `Q_*` unchanged). |
+| `Q_PLACEHOLDER` | KEEP | Query empty or contains `$_` (`grading.py:375`); also emitted when the quoted query is absent from history while window placeholder calls exist (`grading.py:632`). | Unchanged — the history-collapse defect it guards is exactly why the query attestation lanes stay (spec §2.6: `Q_*` unchanged; resolution 6 keeps the query lanes). |
+| `Q_DEGENERATE_PATTERN` | KEEP | No `$variable` in the query (`grading.py:377`) or no non-variable literal after variable-stripping (`grading.py:387`). | Unchanged (spec §2.6: `Q_*` unchanged). |
+| `Q_NOT_IN_HISTORY` | KEEP | Quoted query absent from the case-window history events and the attestation lane did not prove it (`grading.py:630`). | Unchanged — its informational substitute and the query lanes survive (spec §2.6: `Q_*`; resolution 6). |
+| `Q_NO_RECEIPT` | KEEP | No `DAS_RETRIEVE_OK ... count=<n>` receipt line in the block (`grading.py:636`). | Unchanged — the das-retrieve receipt contract is untouched (spec §2.6: `Q_*`; §8 item 10 changes only the skill description). |
+| `Q_REISSUE_ERROR` | KEEP | No re-issue function wired (`grading.py:643`) or the harness re-issue errored (`grading.py:647`). | Unchanged (spec §2.6: `Q_*` unchanged). |
+| `Q_REISSUE_MISMATCH` | KEEP | Re-issue count ≠ quoted receipt count (`grading.py:658`). | Unchanged (spec §2.6: `Q_*` unchanged). |
+| `Q_ABSENCE_UNPROVEN` | KEEP | Unsolvable: quoted ≠ 0 or re-issue ≠ 0 (`grading.py:654`, `:661`); knowledge case: quoted `count=0` (`grading.py:656`). | Unchanged (spec §2.6: `Q_*` unchanged). |
+| `E_NO_EXTRACTION` | KEEP | Facts index supplied but empty (`grading.py:674`). | Unchanged (spec §2.6 explicit) — the extraction record survives v4; only its `source …` record lines change (spec §2.7). |
+| `E_NO_INGEST` | MODIFY | First case only: `window_persist_receipts == 0` OR `window_archive_receipts == 0`, minus the facade-log attested branch (`grading.py:676-692`). | RECEIPTS-ONLY (spec §2.6; resolution 6; §8 item 2): blocking iff first case AND `window_persist_receipts == 0`; the ARCHIVE-OK half and the attested branch (`:684-690`) are deleted — `BRIDGE-PERSIST-OK` receipts are extractable from history windows (`history_parse.py:119-121`), so no log census is needed. |
+| `E_NO_FACTS` | KEEP | Knowledge case block has no non-empty `FACTS:` line (`grading.py:697`). | Unchanged (spec §2.6 explicit) — the FACTS line stays and becomes the reconstruction script's aligned input (spec §2.7, §8 item 4). |
+| `E_FACTS_NOT_IN_INDEX` | KEEP | A `FACTS:` expression is not verbatim in the extraction record (`grading.py:701`). | Unchanged (spec §2.6 explicit) — the record's `expr` lines persist as `expr <expression> top=<handle>` (spec §2.7). |
+| `E_LITERAL_NOT_EXTRACTED` | KEEP | A quoted literal of the executed query is not from the extracted vocabulary (`grading.py:709`). | Unchanged (spec §2.6 explicit). |
+| `R_MISSING` | KEEP | No `REASONING:` line in the block (`grading.py:748`). | Unchanged (spec §2.6: `R_*`) — the executed trace is the load-bearing direct evidence under the resolution-6 design principle (spec §2.6). |
+| `R_NOT_METTA` | KEEP | Fewer than 2 s-expression steps or prose segments in the trace (`grading.py:753`). | Unchanged (spec §2.6: `R_*`). |
+| `R_NOT_EXECUTED` | KEEP | Knowledge case: neither `exec` outputs in the record nor an `(stv …)` output in the trace (`grading.py:771`). | Unchanged (spec §2.6: `R_*`) — exactly the "direct verification evidence of the MeTTa reasoning trace" the owner calls load-bearing (resolution 6). |
+| `R_TRACE_NOT_GROUNDED` | KEEP | Step 0 ≠ the executed query clause or a non-first step fails atom-wise grounding (`grading.py:821`). | Unchanged (spec §2.6: `R_*`). |
+| `P_MISSING` | MODIFY | Knowledge case with no citations parsed from the SOURCES line (`grading.py:826-828`). | Redefined (spec §2.6; §8 item 4): knowledge case where reconstruction finds no used stored facts carrying provenance attributes (nothing citable); unsolvable exempt. The SOURCES line is removed (spec §2.7), so "missing" is decided by the deterministic chain, not by quoted citations. |
+| `P_UNRESOLVED:<COND>` | MODIFY | A resolved citation's condition list is non-empty; each COND emitted bare (`grading.py:839`), CONDs produced by `provenance_check.resolve_citation` (`run_benchmark.py:979` sequential / `:1336` batch). | v4 form becomes `P_UNRESOLVED:<expr12>:<COND>` with the new 8-value COND set (spec §2.6); conditions come from the reconstruction script's JSON mapped by `grade_case` (spec §8 item 4). Per-COND dispositions below. |
+
+**`P_UNRESOLVED` COND values (current set — `provenance_check.py`, emitted via `grading.py:839`):**
+
+| COND | Classification | Current trigger (v15 source) | v4 disposition + rationale (spec anchor) |
+|---|---|---|---|
+| `COMMIT_NOT_IN_REPO` | KEEP | `git cat-file -e <sha>^{commit}` fails (`provenance_check.py:77`). | Carried over verbatim — commit-exists is step 1 of the v4 chain (spec §2.4) and a §2.6 COND-set member. |
+| `COMMIT_UNREADABLE` | KEEP | The `git show --name-only` call errors (`provenance_check.py:83`). | Carried over verbatim — ungradable evidence is failed evidence (spec §2.6 COND set). |
+| `COMMIT_NOT_AN_ARCHIVE_COMMIT` | MODIFY | No `sources/` blob among the commit's changes (`provenance_check.py:88`) or `index.jsonl` not among them (`:131`). | Renamed/split per spec §2.6: `COMMIT_NOT_A_LEDGER_COMMIT` (ledger-commit shape) plus `COMMIT_TOUCHES_OTHER_FILES` — matching the v4 `verify_commit` chain (spec §2.3, §2.4). |
+| `COMMIT_MULTIPLE_SOURCE_BLOBS` | RETIRE | More than one `sources/` blob in the commit (`provenance_check.py:92`). | Retires with the old store (spec §2.6); the v4 unambiguity invariant is `COMMIT_ADDS_NOT_ONE_LINE` (spec §2.2). Survives only inside the standalone unwired `provenance_check.py` (resolution 4; spec §13 item 2). |
+| `INDEX_UNREADABLE_AT_COMMIT` | RETIRE | `git show <sha>:index.jsonl` fails (`provenance_check.py:99`). | `INDEX_*` retires with the old store (spec §2.6); the v4 entry-parse failure is `ENTRY_PARSE_FAILED`. Standalone unwired survival only (resolution 4). |
+| `INDEX_ENTRY_MISSING_FOR_BLOB` | RETIRE | No index entry for the blob path (`provenance_check.py:114`). | `INDEX_*` retires (spec §2.6) — the ledger entry identity is the `(ref, sha256)` pair; no index exists under v4 (spec §2.2). Standalone unwired survival only (resolution 4). |
+| `BLOB_UNREADABLE_AT_COMMIT` | RETIRE | `git show <sha>:<blob>` fails (`provenance_check.py:122`). | `BLOB_*` retires (spec §2.6) — no content blobs exist under ledger-only v4 (D1, spec §10). Standalone unwired survival only (resolution 4). |
+| `BLOB_SHA_MISMATCH` | RETIRE | sha256(blob at commit) ≠ index entry's `blob_sha256` (`provenance_check.py:126`). | `BLOB_*` retires (spec §2.6); the tamper evidence survives as the harness byte-compare (`sha256(background file) == entry.sha256`, spec §8 item 4; §11 residual risk 2) plus `REF_SHA_MISMATCH`. Standalone unwired survival only (resolution 4). |
+| `URL_MISMATCH` | RETIRE | Index entry url ≠ cited url (`provenance_check.py:137`). | Retires explicitly (spec §2.6); re-pairing detection moves to `REF_SHA_MISMATCH` (entry `(ref, sha256)` vs atom attrs, spec §2.3) plus informational `P_SOURCE_SET_MISMATCH`. Standalone unwired survival only (resolution 4). |
+
+**(b) Informational condition codes:**
+
+| Code | Classification | Current trigger (v15 source) | v4 disposition + rationale (spec anchor) |
+|---|---|---|---|
+| `Q_ATTESTED_VIA_ACCESS_LOG` | KEEP | Quoted query absent from window history but `qe_pattern_match` AND `access_count >= 1` (`grading.py:628`). | Unchanged (spec §2.6: `Q_*`); the query lanes serving it are explicitly kept (resolution 6; spec §8 item 3) — the history-collapse defect persists under v4. |
+| `E_INGEST_ATTESTED_VIA_FACADE_LOG` | RETIRE | First case, both receipt censuses zero, but the facade log shows ≥1 `POST /v1/write` AND ≥1 `POST /v1/archive` from the agent IP (`grading.py:690`). | Retired entirely (spec §2.6; resolution 6) — log-census ingest attestation is dropped; `E_NO_INGEST` becomes receipts-only. The query lanes survive because they serve the DIFFERENT gate `Q_ATTESTED_VIA_ACCESS_LOG`. Survives nowhere — full row in (c). |
+| `E_INDEXED_NOT_PERSISTED` | KEEP | A recorded index expression's DAS presence probe resolves to zero (`grading.py:733`). | Unchanged (spec §2.6 explicit) — direct DAS-side verification, not a log census; consistent with the resolution-6 design principle. |
+
+**(c) Retired codes — where they survive:**
+
+| Code | Classification | Current trigger (v15 source) | v4 disposition + survival (spec anchor) |
+|---|---|---|---|
+| `E_INGEST_ATTESTED_VIA_FACADE_LOG` | RETIRE | Currently informational (§2): facade-log ingest attestation substitutes for blocking `E_NO_INGEST` (`grading.py:684-690`). | Dropped entirely (resolution 6; spec §2.6, §8 item 2 deletes the attested branch). Survives nowhere. |
+| `P_UNRESOLVED:<sha12>:NOT_CHECKED` | RETIRE | A block-cited `(sha, url)` pair is absent from the harness-resolved `citation_checks` set (`grading.py:836`; emitted from the shared `gate_case`, so reachable from both the sequential path and the batch lane — in the sequential path a defensive tripwire only, since `citation_checks` is built from the same `parse_citations(block.sources_raw)` the gate re-parses, `run_benchmark.py:964-980`). | Retires from the active path with its feeders: the SOURCES-line citation parse (`grading.py:825-836`) is rewired to the reconstruction script (spec §8 item 4; §2.7 removes the SOURCES line) and the batch citation lane retires (resolution 4; spec §13 item 2). The reconstruction chain enumerates every used stored fact itself, so "cited outside the resolution set" has no v4 analog. Survives nowhere. |
+| `COMMIT_MULTIPLE_SOURCE_BLOBS` | RETIRE | >1 `sources/` blob in the commit (`provenance_check.py:92`). | Survives only inside `provenance_check.py` as a STANDALONE UNWIRED legacy tool — no harness import remains after the rewire (resolution 4; spec §2.6, §13 item 2). |
+| `INDEX_UNREADABLE_AT_COMMIT` | RETIRE | `git show <sha>:index.jsonl` fails (`provenance_check.py:99`). | Same standalone-unwired survival (resolution 4; spec §2.6 `INDEX_*`). |
+| `INDEX_ENTRY_MISSING_FOR_BLOB` | RETIRE | No index entry for the blob path (`provenance_check.py:114`). | Same standalone-unwired survival (resolution 4; spec §2.6 `INDEX_*`). |
+| `BLOB_UNREADABLE_AT_COMMIT` | RETIRE | `git show <sha>:<blob>` fails (`provenance_check.py:122`). | Same standalone-unwired survival (resolution 4; spec §2.6 `BLOB_*`). |
+| `BLOB_SHA_MISMATCH` | RETIRE | sha256(blob) ≠ index `blob_sha256` (`provenance_check.py:126`). | Same standalone-unwired survival (resolution 4; spec §2.6 `BLOB_*`). |
+| `URL_MISMATCH` | RETIRE | Index entry url ≠ cited url (`provenance_check.py:137`). | Same standalone-unwired survival (resolution 4; spec §2.6). |
+
+**(d) New v4 codes (v17):**
+
+| Code | Classification | Current trigger (v15 source) | v4 disposition + rationale (spec anchor) |
+|---|---|---|---|
+| `H_MISSING` | ADD — blocking (D4) | — (new in v17) | Knowledge case: no (or empty) `HANDLES:` line in the block (spec §2.6; §8 item 5). |
+| `H_COUNT_MISMATCH` | ADD — blocking (D4) | — (new in v17) | HANDLES token count ≠ FACTS expression count (spec §2.6; §8 item 5). |
+| `H_MISMATCH` | ADD — blocking (D4) | — (new in v17) | A claimed handle ≠ the deterministically re-derived `top_handle` of the aligned FACTS expression — fabrication tripwire; handles are re-derivable client-side, so the claim is a cross-check, not a lookup dependency (spec §2.6; §2.4 chain; D4). |
+| `P_SOURCE_SET_MISMATCH` | ADD — informational | — (new in v17) | Sources attached to the case's facts ⊄ the case background source set — semantic-misattribution visibility (spec §2.6; §8 item 4); joins `INFORMATIONAL_CONDITIONS` in place of the retired `E_INGEST_ATTESTED_VIA_FACADE_LOG`. |
+| `P_UNRESOLVED:…:COMMIT_NOT_IN_REPO` | carried over (KEEP) | `provenance_check.py:77` | v4 chain step 1: commit not found in the LEDGER repo (spec §2.4, §2.6). |
+| `P_UNRESOLVED:…:COMMIT_UNREADABLE` | carried over (KEEP) | `provenance_check.py:83` | The cat-file/show call errors (spec §2.6 COND set). |
+| `P_UNRESOLVED:…:COMMIT_NOT_A_LEDGER_COMMIT` | renamed (MODIFY) | `provenance_check.py:88`, `:131` | Replaces `COMMIT_NOT_AN_ARCHIVE_COMMIT`: changed paths do not fit the ledger-commit shape (spec §2.3 `verify_commit`; §2.6). |
+| `P_UNRESOLVED:…:COMMIT_TOUCHES_OTHER_FILES` | ADD | — (new in v17) | Commit touches files besides `SOURCE-LEDGER.json` (spec §2.3, §2.6). |
+| `P_UNRESOLVED:…:COMMIT_ADDS_NOT_ONE_LINE` | ADD | — (new in v17) | The commit's `SOURCE-LEDGER.json` diff adds ≠ exactly one entry line (spec §2.2 +1-line invariant; §2.6). |
+| `P_UNRESOLVED:…:ENTRY_PARSE_FAILED` | ADD | — (new in v17) | The added line does not parse as an entry with exactly `{ref, sha256, entry_date}` (spec §2.3, §2.6). |
+| `P_UNRESOLVED:…:REF_SHA_MISMATCH` | ADD | — (new in v17) | Entry `(ref, sha256)` ≠ the atom's provenance attributes (spec §2.3, §2.6) — replaces the INDEX/BLOB/URL pairing checks. |
+| `P_UNRESOLVED:…:NO_PROVENANCE_ATTRS` | ADD | — (new in v17) | A stored link (re-derived handle hits `db.links`) carries no provenance attributes (spec §2.4 rule (a); §2.6); pre-migration atoms resolve via `--legacy-repo` as informational-only, never blocking (resolution 4). |
+
+**(e) Attestation-lane states + census fields:**
+
+| Field | Classification | Current trigger (v15 source) | v4 disposition + rationale (spec anchor) |
+|---|---|---|---|
+| `attestation.agent_ip` | KEEP | Resolved agent container IP recorded per case (`run_benchmark.py:322`, `:325`). | Structural bound for the kept query lanes (`access_count` counts `POST /v1/query` from this IP) — resolution 6 keeps the query lanes (spec §8 item 3). |
+| `attestation.access_count` | KEEP | 2xx `POST /v1/query` count to the agent IP in the window (`run_benchmark.py:326`). | Query lane — serves `Q_ATTESTED_VIA_ACCESS_LOG`; explicitly kept (resolution 6; spec §8 item 3, §2.6). |
+| `attestation.qe_pattern_match` | KEEP | Query-engine log carried the block's exact pattern in the window (`run_benchmark.py:327`). | Query lane — kept (resolution 6; spec §8 item 3). |
+| `attestation.write_count` | RETIRE | 2xx `POST /v1/write` count to the agent IP (`run_benchmark.py:328-329`). | Write census dropped with the ingest-attestation feature (resolution 6; spec §8 item 3); `/v1/write` itself survives as the core v4 write path — only the log census goes. |
+| `attestation.archive_count` | RETIRE | 2xx `POST /v1/archive` count to the agent IP (`run_benchmark.py:330-331`). | Archive census dropped (resolution 6); the `/v1/archive` route itself is deleted in Phase 1 (spec §2.3). |
+| `attestation.source_count` | RETIRE (never wired) | — (does not exist in v15; the would-be `/v1/source` census). | The census rewire is dropped — no `source_count` (resolution 6; spec §8 item 3). |
+| `attestation.window` | KEEP | `[case setup restart, grade time]` bounds every lane (`run_benchmark.py:332`). | Structural bound for the kept query lanes (spec §8 item 3). |
+| `history_window.attested_retrieve_calls` | KEEP | Grade-JSON echo of `access_count` (`run_benchmark.py:1061`). | Query census field kept (spec §8 item 3: query fields kept). |
+| `history_window.attested_write_calls` | RETIRE | Grade-JSON echo of `write_count` (`run_benchmark.py:1062`). | Ingest census field removed (spec §8 item 3). |
+| `history_window.attested_archive_calls` | RETIRE | Grade-JSON echo of `archive_count` (`run_benchmark.py:1063`). | Ingest census field removed (spec §8 item 3 cites this line). |
+| `history_window.persist_receipts` | KEEP | Count of in-window `BRIDGE-PERSIST-OK` receipts (`run_benchmark.py:1058`, via `history_parse.py:119-121`). | Feeds `window_persist_receipts` — the receipts-only `E_NO_INGEST` evidence (spec §2.6; §8 item 2). |
+| `history_window.archive_receipts` | RETIRE | Count of in-window `ARCHIVE-OK` receipts (`run_benchmark.py:1059`). | Removed (spec §8 item 3 cites this line); `ARCHIVE-OK` retires with the archive skill (D7; spec §2.5). |
+| `history_window.add_atom_shas` | RETIRE | In-window add-atom `git:<sha>` tokens (`run_benchmark.py:1060`, via `history_parse.py:110-116`). | The lane retires from the v4 grade path (spec §8 item 6; resolution 4); v4 write receipts carry `top=<handle>`, not git shas (spec §2.5). |
+| `history_window.mode` / `.retrieve_calls` / `.retrieve_args` / `.placeholder_calls` | KEEP | Window mode + real das-retrieve args + placeholder census (`run_benchmark.py:1054-1057`). | Serve the Q-gate history checks (`Q_NOT_IN_HISTORY`, `Q_PLACEHOLDER`) — `Q_*` unchanged (spec §2.6). |
+
+**(f) history_parse.py lanes:**
+
+| Lane | Classification | Current trigger (v15 source) | v4 disposition + rationale (spec anchor) |
+|---|---|---|---|
+| `window_from_texts` | KEEP | Slices history to the case window from pre/post snapshots (`history_parse.py:38-55`). | The window is the Q-gate's evidence boundary and the receipts census's scope — unchanged under v4 (spec §2.6: receipts are extracted "from history windows"). |
+| `normalize_query` | KEEP | Reduces a das-retrieve arg (raw or JSON payload) to the query pattern (`history_parse.py:73-90`). | Used by the Q-gate (`grading.py:98`; `run_benchmark.py:1000`) — `Q_*` unchanged (spec §2.6). |
+| `extract_retrieve_args` | KEEP | Real das-retrieve args from the window (`history_parse.py:93-98`). | Feeds `history_queries` → `Q_NOT_IN_HISTORY` (`grading.py:621`); `Q_*` unchanged (spec §2.6). |
+| `count_placeholder_retrieves` | KEEP | Counts `$_`-placeholder das-retrieve calls (`history_parse.py:101-107`). | Feeds `placeholder_calls` → `Q_PLACEHOLDER` (`grading.py:632`); `Q_*` unchanged (spec §2.6). |
+| `extract_persist_receipts` | KEEP | `BRIDGE-PERSIST-OK` receipt lines from the window (`history_parse.py:119-121`). | Load-bearing for receipts-only `E_NO_INGEST` — spec §2.6 cites this exact site; §8 item 2. |
+| `extract_add_atom_shas` | RETIRE (from the v4 grade path) | `git:<sha>` tokens from add-atom lines (`history_parse.py:110-116`); callers `run_benchmark.py:955` (sequential) / `:1312` (batch). | Retires from the v4 grade path — kept for legacy history texts, no v4 grade-path callers (spec §8 item 6; resolution 4); v4 receipts carry `top=<handle>` (spec §2.5). |
+| `extract_archive_receipts` | RETIRE (from the v4 grade path) | `ARCHIVE-OK` receipt lines (`history_parse.py:124-126`); callers `run_benchmark.py:954` (sequential) / `:1311` (batch). | Same — no v4 grade-path callers (spec §8 item 6; resolution 4); `ARCHIVE-OK` retires with the archive skill (D7; spec §2.5). |
+
+**Audit tally:** 36 audited rows over the current surface — 27 distinct condition codes (3 `A_*`, 10 `Q_*`, 7 `E_*`, 3 `P_*`, 4 `R_*`), where the `P_UNRESOLVED:<COND>` family expands to 9 concrete COND values — classified **24 KEEP / 4 MODIFY / 8 RETIRE**. New in v17: 4 condition codes (`H_MISSING`, `H_COUNT_MISMATCH`, `H_MISMATCH` blocking per D4; `P_SOURCE_SET_MISMATCH` informational) and the 8-value `P_UNRESOLVED` COND set (2 carried over, 1 renamed, 5 new). Attestation/census and history-parse lanes: 21 fields classified (14 + 7).
