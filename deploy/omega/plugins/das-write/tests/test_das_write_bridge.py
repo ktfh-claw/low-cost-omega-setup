@@ -16,6 +16,7 @@ from das_write_bridge import (
     DEFAULT_ORIGIN,
     MAX_FETCH_CHARS,
     MAX_METTA_CHARS,
+    REF_REQUIRED,
     REQUEST_TIMEOUT_SECONDS,
     STATUS_OK,
     STATUS_REMOVE_UNSUPPORTED,
@@ -336,6 +337,83 @@ class TestSizeCap:
         assert len(payload) == MAX_METTA_CHARS
         result = intercept(f"(add-atom &persistent {payload})")
         assert result[0].startswith(STATUS_OK)
+
+
+# ---------------------------------------------------- dasWriteRequireRef gate
+
+class TestRequireRefGate:
+    """dasWriteRequireRef=1: suffix-less (v1) writes never reach the facade.
+
+    A v1 write carries no provenance attrs and produces no ledger commit
+    (wr3q root-cause: two URL-less atoms persisted unprovenanced and
+    invisible to cleanup). Under the opt-in the plugin rejects the write
+    with the actionable REF_REQUIRED status BEFORE the size checks, so the
+    guidance always wins. Default (unset / any other value) is permissive —
+    upstream v1 behavior preserved (spec decision D3).
+    """
+
+    def test_v1_rejected_with_exact_status(self, enabled, spy):
+        enabled["dasWriteRequireRef"] = "1"
+        result = intercept("(add-atom &persistent (Concept foo))")
+        assert result == [STATUS_WRITE_FAILED + ": " + REF_REQUIRED]
+        # Never reaches the facade — no DAS contact, no ledger append.
+        assert spy.calls == []
+
+    def test_stv_alone_rejected_with_exact_status(self, enabled, spy):
+        # The stv-only suffix parses to ref=None — same gate.
+        enabled["dasWriteRequireRef"] = "1"
+        result = intercept("(add-atom &persistent (Concept foo) (stv 1.0 0.9))")
+        assert result == [STATUS_WRITE_FAILED + ": " + REF_REQUIRED]
+        assert spy.calls == []
+
+    def test_require_ref_wins_over_size_check(self, enabled, spy):
+        # Rejection BEFORE the size check — the guidance always wins,
+        # even for an oversized suffix-less expression.
+        enabled["dasWriteRequireRef"] = "1"
+        payload = "(Concept " + "x" * MAX_METTA_CHARS + ")"
+        result = intercept(f"(add-atom &persistent {payload})")
+        assert result == [STATUS_WRITE_FAILED + ": " + REF_REQUIRED]
+        assert spy.calls == []
+
+    def test_require_ref_accepts_yaml_int_one(self, enabled, spy):
+        # config.yaml carries a real int 1, not the string "1"
+        enabled["dasWriteRequireRef"] = 1
+        result = intercept("(add-atom &persistent (Concept foo))")
+        assert result == [STATUS_WRITE_FAILED + ": " + REF_REQUIRED]
+        assert spy.calls == []
+
+    @pytest.mark.parametrize("value", ["", "0", "true", "yes", "on", "2"])
+    def test_non_one_values_keep_v1_permissive(self, enabled, spy, value):
+        # Mirror of the dasWriteEnabled exact-opt-in semantics: anything
+        # but "1" keeps the upstream permissive default (decision D3).
+        enabled["dasWriteRequireRef"] = value
+        spy.response = _ok_response()
+        result = intercept("(add-atom &persistent (Concept foo))")
+        assert result[0].startswith(STATUS_OK)
+        assert len(spy.calls) == 1
+
+    def test_v1_permissive_by_default(self, enabled, spy):
+        # Key entirely unset — stock v1 plain write, provenance-free.
+        spy.response = _ok_response()
+        result = intercept("(add-atom &persistent (Concept foo))")
+        assert result[0].startswith(STATUS_OK)
+        assert len(spy.calls) == 1
+        assert "provenance" not in spy.calls[0]["data"]
+
+    def test_v3_write_unaffected_by_gate(self, enabled, router):
+        # The gate only closes the suffix-less lane; a cited v3 write
+        # flows through the full provenance path unchanged.
+        enabled["dasWriteRequireRef"] = "1"
+        result = intercept(_v3_text())
+        assert result == [STATUS_OK + f": verified=2 top={TOP_HANDLE}"]
+        assert [call[0] for call in router.calls] == ["fetch", "source", "write"]
+
+    def test_gate_inactive_when_bridge_disabled(self, cfg, spy):
+        # dasWriteRequireRef=1 but the bridge is not enabled: no
+        # interception at all — stock behavior, no facade contact.
+        cfg["dasWriteRequireRef"] = "1"
+        assert intercept("(add-atom &persistent (Concept foo))") == []
+        assert spy.calls == []
 
 
 # --------------------------------------------------------- origin validation

@@ -25,7 +25,7 @@ contradicting the agent's intent).
 ## Grammar (v3 + v1)
 
 ```
-(add-atom &persistent <balanced-expression>)                                     ; v1
+(add-atom &persistent <balanced-expression>)                                     ; v1 (config-gated)
 (add-atom &persistent <balanced-expression> "<http(s)-url>")                    ; v3
 (add-atom &persistent <balanced-expression> "<abs-container-path>")             ; v3 (path refs)
 (add-atom &persistent <balanced-expression> "<source-ref>" (stv <s> <c>))       ; v3 + truth value
@@ -41,9 +41,13 @@ contradicting the agent's intent).
 - **v2 is retired** — a quoted `git:<sha>` citation token (alone or after
   a URL) is rejected with the actionable status
   `git citations are no longer accepted — pass the source reference; archiving is automatic`.
-- **v1 (suffix-less) is unchanged** — a plain, unprovenanced write
-  (canaries and dormant prompts keep working; benchmark gates enforce
-  refs on graded facts).
+- **v1 (suffix-less) is config-gated** — permissive by default (canaries
+  and dormant prompts keep working; benchmark gates enforce refs on
+  graded facts); with `dasWriteRequireRef=1` (this deployment) a
+  suffix-less write is rejected with the actionable status
+  `a source reference is required on persistent writes — append the
+  source URL or allowed path after the expression, e.g. (add-atom
+  &persistent <expr> "<ref>")` and never reaches DAS.
 
 ## Transparent provenance (the two-POST flow)
 
@@ -82,6 +86,7 @@ that reaches the plugin):
 | `dasWriteEnabled` | opt-in gate — value `1` enables the interception path; any other value leaves stock behavior untouched | unset | container command line `dasWriteEnabled=1`, config.yaml overlay, or env `OMEGA_dasWriteEnabled=1` |
 | `dasWriteOrigin` | write-bridge facade origin (strict `http://host:port`, no path/query/userinfo) | `http://write-bridge:8080` | container command line, config.yaml overlay, or env `OMEGA_dasWriteOrigin=...` |
 | `dasWriteSourceRoots` | optional; comma/whitespace-separated **absolute container-path prefixes** enabling path refs — a path ref is read only when `os.path.realpath(ref)` resolves inside one of the roots | unset (path refs disabled; URL refs only) | container command line, config.yaml overlay, or env `OMEGA_dasWriteSourceRoots=...` |
+| `dasWriteRequireRef` | opt-in gate — value `1` requires a source ref on every persistent write (suffix-less v1 writes are rejected with the actionable REF_REQUIRED status); any other value keeps the v1 permissive default | unset (permissive) | container command line `dasWriteRequireRef=1`, config.yaml overlay, or env `OMEGA_dasWriteRequireRef=1` |
 
 The Python module (`das_write_bridge.py`) re-checks `dasWriteEnabled` on
 every call (defensive double gate — the MeTTa wrapper checks once at
