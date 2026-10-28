@@ -108,7 +108,13 @@ def count_placeholder_retrieves(window_text: str) -> int:
 
 
 def extract_add_atom_shas(window_text: str) -> list[str]:
-    """Extract git:<sha> provenance citations from add-atom calls."""
+    """Extract git:<sha> provenance citations from add-atom calls.
+
+    LEGACY-format parser (spec §8 item 6; resolution 4): retained for
+    historical/legacy history texts only — NOT called by the v4 grade
+    path. v4 write receipts carry ``top=<handle>``, not ``git:`` shas
+    (spec §2.5).
+    """
     shas: list[str] = []
     for line in window_text.splitlines():
         if "add-atom" in line or "add_atom" in line:
@@ -122,5 +128,10 @@ def extract_persist_receipts(window_text: str) -> list[str]:
 
 
 def extract_archive_receipts(window_text: str) -> list[str]:
-    """Extract ARCHIVE-OK receipt lines from the window."""
+    """Extract ARCHIVE-OK receipt lines from the window.
+
+    LEGACY-format parser (spec §8 item 6; resolution 4): retained for
+    historical/legacy history texts only — NOT called by the v4 grade
+    path. ARCHIVE-OK retired with the archive skill (spec §2.5).
+    """
     return [ln.strip() for ln in window_text.splitlines() if "ARCHIVE-OK" in ln]

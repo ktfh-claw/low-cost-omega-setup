@@ -1064,8 +1064,6 @@ def grade_case(args) -> int:
     history_queries = history_parse.extract_retrieve_args(window_text)
     placeholder_calls = history_parse.count_placeholder_retrieves(window_text)
     persist_receipts = history_parse.extract_persist_receipts(window_text)
-    archive_receipts = history_parse.extract_archive_receipts(window_text)
-    add_atom_shas = history_parse.extract_add_atom_shas(window_text)
 
     facts_index_text = _read_facts_index(args)
     facts_index = grading_mod.parse_facts_index(facts_index_text)
@@ -1139,8 +1137,6 @@ def grade_case(args) -> int:
             "retrieve_args": history_queries[:20],
             "placeholder_calls": placeholder_calls,
             "persist_receipts": len(persist_receipts),
-            "archive_receipts": len(archive_receipts),
-            "add_atom_shas": add_atom_shas[:20],
             "attested_retrieve_calls": attestation["access_count"],
         },
         "facts_index_size": len(facts_index),
@@ -1386,8 +1382,6 @@ def grade(args) -> int:
     history_queries = history_parse.extract_retrieve_args(window_text)
     placeholder_calls = history_parse.count_placeholder_retrieves(window_text)
     persist_receipts = history_parse.extract_persist_receipts(window_text)
-    archive_receipts = history_parse.extract_archive_receipts(window_text)
-    add_atom_shas = history_parse.extract_add_atom_shas(window_text)
 
     facts_index_text = _read_facts_index(args)
     facts_index = grading_mod.parse_facts_index(facts_index_text)
@@ -1449,8 +1443,6 @@ def grade(args) -> int:
             "retrieve_args": history_queries[:20],
             "placeholder_calls": placeholder_calls,
             "persist_receipts": len(persist_receipts),
-            "archive_receipts": len(archive_receipts),
-            "add_atom_shas": add_atom_shas[:20],
         },
         "facts_index_size": len(facts_index),
         "reconstruction": reconstruction_by_case,
