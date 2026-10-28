@@ -105,7 +105,9 @@ def test_answer_block_contract_unchanged():
 def test_trace_deliverable_contract():
     t = _template()
     # step-4 trace shape matches the R-gate parser contract
-    assert "the question clause (the exact QUERY you executed)" in t
+    # wr3p iterate (2026-10-28): step-0 verbatim discipline — the first
+    # trace step is the question clause EXACTLY as executed, bare
+    assert "the question clause EXACTLY as you executed it" in t
     assert "copied VERBATIM from your extraction record" in t
     # v6 executed-trace standard (scenario A/A2 lesson, 2026-10-25):
     # the reasoning must be EXECUTED via the metta skill — the operator
@@ -117,7 +119,7 @@ def test_trace_deliverable_contract():
     # trace persisted to the extraction record (working memory)
     assert "starting with `trace:`" in t
     # unsolvable-case trace form (shape kept, grounding exempt)
-    assert "the question clause followed by the reverse-direction probe clause(s)" in t
+    assert "the bare question clause followed by the reverse-direction probe clause(s)" in t
 
 
 def test_step5_deliverable_first_write():
