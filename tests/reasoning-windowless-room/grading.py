@@ -39,9 +39,14 @@ only if EVERY gate condition holds:
                         case still needs the trace shape (question clause +
                         the count=0 absence probes) but is exempt from index
                         grounding (no facts to ground).
-  P-gate  (provenance): every source the case cites resolves to the
-                        provenance git repo (commit -> blob -> index entry
-                        -> sha256 -> url).
+  P-gate  (provenance): deterministic source reconstruction (v17): the
+                        reconstruct_sources.py JSON payload (trace expr ->
+                        handle -> mongo custom_attributes -> ledger
+                        commit -> ledger entry) maps to
+                        P_UNRESOLVED:<expr12>:<COND> / P_MISSING codes,
+                        the H_* HANDLES cross-check rides in verbatim, and
+                        sources outside the case's background set are the
+                        informational P_SOURCE_SET_MISMATCH.
 
 All grading EXCEPT the answer-substance call is deterministic: regex/keyword
 parsing, string matching, and HTTP re-issue against the read-proxy. The one
@@ -85,9 +90,17 @@ Condition codes (machine-readable failure reasons):
   R_TRACE_NOT_GROUNDED    a trace step is neither in the extraction record
                           nor the executed query clause (not an existing
                           atom — fabricated or paraphrased reasoning)
-  P_MISSING               knowledge case cites no git:<sha> source
-  P_UNRESOLVED:<COND>     cited source failed provenance resolution (see
-                          provenance_check.py condition codes)
+  P_MISSING               knowledge case: reconstruction finds no used
+                          stored facts carrying any provenance attributes
+                          (nothing citable; unsolvable exempt)
+  P_UNRESOLVED:<expr12>:<COND>
+                          a used stored fact's source failed resolution
+                          (COND per GATES-REFERENCE §12: the 8-value set)
+  H_MISSING / H_COUNT_MISMATCH / H_MISMATCH
+                          the HANDLES cross-check failed (blocking, D4)
+  P_SOURCE_SET_MISMATCH   informational: a source ref attached to the
+                          case's facts is outside the case's background
+                          source set
 """
 from __future__ import annotations
 
@@ -106,6 +119,7 @@ FINAL_ANSWER_RE = re.compile(r"^FINAL ANSWER \(([a-z0-9-]+)\):\s*(.*)$", re.MULT
 QUERY_LINE_RE = re.compile(r"^QUERY:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 RECEIPT_RE = re.compile(r"DAS_RETRIEVE_OK[^\n]*?count=(\d+)")
 FACTS_LINE_RE = re.compile(r"^FACTS:[ \t]*(.*)$", re.MULTILINE)
+HANDLES_LINE_RE = re.compile(r"^HANDLES:[ \t]*(.*)$", re.MULTILINE)
 REASONING_LINE_RE = re.compile(r"^REASONING:[ \t]*(.*)$", re.MULTILINE)
 STV_RE = re.compile(r"\(stv\s+-?[0-9]+(?:\.[0-9]+)?\s+-?[0-9]+(?:\.[0-9]+)?\)")
 
@@ -124,9 +138,6 @@ def parse_exec_outputs(text: str) -> list[str]:
             if out.startswith("(") and out.endswith(")"):
                 outputs.append(normalize_expression(out))
     return outputs
-SOURCES_LINE_RE = re.compile(r"^SOURCES:[ \t]*(.*)$", re.MULTILINE)
-GIT_SHA_RE = re.compile(r"git:([0-9a-f]{40})")
-URL_RE = re.compile(r"(https?://\S+)")
 QUOTED_LITERAL_RE = re.compile(r'"([^"]+)"')
 
 # The first case of the sequential run (facts.TEST_CASES order). After a
@@ -294,15 +305,16 @@ class CaseBlock:
     queries: list[str] = field(default_factory=list)
     receipt_counts: list[int] = field(default_factory=list)
     facts_raw: str = ""
+    handles_raw: str = ""
     reasoning_raw: str = ""
-    sources_raw: str = ""
     block_text: str = ""
 
 
 def parse_answers_v2(text: str) -> dict[str, CaseBlock]:
     """Split answers.md into per-case blocks (### CASE <id> sections).
 
-    FINAL ANSWER / QUERY / SOURCES lines are matched within each block.
+    FINAL ANSWER / QUERY / FACTS / HANDLES / REASONING lines are matched
+    within each block.
     """
     blocks: dict[str, CaseBlock] = {}
     matches = list(CASE_BLOCK_RE.finditer(text))
@@ -340,12 +352,12 @@ def parse_answers_v2(text: str) -> dict[str, CaseBlock]:
         facts = FACTS_LINE_RE.search(block_text)
         if facts:
             block.facts_raw = facts.group(1).strip()
+        handles = HANDLES_LINE_RE.search(block_text)
+        if handles:
+            block.handles_raw = handles.group(1).strip()
         reason = REASONING_LINE_RE.search(block_text)
         if reason:
             block.reasoning_raw = reason.group(1).strip()
-        src = SOURCES_LINE_RE.search(block_text)
-        if src:
-            block.sources_raw = src.group(1).strip()
 
         blocks[case_id] = block
 
@@ -515,20 +527,10 @@ def parse_facts_line(facts_raw: str) -> list[str]:
     return out
 
 
-def parse_citations(sources_raw: str) -> list[tuple[str, str]]:
-    """Extract (git:<sha>, url) citation pairs from a SOURCES line."""
-    citations: list[tuple[str, str]] = []
-    shas = GIT_SHA_RE.findall(sources_raw)
-    urls = URL_RE.findall(sources_raw)
-    for i, sha in enumerate(shas):
-        url = urls[i] if i < len(urls) else ""
-        citations.append((f"git:{sha}", url))
-    return citations
-
-
 INFORMATIONAL_CONDITIONS = {
     "Q_ATTESTED_VIA_ACCESS_LOG",
     "E_INDEXED_NOT_PERSISTED",
+    "P_SOURCE_SET_MISMATCH",
 }
 
 
@@ -538,7 +540,8 @@ def gate_case(
     history_queries: list[str],
     history_placeholder_calls: int,
     reissue_fn,
-    citation_checks: list[tuple[str, str, list[str]]],
+    reconstruction: Optional[dict] = None,
+    case_source_refs: Optional[set[str]] = None,
     facts_index: Optional[list[str]] = None,
     window_persist_receipts: int = 0,
     attestation: Optional[dict] = None,
@@ -546,10 +549,22 @@ def gate_case(
     presence_fn=None,
     judge_fn=None,
 ) -> GateResult:
-    """Apply the full gate (A/Q/E/R/P) to one case.
+    """Apply the full gate (A/Q/E/R/P/H) to one case.
 
     reissue_fn(query) -> dict {"count": int, "error": str|None}
-    citation_checks: list of (sha, url, conditions) — already resolved.
+    reconstruction: the reconstruct_sources.py JSON payload (a plain dict
+    — run_benchmark invokes the script per case and feeds it here; the v4
+    harness ALWAYS passes a payload for a present block). Mapped to gate
+    conditions: each stored_fact row's conditions -> P_UNRESOLVED:
+    <expr12>:<COND>; P_MISSING when no used stored fact carries any
+    provenance attributes (nothing citable; unsolvable exempt); the
+    handles_check conditions ride in verbatim (H_MISSING /
+    H_COUNT_MISMATCH / H_MISMATCH, all blocking per D4). None (or a
+    legacy non-dict positional shape from older unit tests) = no P/H
+    conditions.
+    case_source_refs: the case's allowed source refs (the background
+    SOURCE_URLS set); when given, any stored source ref outside it is the
+    informational P_SOURCE_SET_MISMATCH (unsolvable exempt).
     facts_index: normalized expressions from the agent's facts index
     (extraction record); None = E-gate not applicable (legacy grading),
     [] = no clauses were extracted (fails every case).
@@ -810,22 +825,56 @@ def gate_case(
                 conditions.append("R_TRACE_NOT_GROUNDED")
                 detail["trace_not_grounded"] = ungrounded[:5]
 
-    # --- P-gate: provenance resolution ---
-    citations = parse_citations(block.sources_raw)
-    if not is_unsolvable:
-        if not citations:
+    # --- P/H-gate: reconstruction-chain provenance (v17 item 4) ---
+    # The reconstruction payload (reconstruct_sources.py --json, a plain
+    # dict) is the gate's ONLY provenance input. Legacy callers passing
+    # the retired positional citation-list shape are normalized to "no
+    # payload" (the v4 harness always passes the script dict or None).
+    if reconstruction is not None and not isinstance(reconstruction, dict):
+        reconstruction = None
+    if reconstruction is not None:
+        per_expression = reconstruction.get("per_expression") or []
+        seen_codes: set[str] = set()
+        carries_attrs = False
+        stored_refs: set[str] = set()
+        for row in per_expression:
+            if row.get("classification") != "stored_fact":
+                # Derivation/query/exec rows are NOT mapped: a
+                # derivation's conditions are the union of its stored
+                # components' conditions, already emitted by those
+                # components' own stored_fact rows (spec §2.4 rule (c)).
+                continue
+            expr12 = row.get("expr", "")[:12]
+            for cond in row.get("conditions") or []:
+                code = f"P_UNRESOLVED:{expr12}:{cond}"
+                if code not in seen_codes:
+                    seen_codes.add(code)
+                    conditions.append(code)
+            for src in row.get("sources") or []:
+                if "NO_PROVENANCE_ATTRS" not in (src.get("conditions") or []):
+                    carries_attrs = True
+                if src.get("ref"):
+                    stored_refs.add(src["ref"])
+        if not is_unsolvable and not carries_attrs:
+            # Reconstruction found no used stored facts carrying any
+            # provenance attributes — nothing citable (unsolvable exempt).
             conditions.append("P_MISSING")
-    if citations:
-        for sha, url in citations:
-            match = next(
-                (c for c in citation_checks if c[0] == sha and (not url or c[1] == url or not c[1])),
-                None,
-            )
-            if match is None:
-                conditions.append(f"P_UNRESOLVED:{sha[:12]}:NOT_CHECKED")
-            elif match[2]:
-                for cond in match[2]:
-                    conditions.append(f"P_UNRESOLVED:{cond}")
+        # H-gate: the script's HANDLES cross-check rides in verbatim
+        # (H_MISSING only fires when FACTS exist; all H_* blocking, D4).
+        for cond in (reconstruction.get("handles_check") or {}).get("conditions") or []:
+            conditions.append(cond)
+        if (not is_unsolvable and case_source_refs is not None
+                and any(ref not in case_source_refs for ref in stored_refs)):
+            # Informational: semantic-misattribution visibility — sources
+            # attached to the case's facts fall outside its background set.
+            conditions.append("P_SOURCE_SET_MISMATCH")
+        detail["p_gate"] = {
+            "stored_expressions": [
+                row.get("expr") for row in per_expression
+                if row.get("classification") == "stored_fact"
+            ],
+            "handles_check": reconstruction.get("handles_check") or {},
+        }
 
     verdict = "PASS" if not [c for c in conditions if c not in INFORMATIONAL_CONDITIONS] else "FAIL"
     return GateResult(case_id, verdict, conditions, detail)

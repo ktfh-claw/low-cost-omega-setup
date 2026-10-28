@@ -1,8 +1,12 @@
 """Unit tests for the v3 gates: E-gate (extraction), attestation lane,
-facts-index parsing, blob reconstruction, and sequential-mode helpers.
+facts-index parsing, the v17 byte-compare lane, and sequential-mode
+helpers.
 
-Deterministic only — no LLM, no network. Attestation/facade-lane tests
-exercise grading.gate_case logic with synthetic attestation dicts.
+Deterministic only — no LLM, no network. Attestation-lane tests exercise
+grading.gate_case logic with synthetic attestation dicts and
+reconstruction payloads (plain dicts — the Phase-4 script is exercised
+by test_reconstruct_sources.py; here the v4 harness contract is pinned:
+payload in, conditions out).
 """
 import os
 import sys
@@ -22,7 +26,6 @@ from grading import (
     query_literals,
     gate_summary,
 )
-from provenance_check import reconstruct_citation_blob
 
 
 # v15b: the A-gate substance check is the LLM judge; offline unit tests
@@ -46,10 +49,46 @@ def _ok_reissue(query):
     return {"count": 1}
 
 
-# the fake sha the test blocks cite; resolved-OK citation check for the P-gate
-FAKE_SHA = "git:" + "a" * 40
-FAKE_URL = "https://example.com/spatial-knowledge.md"
-OK_CITATIONS = [(FAKE_SHA, FAKE_URL, [])]
+# --- v17 reconstruction payloads (the script's --json shape; plain dicts) ---
+BKGD_URL = ("https://raw.githubusercontent.com/ktfh-claw/low-cost-omega-setup/"
+            "main/tests/reasoning-windowless-room/background/spatial-knowledge.md")
+
+
+def _resolved_source(ref=BKGD_URL, sha256="e" * 64):
+    return {"commit": "f" * 40, "ref": ref, "sha256": sha256,
+            "entry_date": "2026-10-28T00:00:00Z", "resolved": True,
+            "legacy": False, "conditions": []}
+
+
+def _stored_row(expr='(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
+                sources=None, conditions=None):
+    return {"expr": expr, "top_handle": "t" * 32, "stored": True,
+            "classification": "stored_fact",
+            "sources": sources if sources is not None else [_resolved_source()],
+            "conditions": conditions or []}
+
+
+def _payload(rows, handles_conditions=None):
+    return {
+        "per_expression": rows,
+        "per_predicate": {},
+        "handles_check": {"claimed": [], "derived": [],
+                          "conditions": handles_conditions or []},
+        "missing": [],
+        "conditions": [],
+        "source_paths": [],
+    }
+
+
+OK_RECONSTRUCTION = _payload([_stored_row()])
+UNSOLVABLE_RECONSTRUCTION = _payload([
+    {"expr": '(Inheritance (Concept "australia") $X)', "top_handle": None,
+     "stored": False, "classification": "query_clause", "sources": [],
+     "conditions": []},
+    {"expr": '(Inheritance $X (Concept "australia"))', "top_handle": None,
+     "stored": False, "classification": "variable", "sources": [],
+     "conditions": []},
+])
 
 
 FACTS_INDEX = """# Extraction record
@@ -63,9 +102,8 @@ INDEX = parse_facts_index(FACTS_INDEX)
 assert len(INDEX) == 3, INDEX
 
 
-def _block(case_id, query, facts, sources=None, count=1, reasoning=None,
+def _block(case_id, query, facts, handles="h1", count=1, reasoning=None,
            answer="the ceiling"):
-    src = sources or (FAKE_SHA + " " + FAKE_URL)
     if reasoning is None:
         # v6 R-gate: default trace = question clause; a stored fact step
         # (verbatim INDEX expression); the executed derivation step quoting
@@ -82,9 +120,9 @@ def _block(case_id, query, facts, sources=None, count=1, reasoning=None,
 QUERY: {query}
 DAS_RETRIEVE_OK untrusted=true count={count} truncated=false results=[...]
 FACTS: {facts}
+HANDLES: {handles}
 REASONING: {reasoning}
 FINAL ANSWER ({case_id}): {answer}
-SOURCES: {src}
 """
     blocks = parse_answers_v2(text)
     return blocks[case_id]
@@ -131,7 +169,7 @@ def test_parse_facts_line():
 # ---------------------------------------------------------------------------
 
 def _gate(case_id, block, **kw):
-    kw.setdefault("citation_checks", OK_CITATIONS)
+    kw.setdefault("reconstruction", OK_RECONSTRUCTION)
     kw.setdefault("judge_fn", _judge_ok)
     return gate_case(
         _case(case_id), block,
@@ -236,7 +274,7 @@ SOURCES: none (absence case)
         history_queries=['(Inheritance (Concept "australia") $X)'],
         history_placeholder_calls=0,
         reissue_fn=lambda q: {"count": 0},
-        citation_checks=[],
+        reconstruction=UNSOLVABLE_RECONSTRUCTION,
         facts_index=INDEX,
         window_persist_receipts=1,
         judge_fn=_judge_ok,
@@ -380,7 +418,7 @@ SOURCES: none (absence case)
         history_queries=['(Inheritance (Concept "australia") $X)'],
         history_placeholder_calls=0,
         reissue_fn=lambda q: {"count": 0},
-        citation_checks=[],
+        reconstruction=UNSOLVABLE_RECONSTRUCTION,
         facts_index=INDEX,
         window_persist_receipts=1,
         judge_fn=_judge_ok,
@@ -455,7 +493,7 @@ def test_attested_query_passes_with_informational_condition():
         history_queries=[],  # history collapsed the tuple
         history_placeholder_calls=0,
         reissue_fn=_ok_reissue,
-        citation_checks=OK_CITATIONS,
+        reconstruction=OK_RECONSTRUCTION,
         facts_index=INDEX,
         window_persist_receipts=1,
         attestation={"qe_pattern_match": True, "access_count": 2,
@@ -474,7 +512,7 @@ def test_unattested_missing_history_still_fails():
         history_queries=[],
         history_placeholder_calls=0,
         reissue_fn=_ok_reissue,
-        citation_checks=OK_CITATIONS,
+        reconstruction=OK_RECONSTRUCTION,
         facts_index=INDEX,
         window_persist_receipts=1,
         attestation={"qe_pattern_match": False, "access_count": 0},
@@ -493,7 +531,7 @@ def test_attestation_requires_both_lanes():
         history_queries=[],
         history_placeholder_calls=0,
         reissue_fn=_ok_reissue,
-        citation_checks=OK_CITATIONS,
+        reconstruction=OK_RECONSTRUCTION,
         facts_index=INDEX,
         window_persist_receipts=1,
         attestation={"qe_pattern_match": False, "access_count": 5},
@@ -513,7 +551,7 @@ def test_e_ingest_facade_log_census_no_longer_substitutes():
         history_queries=['(Inheritance $X (Concept "ceiling"))'],
         history_placeholder_calls=0,
         reissue_fn=_ok_reissue,
-        citation_checks=OK_CITATIONS,
+        reconstruction=OK_RECONSTRUCTION,
         facts_index=INDEX,
         window_persist_receipts=0,  # history collapsed: no receipts
         attestation={"qe_pattern_match": True, "access_count": 1,
@@ -533,7 +571,7 @@ def test_e_ingest_unattested_still_fails():
         history_queries=['(Inheritance $X (Concept "ceiling"))'],
         history_placeholder_calls=0,
         reissue_fn=_ok_reissue,
-        citation_checks=OK_CITATIONS,
+        reconstruction=OK_RECONSTRUCTION,
         facts_index=INDEX,
         window_persist_receipts=0,
         attestation={"qe_pattern_match": True, "access_count": 1,
@@ -544,61 +582,53 @@ def test_e_ingest_unattested_still_fails():
 
 
 # ---------------------------------------------------------------------------
-# blob reconstruction
+# v17 byte-compare lane (run_benchmark._byte_compare_rows): for each unique
+# (commit, ref, sha256) among the payload's stored-atom source entries,
+# sha256(background file) == entry sha256
 # ---------------------------------------------------------------------------
 
-def test_reconstruct_citation_blob_matches_content():
+def test_byte_compare_lane_matches_background_bytes():
     import hashlib
-    import json
-    import subprocess
     import tempfile
+    from pathlib import Path
+
+    import run_benchmark
 
     content = "# spatial knowledge\n\nthe ceiling is above.\n"
-    with tempfile.TemporaryDirectory() as root:
-        repo = os.path.join(root, "prov")
-        os.makedirs(repo)
-        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
-                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
-
-        def git(*a):
-            subprocess.run(["git", "-C", repo, *a], check=True, env=env,
-                           capture_output=True, text=True)
-
-        git("init", "-q")
-        blob_sha = hashlib.sha256(content.encode()).hexdigest()
-        path = f"sources/2026/10/{blob_sha}.md"
-        os.makedirs(os.path.dirname(os.path.join(repo, path)), exist_ok=True)
-        with open(os.path.join(repo, path), "w") as f:
-            f.write(content)
-        entry = {"url": "https://x/y.md", "blob_sha256": blob_sha, "path": path,
-                 "content_type": "text/markdown", "archived_at": "t"}
-        with open(os.path.join(repo, "index.jsonl"), "w") as f:
-            f.write(json.dumps(entry, separators=(",", ":")) + "\n")
-        git("add", "-A")
-        git("commit", "-q", "-m", "archive")
-        r = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
-                           capture_output=True, text=True, env=env)
-        commit = r.stdout.strip()
-
-        blob_path, blob_content = reconstruct_citation_blob(
-            repo, f"git:{commit}", sudo=False)
-        assert blob_path == path
-        assert blob_content == content
+    sha = hashlib.sha256(content.encode()).hexdigest()
+    payload = _payload([_stored_row(sources=[
+        _resolved_source(ref="https://x/spatial-knowledge.md", sha256=sha)])])
+    with tempfile.TemporaryDirectory() as bg:
+        bg_dir = Path(bg)
+        (bg_dir / "spatial-knowledge.md").write_text(content, encoding="utf-8")
+        rows = run_benchmark._byte_compare_rows(payload, background_dir=bg_dir)
+        assert len(rows) == 1
+        assert rows[0]["byte_match"] is True
+        assert rows[0]["ref"] == "https://x/spatial-knowledge.md"
+        assert rows[0]["sha256"] == sha
+        # drift between the ledger hash and the actual bytes is visible
+        drifted = _payload([_stored_row(sources=[
+            _resolved_source(ref="https://x/spatial-knowledge.md",
+                             sha256="0" * 64)])])
+        assert run_benchmark._byte_compare_rows(
+            drifted, background_dir=bg_dir)[0]["byte_match"] is False
 
 
-def test_reconstruct_missing_commit_raises():
-    import subprocess
+def test_byte_compare_lane_missing_background_file_records_null():
     import tempfile
-    with tempfile.TemporaryDirectory() as root:
-        repo = os.path.join(root, "prov")
-        os.makedirs(repo)
-        subprocess.run(["git", "init", "-q", repo], check=True,
-                      capture_output=True)
-        try:
-            reconstruct_citation_blob(repo, "git:" + "f" * 40, sudo=False)
-            raise AssertionError("expected RuntimeError")
-        except RuntimeError:
-            pass
+    from pathlib import Path
+
+    import run_benchmark
+
+    # a ref that maps to no background file is recorded with
+    # byte_match=None (informational, never a condition by itself)
+    payload = _payload([_stored_row(sources=[
+        _resolved_source(ref="https://x/no-such-background-file.md")])])
+    with tempfile.TemporaryDirectory() as bg:
+        rows = run_benchmark._byte_compare_rows(payload, background_dir=Path(bg))
+        assert len(rows) == 1
+        assert rows[0]["byte_match"] is None
+        assert rows[0]["resolved"] is True
 
 
 # ---------------------------------------------------------------------------
