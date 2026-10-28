@@ -8,6 +8,10 @@ come from this repo's mounts**, converging the live deployment on the
 "image + mounts/config" architecture documented in
 [`docs/architecture.md`](../../../docs/architecture.md).
 
+The plugin also re-registers the skill description the LLM sees: issue-2
+v4 (2026-10-28) adds the atom-handles clause — retrieval receipts carry
+per-answer stored-atom handles the agent can quote verbatim.
+
 ## Provenance context (read the docs truth note)
 
 The deployed agent image is the **ktfh-claw/OmegaClaw-Core fork build**
