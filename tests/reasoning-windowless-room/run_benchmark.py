@@ -327,6 +327,103 @@ def collect_attestation(args, case_id: str, since_iso: str, until_iso: str,
 # preflight
 # ---------------------------------------------------------------------------
 
+# v17 item 7 (resolution 5): the Phase-3 verification-only helper is the
+# ledger_repo_format source of truth (its 23-case pytest owns the exact
+# checks) — preflight invokes it, never reimplements its logic inline.
+LEDGER_HELPER = (HERE / ".." / ".." / "deploy" / "das" / "write-bridge"
+                 / "tools" / "migrate_ledger_repo.sh").resolve()
+
+
+def _write_bridge_smoke_v4(args) -> tuple[str, str]:
+    """v17 item 7 (a): full-v4-path write-bridge smoke.
+
+    The old suffix-less /v1/write smoke only proved the facade accepted
+    v1 grammar; under transparent provenance the must-pass path is
+    source-register → provenance-cited write → top_handle receipt, so a
+    broken ledger or citation gate must fail HERE, not at the first
+    graded case. The facade records the (ref, sha256) pair without
+    fetching, so the sha256 of a synthetic payload is the correct
+    citation. The ledger entry is PERMANENT EVIDENCE (Phase-3 rule 6):
+    the clearly-labeled preflight.invalid ref makes the smoke row
+    identifiable forever — only the DAS links are cleaned up, never the
+    ledger. Returns (smoke_check, cleanup_check); cleanup_check is ""
+    when the write never succeeded (nothing to clean — the old
+    semantics, the cleanup key then stays absent from the checks).
+    """
+    smoke_ref = f"https://preflight.invalid/omega-ledger-smoke-{args.run_id}"
+    sha256_hex = hashlib.sha256(
+        f"omega-preflight-smoke-v4:{args.run_id}".encode()).hexdigest()
+    smoke = f'(BenchmarkPreflight (Concept "{args.run_id}"))'
+    try:
+        src = _http_post(args.write_bridge + "/v1/source",
+                         {"ref": smoke_ref, "sha256": sha256_hex},
+                         timeout=30.0)
+        resp = _http_post(args.write_bridge + "/v1/write", {
+            "metta": smoke, "verify": True,
+            "provenance": {"ref": smoke_ref,
+                           "git_commit": "git:" + src["commit"],
+                           "blob_sha256": sha256_hex},
+        }, timeout=30.0)
+    except Exception as e:
+        return (f"error: {e}", "")
+    top = resp.get("top_handle")
+    smoke_check = ("ok" if isinstance(top, str) and top
+                   else f"error: empty top_handle in write response: {resp}")
+    cleanup_check = ""
+    try:
+        _run(["docker", "exec", "-w", "/app", CONTAINER_WRITE_BRIDGE,
+              "python", "cleanup.py", "--metta", smoke], timeout=180.0)
+        cleanup_check = "ok"
+    except Exception as e:
+        cleanup_check = f"warn: {e}"
+    return (smoke_check, cleanup_check)
+
+
+def _ledger_repo_format(args) -> str:
+    """v17 item 7 (b): REQUIRED ledger-format check (resolution 5).
+
+    The old provenance_repo check only proved a git repo existed at the
+    path; under D1/D6 the repo is a SOURCE-LEDGER.json git ledger whose
+    format the whole citation chain trusts, so preflight must verify the
+    format (repo exists, HEAD touches only the ledger, entries are
+    3-key), not the mere existence. The helper's FAIL line is surfaced
+    verbatim (it already starts with "FAIL:", which fails preflight);
+    without one, the stderr tail carries the diagnosis.
+    """
+    try:
+        r = _sudo_run(["bash", str(LEDGER_HELPER), "--check",
+                       "--repo", args.provenance_repo])
+    except Exception as e:
+        return f"error: {e}"
+    if r.returncode == 0:
+        return "ok"
+    fail_lines = [ln for ln in r.stdout.splitlines() if ln.startswith("FAIL:")]
+    if fail_lines:
+        return fail_lines[0]
+    stderr_tail = (r.stderr.strip().splitlines()[-1].strip()
+                   if r.stderr.strip() else "ledger repo format check failed")
+    return f"FAIL: {stderr_tail}"
+
+
+def _das_write_grammar_v3() -> str:
+    """v17 item 7 (c): the das-write plugin must carry the v3 grammar.
+
+    The benchmark prompt (item 1) teaches the add-atom receipt form
+    ``BRIDGE-PERSIST-OK: verified=<n> top=<handle>``; a stale plugin
+    would emit receipts no gate can parse (E and H both read them),
+    burning the run. Same pattern as skill_description_upgraded: grep
+    the HOST repo artifact (the running agent mounts it :ro via
+    start.sh).
+    """
+    try:
+        plugin_path = "/home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-write/das-write.metta"
+        r = _run(["grep", "-c", "BRIDGE-PERSIST-OK: verified=<n> top=<handle>",
+                  plugin_path])
+        return "ok" if r.returncode == 0 and r.stdout.strip() != "0" else "MISSING"
+    except Exception as e:
+        return f"error: {e}"
+
+
 def preflight(args) -> int:
     """Preflight phase: verify environment is ready for the benchmark."""
     _resolve_endpoints(args)
@@ -353,20 +450,13 @@ def preflight(args) -> int:
         checks[f"{name}_ip"] = ips.get(name, "")
 
     if not args.dry_run:
-        try:
-            smoke = f'(BenchmarkPreflight (Concept "{args.run_id}"))'
-            _http_post(args.write_bridge + "/v1/write", {
-                "metta": smoke, "verify": True,
-            }, timeout=30.0)
-            checks["write_bridge_smoke"] = "ok"
-            try:
-                _run(["docker", "exec", "-w", "/app", CONTAINER_WRITE_BRIDGE,
-                      "python", "cleanup.py", "--metta", smoke], timeout=180.0)
-                checks["write_bridge_smoke_cleanup"] = "ok"
-            except Exception as e:
-                checks["write_bridge_smoke_cleanup"] = f"warn: {e}"
-        except Exception as e:
-            checks["write_bridge_smoke"] = f"error: {e}"
+        # No dasWriteSourceRoots check (item 7f, decision D5): the
+        # benchmark exercises URL refs only (urls.txt), so container
+        # path refs are never used by this flow and need no gate.
+        smoke_check, cleanup_check = _write_bridge_smoke_v4(args)
+        checks["write_bridge_smoke"] = smoke_check
+        if cleanup_check:
+            checks["write_bridge_smoke_cleanup"] = cleanup_check
 
         try:
             resp = _http_post(args.read_proxy + "/v1/query", {
@@ -378,12 +468,7 @@ def preflight(args) -> int:
         except Exception as e:
             checks["read_proxy_query"] = f"error: {e}"
 
-        try:
-            result = _sudo_run(["git", "-c", f"safe.directory={args.provenance_repo}",
-                                "-C", args.provenance_repo, "rev-parse", "--git-dir"])
-            checks["provenance_repo"] = "ok" if result.returncode == 0 else "missing"
-        except Exception as e:
-            checks["provenance_repo"] = f"error: {e}"
+        checks["ledger_repo_format"] = _ledger_repo_format(args)
 
         try:
             r = _sudo_run(["test", "-d", args.memory_volume])
@@ -403,6 +488,11 @@ def preflight(args) -> int:
             checks["skill_description_upgraded"] = "ok" if r.returncode == 0 and r.stdout.strip() != "0" else "MISSING"
         except Exception as e:
             checks["skill_description_upgraded"] = f"error: {e}"
+
+        # v17 item 7 (c): das-write v3 grammar deployed? (the receipt
+        # form the prompt teaches and the E/H gates parse — see
+        # _das_write_grammar_v3)
+        checks["das_write_grammar_v3"] = _das_write_grammar_v3()
 
         # v6: metta-grammar plugin deployed? (scenario-A/A2 lesson,
         # 2026-10-25: NAL/PLN operators are STRICTLY 2-ARGUMENT and the
@@ -460,10 +550,11 @@ def preflight(args) -> int:
     else:
         checks["write_bridge_smoke"] = "dry-run"
         checks["read_proxy_query"] = "dry-run"
-        checks["provenance_repo"] = "dry-run"
+        checks["ledger_repo_format"] = "dry-run"
         checks["memory_volume"] = "dry-run"
         checks["prompt_backup_fresh"] = "dry-run"
         checks["skill_description_upgraded"] = "dry-run"
+        checks["das_write_grammar_v3"] = "dry-run"
         checks["metta_skill_upgraded"] = "dry-run"
         checks["metta_plugin_mounted"] = "dry-run"
         checks["canary_fetch_ai"] = "dry-run"
