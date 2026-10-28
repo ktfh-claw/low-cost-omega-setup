@@ -164,3 +164,74 @@ def test_rendered_prompt_carries_v17_contract_for_every_case():
         assert "archive" not in rendered.lower(), case["id"]
         assert "git:" not in rendered, case["id"]
         assert "provenance" not in rendered.lower(), case["id"]
+
+
+# ---------------------------------------------------------------------------
+# wr3o lessons (2026-10-28 live run): two agent-discipline failures the
+# slim prompt must prevent at the source — R_NOT_METTA from a bracketed
+# probe annotation in REASONING (unsolvable) and the E_FACTS_NOT_IN_INDEX +
+# H_MISMATCH pair from unwrapping a recorded expression while keeping its
+# receipt handle (false case)
+# ---------------------------------------------------------------------------
+
+def test_step4_bans_bracket_annotations_in_reasoning():
+    # unsolvable case: a `[reverse-direction probe count=0]` bracket note
+    # inside REASONING is prose under the strict gate (R_NOT_METTA)
+    seg = _segment(_template(), "4. **EXECUTE", "5. **WRITE")
+    assert "NEVER annotate anything inside REASONING" in seg
+    assert "bracketed notes" in seg
+    assert "`R_NOT_METTA`" in seg
+    # the zero-count evidence rides in the block's receipt line, not REASONING
+    assert "DAS_RETRIEVE_OK ... count=0" in seg
+    assert "never a note in REASONING" in seg
+
+
+def test_gate_rule_reasoning_brackets_are_prose():
+    # the block's REASONING gate rule carries the same ban
+    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
+    assert "Bracketed annotations are prose too" in fmt
+
+
+def test_step5_facts_wrapper_preservation():
+    # false case: unwrapping `(Concept "...")` type wrappers from a recorded
+    # expression rewrites it — the rewritten form was never recorded and the
+    # receipt handle paired with it belongs to the original form
+    seg = _segment(_template(), "5. **WRITE", "### REQUIRED FORMAT")
+    assert ("type wrappers such as `(Concept \"...\")` inside a stored "
+            "expression are PART of the expression") in seg
+    assert "Unwrapping, simplifying, or re-formatting a recorded expression rewrites it" in seg
+    assert "`E_FACTS_NOT_IN_INDEX`" in seg
+    assert "`H_MISMATCH`" in seg
+
+
+def test_step5_handles_pair_copy_rule():
+    # the recorded `expr <expression> top=<handle>` line pairs an expression
+    # with its handle — the pair must survive to the block intact
+    seg = _segment(_template(), "5. **WRITE", "### REQUIRED FORMAT")
+    assert "A handle is valid ONLY with the exact expression it was issued for" in seg
+    assert "copy the PAIR intact" in seg
+
+
+def test_gate_rules_facts_and_handles_pair_discipline():
+    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
+    # FACTS bullet: the recorded form is the claim — wrappers and all
+    assert "The recorded form is the claim — wrappers and all" in fmt
+    # HANDLES bullet: the handle travels together with its expression
+    assert "Copy each handle TOGETHER with its expression" in fmt
+
+
+def test_rendered_prompt_carries_wr3o_lessons_for_every_case():
+    # the discipline additions render for every case and introduce no banned
+    # vocabulary
+    cases = run_benchmark._facts_mod().TEST_CASES
+    assert cases
+    for case in cases:
+        rendered = _render(case)
+        assert "NEVER annotate anything inside REASONING" in rendered, case["id"]
+        assert "copy the PAIR intact" in rendered, case["id"]
+        assert ("type wrappers such as `(Concept \"...\")`" in rendered), case["id"]
+        assert "provenance" not in rendered.lower(), case["id"]
+        assert "archive" not in rendered.lower(), case["id"]
+        assert "SOURCES" not in rendered, case["id"]
+        assert "git:" not in rendered, case["id"]
+        assert "sha256" not in rendered, case["id"]
