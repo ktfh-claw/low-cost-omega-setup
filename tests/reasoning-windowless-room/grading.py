@@ -97,7 +97,9 @@ Condition codes (machine-readable failure reasons):
                           a used stored fact's source failed resolution
                           (COND per GATES-REFERENCE §12: the 8-value set)
   H_MISSING / H_COUNT_MISMATCH / H_MISMATCH
-                          the HANDLES cross-check failed (blocking, D4)
+                          the HANDLES cross-check failed (blocking, D4;
+                          knowledge case — unsolvable exempt, parallel to
+                          P_MISSING)
   P_SOURCE_SET_MISMATCH   informational: a source ref attached to the
                           case's facts is outside the case's background
                           source set
@@ -558,8 +560,10 @@ def gate_case(
     conditions: each stored_fact row's conditions -> P_UNRESOLVED:
     <expr12>:<COND>; P_MISSING when no used stored fact carries any
     provenance attributes (nothing citable; unsolvable exempt); the
-    handles_check conditions ride in verbatim (H_MISSING /
-    H_COUNT_MISMATCH / H_MISMATCH, all blocking per D4). None (or a
+    handles_check conditions ride in for knowledge cases only (H_MISSING
+    / H_COUNT_MISMATCH / H_MISMATCH, all blocking per D4; unsolvable
+    exempt — the §2.6 triggers are knowledge-case, parallel to
+    P_MISSING). None (or a
     legacy non-dict positional shape from older unit tests) = no P/H
     conditions.
     case_source_refs: the case's allowed source refs (the background
@@ -859,10 +863,12 @@ def gate_case(
             # Reconstruction found no used stored facts carrying any
             # provenance attributes — nothing citable (unsolvable exempt).
             conditions.append("P_MISSING")
-        # H-gate: the script's HANDLES cross-check rides in verbatim
-        # (H_MISSING only fires when FACTS exist; all H_* blocking, D4).
-        for cond in (reconstruction.get("handles_check") or {}).get("conditions") or []:
-            conditions.append(cond)
+        # H-gate: the script's HANDLES cross-check rides in for knowledge
+        # cases only (unsolvable exempt — the §2.6 triggers are
+        # knowledge-case, parallel to P_MISSING; all H_* blocking, D4).
+        if not is_unsolvable:
+            for cond in (reconstruction.get("handles_check") or {}).get("conditions") or []:
+                conditions.append(cond)
         if (not is_unsolvable and case_source_refs is not None
                 and any(ref not in case_source_refs for ref in stored_refs)):
             # Informational: semantic-misattribution visibility — sources
