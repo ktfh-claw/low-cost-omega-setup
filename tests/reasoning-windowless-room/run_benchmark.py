@@ -9,8 +9,8 @@ one prompt, one question, graded independently, then the next question.
 No example queries or per-case guidance in the agent prompt (the query
 grammar lives in the das-retrieve skill description), an E-gate on clause
 extraction, a DAS-cleanup phase before the run, a harness-side attestation
-lane for the lossy history channel, and blob reconstruction back to the
-source markdown files.
+lane for the lossy history channel, and deterministic source reconstruction
+via the Phase-4 ledger-chain script.
 
 Phases: preflight, cleanup-das, setup-case, agent-case, grade-case,
 full (sequential; --batch keeps the v2 all-at-once flow), grade, report,
@@ -32,12 +32,14 @@ if ALL gate conditions hold (no relaxation vs v2):
           real ingest (a BRIDGE-PERSIST-OK receipt in its window), the
           case's FACTS line resolves against the index, and every quoted
           literal of the query comes from the extracted vocabulary.
-  P-gate  every git:<sha> source citation resolves against the provenance
-          git repo: commit exists, adds one sources/ blob + index.jsonl,
-          index entry at that commit matches the blob path, sha256(blob)
-          matches the index entry, entry url matches the citation; the
-          blob is reconstructed and byte-compared against the repo's
-          background markdown the reasoning was extracted from.
+  P-gate  deterministic source reconstruction (v17): per case the harness
+          runs deploy/das/write-bridge/tools/reconstruct_sources.py (trace
+          + FACTS + HANDLES in) and feeds its JSON payload to gate_case,
+          which maps it to P_UNRESOLVED:<expr12>:<COND> / P_MISSING / H_*
+          conditions; every resolved (ref, sha256) the chain found is
+          byte-compared against the repo's background markdown
+          (sha256(file) == entry sha256; refs mapping to no background
+          file are recorded with byte_match=null — informational).
 
 Grading is deterministic (regex/keyword parsing, string matching, HTTP
 re-issue, git reads, docker-log reads) EXCEPT the A-gate answer-substance
@@ -877,6 +879,129 @@ def _read_facts_index(args) -> str:
 
 
 # ---------------------------------------------------------------------------
+# P-gate reconstruction lane (v17 item 4): the Phase-4 script, per case
+# ---------------------------------------------------------------------------
+
+RECONSTRUCT_SCRIPT = (Path(__file__).resolve().parents[2]
+                      / "deploy" / "das" / "write-bridge" / "tools"
+                      / "reconstruct_sources.py")
+RECONSTRUCTION_TIMEOUT = 300.0
+
+
+def _case_source_refs(case_id: str) -> set[str]:
+    """The case's allowed source refs: the background SOURCE_URLS of the
+    canonical facts the case requires (gate_case compares the
+    reconstruction's stored refs against this set for the informational
+    P_SOURCE_SET_MISMATCH)."""
+    facts_mod = _facts_mod()
+    return {facts_mod.SOURCE_URLS[f["source_file"]]
+            for f in facts_mod.CANONICAL_FACTS
+            if case_id in f.get("requires", [])}
+
+
+def _run_reconstruction(args, case_id: str, block, artifacts_dir: Path) -> dict | None:
+    """Run the Phase-4 reconstruction script for one case; return its JSON
+    payload (script exit 0 or 2 — the coarse source verdict; the exact
+    conditions ride in the payload) or None when the case block is
+    missing (the gate's missing-block shorthand already emits P_MISSING).
+
+    Script exit 1 / subprocess error / unreadable payload is a HARNESS
+    ERROR: raised as RuntimeError so the grade command aborts through
+    its existing error path (exit 1) — no gate condition is invented
+    for it. The --json / --source-paths-out artifacts stay in the run
+    dir as evidence. The legacy fallback repo is never passed
+    (resolution 4: optional-informational only, never in the default
+    grade path).
+    """
+    if block is None:
+        return None
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    json_out = artifacts_dir / f"reconstruction-{case_id}.json"
+    paths_out = artifacts_dir / f"reconstruction-{case_id}.paths"
+    cmd = [
+        sys.executable, str(RECONSTRUCT_SCRIPT),
+        "--trace", block.reasoning_raw,
+        "--facts", block.facts_raw,
+        "--handles", block.handles_raw,
+        "--ledger-repo", args.provenance_repo,
+        "--case", case_id,
+        "--json", str(json_out),
+        "--source-paths-out", str(paths_out),
+        "--background-dir", str(HERE / "background"),
+        "--mongo-container", CONTAINER_MONGODB,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=RECONSTRUCTION_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        raise RuntimeError(f"reconstruction script failed to run: {e}") from e
+    if proc.returncode not in (0, 2):
+        detail = (proc.stderr or proc.stdout).strip()[:500]
+        raise RuntimeError(
+            f"reconstruction harness error (rc {proc.returncode}): {detail}")
+    payload = _load_json(json_out)
+    if payload is None:
+        raise RuntimeError(f"reconstruction payload unreadable: {json_out}")
+    return payload
+
+
+def _byte_compare_rows(payload: dict,
+                       background_dir: Path | None = None) -> list[dict]:
+    """Byte-compare lane rows: for each unique (commit, ref, sha256) among
+    the payload's stored-atom source entries (stored_fact rows plus
+    derivation rows, whose sources are their stored components'; query/
+    exec rows carry none), hash the repo background file the ref names and
+    compare it to the entry's sha256 (sha256(background file) ==
+    entry sha256 — spec §8 item 4). Refs mapping to no background file
+    record byte_match=None (recorded, informational only). The script's
+    source_paths (payload["source_paths"] + the .paths artifact kept in
+    the run dir) record which local files the chain itself used.
+    """
+    if background_dir is None:
+        background_dir = HERE / "background"
+    rows: list[dict] = []
+    seen: set[tuple] = set()
+    for row in payload.get("per_expression") or []:
+        for src in row.get("sources") or []:
+            key = (src.get("commit"), src.get("ref"), src.get("sha256"))
+            if key in seen:
+                continue
+            seen.add(key)
+            ref = src.get("ref") or ""
+            fname = ref.rsplit("/", 1)[-1] if ref else ""
+            bg = background_dir / fname if fname else None
+            entry = {
+                "ref": ref,
+                "sha256": src.get("sha256"),
+                "commit": src.get("commit"),
+                "entry_date": src.get("entry_date"),
+                "resolved": src.get("resolved"),
+                "conditions": src.get("conditions") or [],
+                "byte_match": None,
+            }
+            if bg is not None and bg.is_file():
+                entry["byte_match"] = (
+                    hashlib.sha256(bg.read_bytes()).hexdigest() == src.get("sha256")
+                )
+            rows.append(entry)
+    return rows
+
+
+def _reconstruction_lane(payload: dict | None) -> dict | None:
+    """grade_data["reconstruction"] view (None when the case block was
+    missing). script_exit mirrors the script's own exit rule
+    (reconstruct_sources.py: 2 iff any blocking condition, else 0; H_*
+    never affect it — D4)."""
+    if payload is None:
+        return None
+    return {
+        "script_exit": 2 if payload.get("conditions") else 0,
+        "payload": payload,
+        "byte_compare": _byte_compare_rows(payload),
+    }
+
+
+# ---------------------------------------------------------------------------
 # A-gate LLM judge (v15b): one chat-completions call per graded case
 # ---------------------------------------------------------------------------
 
@@ -909,11 +1034,11 @@ def _get_judge(args):
 
 def grade_case(args) -> int:
     """Grade ONE case independently (A/Q/E/R/P gate; A-substance via the
-    LLM judge, everything else deterministic)."""
+    LLM judge, everything else deterministic; P from the Phase-4
+    reconstruction script's JSON payload)."""
     sys.path.insert(0, str(HERE))
     import grading as grading_mod
     import history_parse
-    import provenance_check
 
     case = _case_by_id(args.case)
     if case is None:
@@ -949,23 +1074,15 @@ def grade_case(args) -> int:
     blocks = grading_mod.parse_answers_v2(answers)
     block = blocks.get(args.case)
 
-    # citations: from the case block + any shas the agent persisted in-window
-    citation_inputs: list[provenance_check.Citation] = []
-    seen: set[tuple[str, str]] = set()
-    if block is not None:
-        for sha, url in grading_mod.parse_citations(block.sources_raw):
-            if (sha, url) not in seen:
-                seen.add((sha, url))
-                citation_inputs.append(provenance_check.Citation(sha=sha, url=url))
-    for sha in add_atom_shas:
-        if (sha, "") not in seen:
-            seen.add((sha, ""))
-            citation_inputs.append(provenance_check.Citation(sha=sha, url=""))
-
-    citation_checks = []
-    for c in citation_inputs:
-        check = provenance_check.resolve_citation(args.provenance_repo, c.sha, c.url, sudo=True)
-        citation_checks.append((c.sha, c.url, check.conditions))
+    # P-gate input: the Phase-4 reconstruction script's JSON payload for
+    # this case (trace + FACTS + HANDLES in; conditions out). Harness
+    # error (rc 1 / unreadable payload) aborts the grade command.
+    try:
+        recon_payload = _run_reconstruction(args, args.case, block, rd)
+    except RuntimeError as e:
+        print(f"[grade-case] ERROR: {e}")
+        _write_json(rd / f"grade-case-{args.case}.json", {"error": str(e)})
+        return GATE_ERROR
 
     def reissue(query: str) -> dict:
         try:
@@ -994,7 +1111,8 @@ def grade_case(args) -> int:
 
     r = grading_mod.gate_case(
         case, block, history_queries, placeholder_calls, reissue,
-        citation_checks,
+        reconstruction=recon_payload,
+        case_source_refs=_case_source_refs(args.case),
         facts_index=facts_index,
         window_persist_receipts=len(persist_receipts),
         attestation=attestation,
@@ -1003,35 +1121,11 @@ def grade_case(args) -> int:
         judge_fn=_get_judge(args),
     )
 
-    # blob reconstruction lane: arrive back at the source markdown bytes
-    reconstruction = []
-    if block is not None:
-        recon_dir = rd / "reconstructed"
-        recon_dir.mkdir(parents=True, exist_ok=True)
-        for sha, url in grading_mod.parse_citations(block.sources_raw):
-            try:
-                blob_path, blob_content = provenance_check.reconstruct_citation_blob(
-                    args.provenance_repo, sha)
-                entry = {"sha": sha, "url": url, "blob_path": blob_path, "reconstructed": True}
-                # byte-compare against the repo background file the URL names
-                fname = url.rsplit("/", 1)[-1] if url else ""
-                repo_file = HERE / "background" / fname
-                if fname and repo_file.exists():
-                    repo_bytes = repo_file.read_bytes()
-                    blob_bytes = blob_content.encode("utf-8")
-                    entry["repo_file"] = str(repo_file)
-                    entry["matches_repo_file"] = (repo_bytes == blob_bytes)
-                    if not entry["matches_repo_file"]:
-                        entry["repo_sha256"] = hashlib.sha256(repo_bytes).hexdigest()
-                        entry["blob_sha256"] = hashlib.sha256(blob_bytes).hexdigest()
-                # persist the reconstructed bytes as a run artifact
-                out = recon_dir / f"{sha[4:]}-{fname or 'blob.md'}"
-                out.write_text(blob_content, encoding="utf-8")
-                entry["saved_to"] = str(out)
-                reconstruction.append(entry)
-            except RuntimeError as e:
-                reconstruction.append({"sha": sha, "url": url,
-                                        "reconstructed": False, "error": str(e)})
+    # byte-compare lane: for each unique (commit, ref, sha256) the
+    # reconstruction chain found, hash the background file the ref names
+    # and compare it to the entry's sha256 (evidence, not a condition —
+    # a failed resolution already blocks via P_UNRESOLVED)
+    reconstruction_lane = _reconstruction_lane(recon_payload)
 
     grade_data = {
         "run_id": args.run_id,
@@ -1051,9 +1145,7 @@ def grade_case(args) -> int:
         },
         "facts_index_size": len(facts_index),
         "attestation": attestation,
-        "citations": [{"sha": s, "url": u, "conditions": c}
-                      for s, u, c in citation_checks],
-        "reconstruction": reconstruction,
+        "reconstruction": reconstruction_lane,
         "timestamp": _now_iso(),
     }
     _write_json(rd / f"grade-case-{args.case}.json", grade_data)
@@ -1258,7 +1350,6 @@ def grade(args) -> int:
     sys.path.insert(0, str(HERE))
     import grading as grading_mod
     import history_parse
-    import provenance_check
 
     if args.dry_run:
         print("[grade] [dry-run] would apply the strict gate (A/Q/E/R/P) to answers.md")
@@ -1303,27 +1394,6 @@ def grade(args) -> int:
 
     blocks = grading_mod.parse_answers_v2(content)
 
-    citation_inputs: list[provenance_check.Citation] = []
-    seen: set[tuple[str, str]] = set()
-    for case in facts_mod.TEST_CASES:
-        block = blocks.get(case["id"])
-        if block is None:
-            continue
-        for sha, url in grading_mod.parse_citations(block.sources_raw):
-            if (sha, url) not in seen:
-                seen.add((sha, url))
-                citation_inputs.append(provenance_check.Citation(sha=sha, url=url))
-    for sha in add_atom_shas:
-        if (sha, "") not in seen:
-            seen.add((sha, ""))
-            citation_inputs.append(provenance_check.Citation(sha=sha, url=""))
-
-    citation_checks = []
-    for c in citation_inputs:
-        check = provenance_check.resolve_citation(
-            args.provenance_repo, c.sha, c.url, sudo=True)
-        citation_checks.append((c.sha, c.url, check.conditions))
-
     def reissue(query: str) -> dict:
         try:
             resp = _http_post(args.read_proxy + "/v1/query",
@@ -1332,11 +1402,27 @@ def grade(args) -> int:
         except Exception as e:
             return {"error": str(e)}
 
+    rd = RESULTS_DIR / args.run_id
     results = []
+    reconstruction_by_case: dict[str, dict] = {}
     for case in facts_mod.TEST_CASES:
+        case_id = case["id"]
+        block = blocks.get(case_id)
+        # P-gate input: per-case reconstruction payload (artifacts land
+        # next to the batch grade outputs). Harness error aborts.
+        try:
+            recon_payload = _run_reconstruction(args, case_id, block, rd)
+        except RuntimeError as e:
+            print(f"[grade] ERROR: {e}")
+            _write_json(rd / "grade.json", {"error": str(e)})
+            return GATE_ERROR
+        if recon_payload is not None:
+            reconstruction_by_case[case_id] = _reconstruction_lane(recon_payload)
         r = grading_mod.gate_case(
-            case, blocks.get(case["id"]), history_queries, placeholder_calls,
-            reissue, citation_checks,
+            case, block, history_queries, placeholder_calls,
+            reissue,
+            reconstruction=recon_payload,
+            case_source_refs=_case_source_refs(case_id),
             facts_index=facts_index,
             window_persist_receipts=len(persist_receipts),
             facts_index_raw=facts_index_text,
@@ -1367,8 +1453,7 @@ def grade(args) -> int:
             "add_atom_shas": add_atom_shas[:20],
         },
         "facts_index_size": len(facts_index),
-        "citation_checks": [{"sha": s, "url": u, "conditions": conds}
-                             for s, u, conds in citation_checks],
+        "reconstruction": reconstruction_by_case,
         "timestamp": _now_iso(),
     }
     _write_json(RESULTS_DIR / args.run_id / "grade.json", grade_data)
@@ -1425,10 +1510,12 @@ def report(args) -> int:
         cf = case_files.get(cid, {})
         att = cf.get("attestation") or {}
         att_str = (f"QE+access ({att.get('access_count', '?')} posts)"
-                   if att.get("qe_pattern_match") else "-")
-        recon = cf.get("reconstruction") or []
-        recon_str = (f"{sum(1 for x in recon if x.get('matches_repo_file'))}/{len(recon)} match repo bytes"
-                     if recon else "-")
+                    if att.get("qe_pattern_match") else "-")
+        recon = cf.get("reconstruction") or {}
+        recon_rows = (recon.get("byte_compare") or []
+                      if isinstance(recon, dict) else [])
+        recon_str = (f"{sum(1 for x in recon_rows if x.get('byte_match'))}/{len(recon_rows)} byte-match background"
+                     if recon_rows else "-")
         lines.append(f"| {cid} | {r.get('verdict', '?')} | {conds} | {att_str} | {recon_str} |")
     lines.append("")
 
