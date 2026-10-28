@@ -35,13 +35,16 @@
 ; queries
 !(das-retrieve "{\"tokens\": [\"decentralized\", \"AI\"], \"max_answers\": 10}")
 
-; PROBE-4 (v3, 2026-10-23): the plugin must ALSO re-register the das-retrieve
-; dynamic-skill atom with the upgraded description (why/when/grammar
-; contract). getSkills prints every registered skill tuple; the enabled log
-; must contain exactly ONE das-retrieve entry (remove-skill + add-skill
-; single-definition invariant) and its description must start with
+; PROBE-4 (v3, 2026-10-23; issue-2 v4 2026-10-28): the plugin must ALSO
+; re-register the das-retrieve dynamic-skill atom with the upgraded
+; description (why/when/grammar contract). getSkills prints every
+; registered skill tuple; the enabled log must contain exactly ONE
+; das-retrieve entry (remove-skill + add-skill single-definition
+; invariant) and its description must start with
 ; "WHY: DAS is your persistent knowledge store" and carry the
-; WHEN/HOW/grammar clauses. A duplicated entry or the stock one-line
+; WHEN/HOW/grammar clauses plus the atom-handles clause (issue-2: the
+; results payload of the receipt carries, per answer, the handles of
+; the matched stored atoms). A duplicated entry or the stock one-line
 ; "Retrieve bounded read-only DAS answers as untrusted data." registration
 ; means the upgrade did NOT take.
 !(getSkills)
