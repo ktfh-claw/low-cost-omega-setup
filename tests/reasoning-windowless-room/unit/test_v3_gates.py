@@ -162,14 +162,14 @@ def test_e_gate_good_extraction_passes():
     r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
                                  '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "PASS", r.conditions
 
 
 def test_e_gate_missing_facts_line_fails():
     block = _block("original", '(Inheritance $X (Concept "ceiling"))', "")
     r = _gate("original", block, facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "FAIL"
     assert "E_NO_FACTS" in r.conditions
 
@@ -178,7 +178,7 @@ def test_e_gate_facts_not_in_index_fails():
     r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
                              '(Inheritance (Concept "made-up") $X)'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "FAIL"
     assert "E_FACTS_NOT_IN_INDEX" in r.conditions
 
@@ -188,7 +188,7 @@ def test_e_gate_foreign_query_literal_fails():
     r = _gate("original", _block("original", '(Inheritance $X (Concept "roome"))',
                              '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "FAIL"
     assert "E_LITERAL_NOT_EXTRACTED" in r.conditions
     assert r.detail.get("foreign_literals") == ["roome"]
@@ -198,7 +198,7 @@ def test_e_gate_reused_literal_passes():
     r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
                              '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "PASS", r.conditions
 
 
@@ -206,7 +206,7 @@ def test_e_gate_no_ingest_first_case_fails_without_receipts():
     r = _gate("original", _block("original", '(Inheritance $X (Concept "ceiling"))',
                                  '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=0, window_archive_receipts=0)
+              window_persist_receipts=0)
     assert r.verdict == "FAIL"
     assert "E_NO_INGEST" in r.conditions
 
@@ -217,7 +217,7 @@ def test_e_gate_later_case_ingest_not_required():
                               '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                               answer="false — you see the ceiling, not the sky"),
               facts_index=INDEX,
-              window_persist_receipts=0, window_archive_receipts=0)
+              window_persist_receipts=0)
     assert r.verdict == "PASS", r.conditions
 
 
@@ -238,7 +238,7 @@ SOURCES: none (absence case)
         reissue_fn=lambda q: {"count": 0},
         citation_checks=[],
         facts_index=INDEX,
-        window_persist_receipts=1, window_archive_receipts=1,
+        window_persist_receipts=1,
         judge_fn=_judge_ok,
     )
     assert r.verdict == "PASS", r.conditions
@@ -268,7 +268,7 @@ def test_r_gate_prose_reasoning_fails():
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning="scene construction: windowless room; looking up intersects the ceiling."),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "FAIL"
     assert "R_NOT_METTA" in r.conditions
 
@@ -278,7 +278,7 @@ def test_r_gate_missing_reasoning_line_fails():
                    '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))')
     block.reasoning_raw = ""
     r = _gate("original", block, facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "FAIL"
     assert "R_MISSING" in r.conditions
 
@@ -290,7 +290,7 @@ def test_r_gate_single_step_fails():
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning='(Inheritance $X (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert "R_NOT_METTA" in r.conditions
 
 
@@ -300,7 +300,7 @@ def test_r_gate_first_step_must_be_the_query():
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning='(Evaluation (Predicate "visible-when-looking-up") (Concept "observer-inside-room") (Concept "ceiling")); (Inheritance $X (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "FAIL"
     assert "R_TRACE_NOT_GROUNDED" in r.conditions
 
@@ -313,7 +313,7 @@ def test_r_gate_ungrounded_middle_step_fails():
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning='(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "made-up-relation") (Concept "room") (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "FAIL"
     assert "R_TRACE_NOT_GROUNDED" in r.conditions
     assert r.detail.get("trace_not_grounded") == ['(Evaluation (Predicate "made-up-relation") (Concept "room") (Concept "ceiling"))']
@@ -337,7 +337,7 @@ def test_r_gate_derived_conclusion_over_stored_vocab_passes():
                      reasoning=f'(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); {derived}'),
               facts_index=INDEX,
               facts_index_raw=facts_index_raw,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "PASS", r.conditions
 
 
@@ -348,7 +348,7 @@ def test_r_gate_derived_conclusion_with_foreign_literal_fails():
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))',
                      reasoning=f'(Inheritance $X (Concept "ceiling")); (Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling")); {derived}'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert "R_TRACE_NOT_GROUNDED" in r.conditions
 
 
@@ -358,7 +358,7 @@ def test_r_gate_good_trace_passes():
               _block("original", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "PASS", r.conditions
     assert not any(c.startswith("R_") for c in r.conditions)
 
@@ -382,7 +382,7 @@ SOURCES: none (absence case)
         reissue_fn=lambda q: {"count": 0},
         citation_checks=[],
         facts_index=INDEX,
-        window_persist_receipts=1, window_archive_receipts=1,
+        window_persist_receipts=1,
         judge_fn=_judge_ok,
     )
     assert r.verdict == "PASS", r.conditions
@@ -401,7 +401,7 @@ def test_r_not_executed_fires_without_exec_evidence():
                      reasoning='(Inheritance $X (Concept "ceiling")); '
                                '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert "R_NOT_EXECUTED" in r.conditions
     assert r.verdict == "FAIL"
 
@@ -413,7 +413,7 @@ def test_r_not_executed_satisfied_by_trace_stv():
               _block("original", '(Inheritance $X (Concept "ceiling"))',
                      '(Evaluation (Predicate "has-part") (Concept "room") (Concept "ceiling"))'),
               facts_index=INDEX,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert r.verdict == "PASS", r.conditions
     assert "R_NOT_EXECUTED" not in r.conditions
 
@@ -437,7 +437,7 @@ def test_r_not_executed_satisfied_by_exec_record_lines():
                                '(Concept "observer-inside-room") (Concept "ceiling"))'),
               facts_index=idx,
               facts_index_raw=facts_index_exec,
-              window_persist_receipts=1, window_archive_receipts=1)
+              window_persist_receipts=1)
     assert "R_NOT_EXECUTED" not in r.conditions
     assert r.verdict == "PASS", r.conditions
 
@@ -457,7 +457,7 @@ def test_attested_query_passes_with_informational_condition():
         reissue_fn=_ok_reissue,
         citation_checks=OK_CITATIONS,
         facts_index=INDEX,
-        window_persist_receipts=1, window_archive_receipts=1,
+        window_persist_receipts=1,
         attestation={"qe_pattern_match": True, "access_count": 2,
                      "write_count": 1, "archive_count": 1},
         judge_fn=_judge_ok,
@@ -476,7 +476,7 @@ def test_unattested_missing_history_still_fails():
         reissue_fn=_ok_reissue,
         citation_checks=OK_CITATIONS,
         facts_index=INDEX,
-        window_persist_receipts=1, window_archive_receipts=1,
+        window_persist_receipts=1,
         attestation={"qe_pattern_match": False, "access_count": 0},
     )
     assert r.verdict == "FAIL"
@@ -495,14 +495,17 @@ def test_attestation_requires_both_lanes():
         reissue_fn=_ok_reissue,
         citation_checks=OK_CITATIONS,
         facts_index=INDEX,
-        window_persist_receipts=1, window_archive_receipts=1,
+        window_persist_receipts=1,
         attestation={"qe_pattern_match": False, "access_count": 5},
     )
     assert "Q_NOT_IN_HISTORY" in r.conditions
     assert r.verdict == "FAIL"
 
 
-def test_e_ingest_attested_via_facade_log_is_informational():
+def test_e_ingest_facade_log_census_no_longer_substitutes():
+    # v17 (resolution 6): E_NO_INGEST is receipts-only — the retired
+    # facade-log census (write_count/archive_count) no longer substitutes
+    # for a missing BRIDGE-PERSIST-OK receipt on the first case.
     r = gate_case(
         _case("original"),
         _block("original", '(Inheritance $X (Concept "ceiling"))',
@@ -512,13 +515,14 @@ def test_e_ingest_attested_via_facade_log_is_informational():
         reissue_fn=_ok_reissue,
         citation_checks=OK_CITATIONS,
         facts_index=INDEX,
-        window_persist_receipts=0, window_archive_receipts=0,  # history collapsed
+        window_persist_receipts=0,  # history collapsed: no receipts
         attestation={"qe_pattern_match": True, "access_count": 1,
                      "write_count": 2, "archive_count": 1},
         judge_fn=_judge_ok,
     )
-    assert r.verdict == "PASS", r.conditions
-    assert "E_INGEST_ATTESTED_VIA_FACADE_LOG" in r.conditions
+    assert "E_NO_INGEST" in r.conditions
+    assert "E_INGEST_ATTESTED_VIA_FACADE_LOG" not in r.conditions
+    assert r.verdict == "FAIL"
 
 
 def test_e_ingest_unattested_still_fails():
@@ -531,7 +535,7 @@ def test_e_ingest_unattested_still_fails():
         reissue_fn=_ok_reissue,
         citation_checks=OK_CITATIONS,
         facts_index=INDEX,
-        window_persist_receipts=0, window_archive_receipts=0,
+        window_persist_receipts=0,
         attestation={"qe_pattern_match": True, "access_count": 1,
                      "write_count": 0, "archive_count": 0},
     )

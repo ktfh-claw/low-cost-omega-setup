@@ -146,7 +146,6 @@ def _gate(case_id, index, presence_fn=None, **kw):
         _ok_reissue, OK_CITATIONS,
         facts_index=index,
         window_persist_receipts=1,
-        window_archive_receipts=1,
         presence_fn=presence_fn,
         facts_index_raw="\n".join(index),
         **kw,
