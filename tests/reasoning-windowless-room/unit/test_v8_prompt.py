@@ -10,6 +10,12 @@ DAS calls, header-only artifacts). The `pin` tool output is the only tool
 result that survives a wake cycle — v8 makes a mechanical LEDGER line the
 required cross-cycle working memory and names the next literal call, so
 each wake starts from in-prompt state instead of re-deriving it.
+
+v17 audit (issue #2, spec §8 item 1): every v8 assertion survives the
+slim prompt unchanged — the first-cycle seed keeps its
+read-`{{URL_LIST_PATH}}`-ONCE part, and the `next:` lane now points at
+the literal first `add-atom` (v3) call (the `archive-source` call it
+pinned through v15 went with the capture step).
 """
 
 import os
@@ -34,7 +40,8 @@ def test_ledger_section_present():
 
 def test_ledger_first_cycle_seed():
     # the FIRST action of the case is a pin: the ledger with the literal
-    # archive-source call for the first URL — not a file read
+    # first add-atom (v3) call for the first fact of the first unprocessed
+    # background file — not a file read beyond the seeded ones
     t = _template()
     seg = t[t.index("## PINNED LEDGER"):t.index("1. **EXTRACT")]
     assert "First cycle of this case" in seg

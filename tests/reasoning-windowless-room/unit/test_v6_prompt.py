@@ -7,6 +7,12 @@ reasoning-trace + answer-write steps moved to the top of the task list
 REMOVED entirely: extraction is ONE bounded pass over the background
 sources. These tests pin the v6 template invariants so the
 convergence-ordering fix cannot silently regress.
+
+v17 re-point (issue #2, spec §8 item 1): the skip rule drops its `git:`
+marker (skip = the file's clauses are already recorded as `expr` lines)
+and the answer-block contract swaps the removed SOURCES: line for the
+new HANDLES: line. All other v6 invariants survive the slim prompt
+unchanged.
 """
 import os
 import sys
@@ -63,8 +69,10 @@ def test_no_open_ended_study_step():
 def test_record_reuse_skip_rule():
     t = _template()
     # already-recorded sources are skipped deterministically (no re-read,
-    # no re-archive) — cross-case carry-over without a relevance decision
-    assert "already lists this source with its `git:<sha>`, SKIP it" in t
+    # no re-write) — cross-case carry-over without a relevance decision
+    # (v17: "recorded" = the file's clauses sit in the record as `expr`
+    # lines — the git marker went with the capture step)
+    assert "already lists this file's clauses as `expr` lines, SKIP it" in t
 
 
 def test_campaign_anti_loop_rules_present():
@@ -80,13 +88,16 @@ def test_campaign_anti_loop_rules_present():
 
 def test_answer_block_contract_unchanged():
     t = _template()
+    # v17: the removed SOURCES: line is replaced by the HANDLES: line
+    # (between FACTS and REASONING, aligned by order with the FACTS
+    # expressions) — the other block lines are pinned verbatim
     for line in (
         "QUERY: <the exact metta pattern you executed>",
         "DAS_RETRIEVE_OK untrusted=true count=<n> truncated=... results=[...]",
         "FACTS: <the exact `expr` expressions copied VERBATIM from your extraction record that this answer used, semicolon-separated — no new or paraphrased expressions>",
+        "HANDLES: <the atom handles of the FACTS expressions, in the same order — one handle per expression, space-separated, each copied VERBATIM from a receipt you hold>",
         "REASONING: <the MeTTa reasoning trace: question clause; fact step(s); conclusion clause — semicolon-separated s-expressions, NOT prose>",
         "FINAL ANSWER ({{CASE_ID}}): <answer>",
-        "SOURCES: git:<40-hex-sha> <source-url> [git:<40-hex-sha> <source-url> ...]",
     ):
         assert line in t, line[:40]
 

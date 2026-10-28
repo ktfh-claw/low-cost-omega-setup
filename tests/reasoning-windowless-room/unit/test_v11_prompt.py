@@ -11,6 +11,11 @@ the case-1 window; earlier runs silently absorbed the same defect via
 self-recovery). The rendered prompt must therefore carry MEMORY-VOLUME-
 RELATIVE paths (repos/Omega/memory/benchmark/...), which resolve for file
 tools AND shell alike.
+
+v17 audit (issue #2, spec §8 item 1): every v11 assertion survives the
+slim prompt unchanged — all six placeholders are intact and the
+render pass (run_benchmark.py:710-717) still substitutes exactly the
+memory-volume-relative artifact paths.
 """
 
 import os
