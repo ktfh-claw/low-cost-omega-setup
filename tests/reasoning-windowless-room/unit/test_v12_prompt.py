@@ -16,6 +16,11 @@ lines, not a composition. The template now states this in step 1 (the
 record is the query AND answer vocabulary), in step 5 (copy-before-write
 rule with the wr3k lesson), and in the format-block gate rules. Grading
 code is unchanged — the gate already checks FACTS against the record.
+
+v17 re-point (issue #2, spec §8 item 1): the FACTS copy rules KEPT
+verbatim; the SOURCES half of the step-1 vocabulary binding is dropped
+with the SOURCES: line — the record binds "query and answer vocabulary"
+only. All other v12 assertions survive the slim prompt unchanged.
 """
 
 import os
@@ -72,8 +77,9 @@ def test_step1_answer_vocabulary():
     # exact spellings — the gloss trap is answer-side, not query-side only
     t = _template()
     seg = _segment(t, "1. **EXTRACT", "2. **FORMALIZE")
-    # v14 extends the binding to SOURCES citations as well (full
-    # provenance receipts: sha + blob + path + url recorded at archive
-    # time; citation pairs copied from the record, never rebuilt)
-    assert "query, answer AND SOURCES vocabulary" in seg
+    # v17: the binding drops its SOURCES half (the SOURCES: line is
+    # removed); the record binds the query and the FACTS line, and every
+    # recorded `expr` line carries its write's handle for the HANDLES:
+    # line
+    assert "This record is your query and answer vocabulary" in seg
     assert "an unrecorded expression on a FACTS: line is a false claim" in seg

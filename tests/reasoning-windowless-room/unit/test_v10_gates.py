@@ -166,16 +166,19 @@ def test_query_post_regex_requires_2xx():
 
 
 # ---------------------------------------------------------------------------
-# v10 fix 5 (prompt-side): citation-pair anti-mispair line is in the template
+# v10 fix 5 (prompt-side): anti-mispair line is in the template
+# (v17 re-point: sha/url pair copying → handle copying, spec §8 item 1)
 # ---------------------------------------------------------------------------
 
-def test_prompt_cites_sha_url_pairs_verbatim():
+def test_prompt_copies_handles_verbatim():
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "..", "agent_prompt_template.md")) as f:
         t = f.read()
-    # v14: the anti-mispair rule now points at the extraction record's
-    # `source` lines (full provenance receipts recorded at archive time:
-    # sha + blob + path + url) instead of the ephemeral archive receipt,
-    # and forbids citing anything outside a recorded `source` line
-    assert "never re-pair a sha with a different url" in t
-    assert "never cite a sha or url that appears in no recorded `source` line" in t
+    # v17: the anti-mispair rule now covers HANDLES — every handle is a
+    # character-for-character copy from a receipt the agent holds (the
+    # write receipt's `top=` or a das-retrieve receipt's `results=`
+    # handles), never re-typed, never re-ordered, never composed, and
+    # anything outside a held receipt is fabricated
+    assert "never re-type a handle from memory" in t
+    assert "never re-typed, never re-ordered, never composed" in t
+    assert "A handle that appears in no receipt you hold is fabricated" in t
