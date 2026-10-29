@@ -1430,6 +1430,18 @@ def grade_case(args) -> int:
     blocks = grading_mod.parse_answers_v2(answers)
     block = blocks.get(args.case)
 
+    # E_NO_INGEST census (v17 harness iteration 2, wr3o-20261028): persist
+    # this durable, live-only evidence BEFORE the reconstruction lane.  A
+    # reconstruction harness failure must not discard the agent container's
+    # per-instance logs; after a restart they cannot be recovered.
+    setup_json = _load_json(rd / f"setup-case-{args.case}.json") or {}
+    since_iso = setup_json.get("restarted_at") or _now_iso()
+    receipt_census = _census_persist_receipts(since_iso, _now_iso())
+    _write_json(rd / f"persist-receipts-{args.case}.json", receipt_census)
+    window_receipt_count = len(persist_receipts)
+    if receipt_census.get("count", 0) > 0:
+        window_receipt_count = receipt_census["count"]
+
     # P-gate input: the Phase-4 reconstruction script's JSON payload for
     # this case (trace + FACTS + HANDLES in; conditions out). Harness
     # error (rc 1 / unreadable payload) aborts the grade command.
@@ -1457,30 +1469,10 @@ def grade_case(args) -> int:
     # query-specific qe_pattern_match stays conditional on the block
     # naming a query (empty query -> False, so Q_NOT_IN_HISTORY semantics
     # are unchanged).
-    since_iso = None
-    setup_json = _load_json(rd / f"setup-case-{args.case}.json") or {}
-    since_iso = setup_json.get("restarted_at") or _now_iso()
     att_query = (history_parse.normalize_query(block.queries[0])
                  if (block is not None and block.queries) else "")
     attestation = collect_attestation(
         args, args.case, since_iso, _now_iso(), att_query)
-
-    # E_NO_INGEST census (v17 harness iteration 2, wr3o-20261028): the
-    # STRICT v4 receipt census over the AGENT container's docker logs,
-    # bounded [setup restarted_at, grade-now] — the PRIMARY census surface
-    # (spec §8 item 2 DEVIATION, GATES-REFERENCE §5: transparency removed
-    # receipt narration AND the serialized history collapses tool calls
-    # to $_, so the history-window extract_persist_receipts census reads
-    # ZERO even on a fully-ingesting run). PER-INSTANCE CAVEAT: the agent
-    # container is rm -f'd at every setup/teardown restart, so this census
-    # is valid LIVE only — the matched lines are PERSISTED into the run
-    # dir here as the durable evidence (retroactive re-grades of a dead
-    # container's window read zero and fall back to the history census).
-    receipt_census = _census_persist_receipts(since_iso, _now_iso())
-    _write_json(rd / f"persist-receipts-{args.case}.json", receipt_census)
-    window_receipt_count = len(persist_receipts)
-    if receipt_census.get("count", 0) > 0:
-        window_receipt_count = receipt_census["count"]
 
     r = grading_mod.gate_case(
         case, block, history_queries, placeholder_calls, reissue,
