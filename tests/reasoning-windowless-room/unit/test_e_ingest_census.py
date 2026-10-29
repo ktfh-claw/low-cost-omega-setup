@@ -47,6 +47,9 @@ monkeypatched module attributes (the established pattern).
 
 import os
 import sys
+import json
+import tempfile
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
@@ -124,6 +127,44 @@ def test_census_docker_error_is_zero_not_crash():
     out = run_benchmark._census_persist_receipts("a", "b")
     assert out["count"] == 0
     assert out.get("error"), out
+
+
+def test_grade_case_persists_census_before_reconstruction_failure():
+    """The live-only receipt evidence survives a P-gate harness abort."""
+    originals = {
+        name: getattr(run_benchmark, name)
+        for name in ("RESULTS_DIR", "_case_by_id", "_resolve_endpoints",
+                     "_bench_paths", "_sudo_read", "_load_json",
+                     "_read_facts_index", "_census_persist_receipts",
+                     "_run_reconstruction", "_now_iso")
+    }
+    try:
+        with tempfile.TemporaryDirectory() as root:
+            run_benchmark.RESULTS_DIR = Path(root)
+            run_benchmark._case_by_id = lambda case_id: {"id": case_id}
+            run_benchmark._resolve_endpoints = lambda args: None
+            run_benchmark._bench_paths = lambda args: {
+                "answers": "answers", "history": "history", "vol": Path(root),
+            }
+            run_benchmark._sudo_read = lambda path: ""
+            run_benchmark._load_json = lambda path: {"restarted_at": "setup-time"}
+            run_benchmark._read_facts_index = lambda args: ""
+            expected = {"count": 1, "matched": [V4_RECEIPT],
+                        "window": ["setup-time", "grade-time"]}
+            run_benchmark._census_persist_receipts = lambda since, until: expected
+            run_benchmark._run_reconstruction = lambda *a: (_ for _ in ()).throw(
+                RuntimeError("forced reconstruction failure"))
+            run_benchmark._now_iso = lambda: "grade-time"
+
+            args = type("Args", (), {
+                "case": "original", "run_id": "r", "dry_run": False,
+            })()
+            assert run_benchmark.grade_case(args) == run_benchmark.GATE_ERROR
+            artifact = Path(root) / "r" / "persist-receipts-original.json"
+            assert json.loads(artifact.read_text()) == expected
+    finally:
+        for name, value in originals.items():
+            setattr(run_benchmark, name, value)
 
 
 # wr3q-20261028 census evidence, VERBATIM from the run dir's persisted
