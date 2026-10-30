@@ -289,14 +289,25 @@ def test_rendered_prompt_carries_wr3p_step0_discipline_for_every_case():
 # pins-and-idles instead of re-answering.
 # ---------------------------------------------------------------------------
 
-def test_ledger_closeout_pins_terminal_line_before_append():
-    # the terminal pin comes FIRST: a cycle waking between the append and
-    # the pin re-answers the case from a stale ledger (wr3q duplicate block)
+def test_ledger_closeout_pins_intermediate_before_terminal_after():
+    # TRUTHFUL close-out pins (wr3r lesson: the pre-append TERMINAL pin is
+    # a false claim — 4+ cycles idled on `done: answer block written` while
+    # answers.md stayed empty until a stochastic rescue appended it 19 min
+    # later). The intermediate pin lands BEFORE the append (it names the
+    # append as `next:` so a waking cycle issues the append instead of
+    # re-answering — wr3q duplicate-block guard); the terminal pin lands
+    # ONLY AFTER the append succeeded.
     t = _template()
     seg = t[t.index("## PINNED LEDGER"):t.index("1. **EXTRACT")]
-    assert "pin BEFORE append" in seg
+    assert ("LEDGER: step 5 | done: terminal close-out composed | "
+            "next: append-file {{ANSWERS_PATH}} with the answer block "
+            "once, then pin the done line") in seg
     assert ("LEDGER: step 5 | done: answer block written | next: none — "
             "case complete, idle silently") in seg
+    assert "BEFORE the append" in seg
+    assert "ONLY AFTER the append" in seg
+    assert "NEVER pin `done: answer block written` before the block exists" in seg
+    assert "wr3r lesson" in seg
 
 
 def test_ledger_existing_block_pins_and_idles():
@@ -313,21 +324,31 @@ def test_ledger_existing_block_pins_and_idles():
 
 
 def test_step5_closeout_order_binding():
-    # step 5's tail carries the same binding close-out order plus the
-    # pre-append duplicate check
+    # step 5's tail carries the binding close-out order plus the
+    # pre-append duplicate check: (1) duplicate check, (2) intermediate
+    # pin, (3) append, (4) terminal pin ONLY AFTER the append succeeded
     seg = _segment(_template(), "5. **WRITE", "### REQUIRED FORMAT")
     assert "Close-out order is BINDING" in seg
-    assert "FIRST" in seg
+    assert "four moves, in this order" in seg
+    assert ("LEDGER: step 5 | done: terminal close-out composed | "
+            "next: append-file {{ANSWERS_PATH}} with the answer block "
+            "once, then pin the done line") in seg
     assert ("LEDGER: step 5 | done: answer block written | next: none — "
             "case complete, idle silently") in seg
+    assert "ONLY AFTER the append" in seg
     assert "already carries a `### CASE {{CASE_ID}}` block" in seg
     assert "NEVER append a second block" in seg
+    # copy rule before the write order (v12 pin stays valid)
+    assert seg.index("VERBATIM") < seg.index("append the block")
 
 
 def test_stop_rule_names_both_completion_conditions():
-    # DONE = block appended AND terminal pin pinned; a found-block cycle
-    # may pin the missing terminal line and NOTHING else; a duplicate
-    # block fails the run (wr3q: the duplicate was the graded block)
+    # DONE = block appended AND terminal pin pinned (truthfully — the
+    # terminal pin is issued only after the append succeeded, never
+    # before); a found-block cycle may pin the missing terminal line and
+    # NOTHING else; a duplicate block fails the run (wr3q: the duplicate
+    # was the graded block; wr3r: a pre-write terminal pin idled every
+    # following cycle)
     stop = _template()
     stop = stop[stop.index("## STOP rule"):]
     assert "BOTH" in stop
@@ -335,6 +356,8 @@ def test_stop_rule_names_both_completion_conditions():
     assert "must do NOTHING" in stop
     assert "second `### CASE {{CASE_ID}}` block" in stop
     assert "wr3q lesson" in stop
+    assert "only AFTER the append" in stop
+    assert "never a claim before the write exists" in stop
 
 
 def test_rendered_prompt_carries_wr3q_closeout_discipline_for_every_case():
@@ -345,7 +368,10 @@ def test_rendered_prompt_carries_wr3q_closeout_discipline_for_every_case():
     for case in cases:
         rendered = _render(case)
         assert "Close-out order is BINDING" in rendered, case["id"]
-        assert "pin BEFORE append" in rendered, case["id"]
+        assert "done: terminal close-out composed" in rendered, case["id"]
+        assert ("LEDGER: step 5 | done: answer block written | next: none — "
+                "case complete, idle silently") in rendered, case["id"]
+        assert "ONLY AFTER the append" in rendered, case["id"]
         assert "NEVER append a second block" in rendered, case["id"]
         assert "EXISTING `### CASE " + case["id"] + "` block" in rendered, case["id"]
         assert "provenance" not in rendered.lower(), case["id"]
