@@ -71,7 +71,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -162,6 +162,11 @@ def _run_id() -> str:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _now_iso_minus_seconds(seconds: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sudo_read(path: Path, timeout: float = 60.0) -> str | None:
@@ -287,6 +292,129 @@ def _docker_logs_since(container: str, since_iso: str, until_iso: str) -> str:
 # echo -> 2).
 PERSIST_RECEIPT_RE = re.compile(
     r"BRIDGE-PERSIST-OK: verified=\d+ top=[0-9a-f]{32}")
+
+
+# ---------------------------------------------------------------------------
+# L1 deltas (Balázs directive 2026-10-30 23:50 UTC): state-vs-claim
+# adherence cross-checks (1), layer-split verdict fields (2), stall
+# watchdog (3). ADDITIVE lane: the A/Q/E/R/P mechanism gate semantics and
+# the existing grade-case / grade.json contracts are unchanged — adherence
+# conditions are reported per case as their own layer and do not flip the
+# mechanism verdict.
+# ---------------------------------------------------------------------------
+
+DEFAULT_STALL_MINUTES = 15
+
+# Emission lane only: the agent's pin tool calls appear in docker logs as
+# ``COMMAND_RETURN: ((pin "LEDGER: ...") "SUCCESS, RETURN: PIN-SUCCESS")``.
+# The same LEDGER text is echoed ~8x inside later LLMRequest prompt lines
+# (live wr3t: 74 echo lines vs 9 emission lines) — echoes are excluded by
+# the same LLMRequest-line exclusion the persist-receipt census uses.
+LEDGER_PIN_RE = re.compile(r'COMMAND_RETURN: \(\(pin "(LEDGER: [^"]*)"')
+
+
+def _census_ledger_pins(since_iso: str, until_iso: str) -> dict:
+    """Collect the LEDGER lines the agent actually PINNED (emission lane,
+    COMMAND_RETURN only), in order, bounded by [since, until].
+
+    Docker/log errors are NOT gate evidence: empty pins + ``error``
+    recorded (classify_adherence then sees no pinned claim —
+    conservative, same failure mode as the persist-receipt census)."""
+    out: dict = {"pins": [], "window": [since_iso, until_iso]}
+    try:
+        logs = _docker_logs_since(CONTAINER_AGENT, since_iso, until_iso)
+    except Exception as e:  # docker down / container gone: not gate evidence
+        out["error"] = str(e)[:200]
+        return out
+    pins: list[str] = []
+    for ln in logs.splitlines():
+        if "LLMRequest[" in ln:
+            continue  # prompt echo, not an emission
+        m = LEDGER_PIN_RE.search(ln)
+        if m:
+            pins.append(m.group(1))
+    # de-duplicate consecutive identical re-pins (pin is a no-op dedup on
+    # the agent side; the ordered unique sequence is the claim sequence)
+    deduped: list[str] = []
+    for p in pins:
+        if not deduped or deduped[-1] != p:
+            deduped.append(p)
+    out["pins"] = deduped
+    return out
+
+
+def classify_adherence(case_id: str, last_ledger_pin: str,
+                       answers_text: str) -> list[str]:
+    """State-vs-claim cross-check (delta 1): compare the LAST pinned
+    ledger claim against the actual answers.md state for this case.
+
+    Conditions (additive layer; mechanism gate unchanged):
+    - ADHERENCE_DUPLICATE_BLOCK: more than one ``### CASE <id>`` block —
+      the wr3q/wr3s duplicate discipline breach (last-wins grading hides
+      it from the mechanism gate).
+    - ADHERENCE_FALSE_COMPLETION: the terminal pin claims ``answer block
+      written`` while the case block does NOT exist in answers.md — the
+      wr3r/wr3t false pre-write claim class.
+    An intermediate close-out pin with no block is an INCOMPLETE case
+    (the timeout lane already covers it) — not a false claim. No pins at
+    all is clean (nothing claimed)."""
+    conds: list[str] = []
+    block_count = answers_text.count(f"### CASE {case_id}")
+    if block_count > 1:
+        conds.append("ADHERENCE_DUPLICATE_BLOCK")
+    if ("answer block written" in (last_ledger_pin or "")
+            and block_count == 0):
+        conds.append("ADHERENCE_FALSE_COMPLETION")
+    return conds
+
+
+def _adherence_lane(case_id: str, pin_census: dict,
+                    answers_text: str) -> dict:
+    """Assemble the per-case adherence lane (conditions + evidence)."""
+    pins = pin_census.get("pins", [])
+    last_pin = pins[-1] if pins else ""
+    conditions = classify_adherence(case_id, last_pin, answers_text)
+    return {
+        "conditions": conditions,
+        "evidence": {
+            "last_ledger_pin": last_pin,
+            "block_count": answers_text.count(f"### CASE {case_id}"),
+            "ledger_pin_count": len(pins),
+            "pin_window": pin_census.get("window"),
+            **({"pin_census_error": pin_census["error"]}
+               if "error" in pin_census else {}),
+        },
+    }
+
+
+def _layer_split_fields(mechanism_verdict: str,
+                        mechanism_conditions: list[str],
+                        adherence_lane: dict) -> dict:
+    """Delta 2: layer-split reporting fields for a graded case."""
+    return {
+        "mechanism_verdict": mechanism_verdict,
+        "mechanism_conditions": list(mechanism_conditions),
+        "adherence_conditions": list(adherence_lane.get("conditions", [])),
+        "adherence_evidence": adherence_lane.get("evidence", {}),
+    }
+
+
+class StallWatchdog:
+    """Delta 3: abort a case when no forward signal has arrived for
+    ``stall_minutes`` (Balázs directive 22:54 UTC: a healthy case takes
+    ~10-15 min; a long silent stretch is a stall to investigate early,
+    not to wait out). The wall-clock cap stays as the backstop."""
+
+    def __init__(self, stall_minutes: int, now: float):
+        self.stall_seconds = stall_minutes * 60
+        self.last_progress = now
+
+    def register(self, moved: bool, now: float) -> None:
+        if moved:
+            self.last_progress = now
+
+    def should_abort(self, now: float) -> bool:
+        return (now - self.last_progress) >= self.stall_seconds
 
 
 def _census_persist_receipts(since_iso: str, until_iso: str) -> dict:
@@ -1201,6 +1329,10 @@ def agent_case(args) -> int:
         print(f"[agent-case] [dry-run] would poll answers.md for the marker")
         return 0
 
+    stall_minutes = getattr(args, "stall_minutes", DEFAULT_STALL_MINUTES)
+    watchdog = StallWatchdog(stall_minutes, start)
+    answers_state = _sudo_read(paths["answers"]) or ""
+    facts_state = _sudo_read(paths["facts_index"]) or ""
     while time.time() - start < timeout_s:
         content = _sudo_read(paths["answers"])
         if content is not None and marker in content:
@@ -1214,6 +1346,40 @@ def agent_case(args) -> int:
                 "post_snapshot": str(post),
             })
             return 0
+        # delta 3 (Balázs directive 22:54 UTC): a healthy case moves in
+        # ~10-15 min; a long silent stretch is a stall to investigate
+        # early, not wait out. Forward signals: new answers.md content,
+        # new facts-index.md content, or a fresh persist receipt.
+        moved = False
+        if content is not None and content != answers_state:
+            answers_state = content
+            moved = True
+        facts_now = _sudo_read(paths["facts_index"]) or ""
+        if facts_now != facts_state:
+            facts_state = facts_now
+            moved = True
+        try:
+            recent = _docker_logs_since(CONTAINER_AGENT,
+                                        _now_iso_minus_seconds(120),
+                                        _now_iso())
+            if PERSIST_RECEIPT_RE.search(recent):
+                moved = True
+        except Exception:
+            pass  # docker-log errors are not gate evidence
+        watchdog.register(moved, time.time())
+        if watchdog.should_abort(time.time()):
+            elapsed = int(time.time() - start)
+            print(f"[agent-case] STALL WATCHDOG: case {args.case} had no "
+                  f"forward signal for {stall_minutes}m (elapsed {elapsed}s)"
+                  " — aborting case for early investigation")
+            post = paths["vol"] / f"history.post-case-{args.run_id}-{args.case}.metta"
+            _sudo_run(["cp", str(paths["history"]), str(post)])
+            _write_json(RESULTS_DIR / args.run_id / f"agent-case-{args.case}.json", {
+                "case_id": args.case, "status": "stalled",
+                "elapsed_s": elapsed, "post_snapshot": str(post),
+                "stall_minutes": stall_minutes,
+            })
+            return 1
         time.sleep(30)
 
     post = paths["vol"] / f"history.post-case-{args.run_id}-{args.case}.metta"
@@ -1442,6 +1608,15 @@ def grade_case(args) -> int:
     if receipt_census.get("count", 0) > 0:
         window_receipt_count = receipt_census["count"]
 
+    # L1 delta 1+2 (Balázs directive 2026-10-30 23:50 UTC): state-vs-claim
+    # adherence cross-check — the LAST pinned ledger claim vs the actual
+    # answers.md block state, from the docker-log pin emission lane. The
+    # census is persisted BEFORE the reconstruction lane (same ordering
+    # discipline as the persist-receipt census: live-only evidence first).
+    ledger_pin_census = _census_ledger_pins(since_iso, _now_iso())
+    _write_json(rd / f"ledger-pins-{args.case}.json", ledger_pin_census)
+    adherence = _adherence_lane(args.case, ledger_pin_census, answers)
+
     # P-gate input: the Phase-4 reconstruction script's JSON payload for
     # this case (trace + FACTS + HANDLES in; conditions out). Harness
     # error (rc 1 / unreadable payload) aborts the grade command.
@@ -1497,6 +1672,10 @@ def grade_case(args) -> int:
         "case_id": args.case,
         "verdict": r.verdict,
         "conditions": r.conditions,
+        # L1 delta 2: layer-split — mechanism (A/Q/E/R/P) is reported
+        # unchanged; adherence is its own layer and does NOT flip the
+        # mechanism verdict.
+        **_layer_split_fields(r.verdict, r.conditions, adherence),
         "detail": r.detail,
         "history_window": {
             "mode": window_mode,
@@ -1676,6 +1855,14 @@ def full_sequential(args) -> int:
             per_case[case_id] = {
                 "verdict": g.get("verdict", "FAIL"),
                 "conditions": g.get("conditions", []),
+                # L1 delta 2: layer-split per case — mechanism verdict is
+                # the unchanged A/Q/E/R/P verdict; adherence conditions
+                # ride as their own layer (never flip the mechanism
+                # verdict).
+                "mechanism_verdict": g.get("mechanism_verdict",
+                                           g.get("verdict", "FAIL")),
+                "adherence_conditions": g.get("adherence_conditions", []),
+                "adherence_evidence": g.get("adherence_evidence", {}),
             }
             if rc == GATE_ERROR:
                 harness_error = True
@@ -1684,12 +1871,17 @@ def full_sequential(args) -> int:
             # every case graded independently; continue to the next regardless
 
     cases_passed = sum(1 for v in per_case.values() if v.get("verdict") == "PASS")
+    # L1 delta 2: layer-split summary — mechanism pass count is unchanged;
+    # adherence-clean count is reported as its own layer.
+    adherence_clean = sum(1 for v in per_case.values()
+                          if not v.get("adherence_conditions"))
     summary = {
         "run_id": args.run_id,
         "mode": "sequential",
         "gate_verdict": "PASS" if (cases_passed == len(case_ids) and not harness_error) else "FAIL",
         "cases_passed": cases_passed,
         "cases_total": len(case_ids),
+        "adherence_clean_cases": adherence_clean,
         "per_case": per_case,
         "timestamp": _now_iso(),
     }
@@ -2120,6 +2312,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="run cleanup-das before the sequential run (default)")
     fp.add_argument("--no-cleanup", dest="cleanup_first", action="store_false")
     fp.add_argument("--timeout-minutes", type=int, default=75)
+    # L1 delta 3 (Balázs directive 22:54 UTC): stall watchdog — abort
+    # a case early when no forward signal (answers.md/facts-index.md
+    # change or a fresh persist receipt) arrives for this many minutes;
+    # the wall-clock cap stays as the backstop.
+    fp.add_argument("--stall-minutes", type=int,
+                    default=DEFAULT_STALL_MINUTES)
     fp.add_argument("--no-trim-history", dest="trim_history",
                     action="store_false", default=True,
                     help="keep the full serialized history (v3 behavior); "
