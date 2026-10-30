@@ -1037,6 +1037,83 @@ def test_operator_headed_variable_premise_exempt():
         {"expr": CEILING_OVERHEAD, "handle": CEILING_OVERHEAD_HANDLE}]
 
 
+# ------------------------ combined `=>` + operator call (wr3r-20261028)
+
+# wr3r-20261028 original case (answers.md), VERBATIM: the agent recorded the
+# executed PLN call AND its output as ONE trace step — the COMBINED form
+# `(|- <p1> <p2>) => <output>`. On HEAD the `=>` branch split left/right but
+# kept the entire operator call as ONE left component; _strip_stv cannot
+# unwrap a call, so _parse_fact aborted the whole case ungraded ("expression
+# must start with a symbol", grade-case-original.json). FIX E: an operator-
+# headed LEFT component decomposes into its premise atoms via the existing
+# _split_operator_call; the RIGHT/output side stays ONE component.
+SEEN_WHEN_LOOKING_UP = ('(Evaluation (Predicate "seen-when-looking-up") '
+                        '(Concept "ceiling"))')
+SEEN_WHEN_LOOKING_UP_HANDLE = "bd112e48707fd22a19d186ca64de8675"  # live wr3r
+WR3R_STEP3_COMBINED = (
+    '(|- ((Evaluation (Predicate "seen-when-looking-up") (Concept "ceiling")) (stv 0.9 0.8)) '
+    '((Evaluation (Predicate "seen-when-looking-up") (Concept "ceiling")) (stv 0.9 0.8))) '
+    '=> ((Evaluation (Predicate "seen-when-looking-up") (Concept "ceiling")) (stv 0.81 0.64))'
+)
+WR3R_ORIGINAL_TRACE = ";".join([
+    '(Evaluation (Predicate "seen-when-looking-up") $X)',
+    SEEN_WHEN_LOOKING_UP,
+    WR3R_STEP3_COMBINED,
+])
+
+
+def test_combined_arrow_operator_call_decomposes_left_premises():
+    # wr3r original step 3 VERBATIM (pipeline preprocessing applied): kind
+    # derivation, atoms = [p1 clean, p2 clean, output clean] — the operator
+    # call's premises decompose via _split_operator_call, the output stays
+    # ONE component; handles match the live wr3r receipt (bd112e48…).
+    plan = rs._plan_step(_pipeline_step(WR3R_STEP3_COMBINED), 2,
+                         *rs._factories())
+    assert plan["kind"] == "derivation"
+    assert plan["atoms"] == [
+        {"expr": SEEN_WHEN_LOOKING_UP, "handle": SEEN_WHEN_LOOKING_UP_HANDLE},
+        {"expr": SEEN_WHEN_LOOKING_UP, "handle": SEEN_WHEN_LOOKING_UP_HANDLE},
+        {"expr": SEEN_WHEN_LOOKING_UP, "handle": SEEN_WHEN_LOOKING_UP_HANDLE},
+    ]
+
+
+def test_combined_arrow_operator_trace_end_to_end():
+    # THE regression pin for the wr3r original abort: the COMPLETE verbatim
+    # wr3r REASONING trace through the CLI path, mongo stubbed EMPTY (all
+    # atoms unstored -> vacuous pass): exit 0, NO harness error (HEAD: rc 1
+    # "trace unparseable ... step 3 component '(|- ...'").
+    with tempfile.TemporaryDirectory() as root:
+        repo, _ = _make_ledger_repo(root, [_ledger_entry()])
+        rc, payload, err = _run_case(
+            ["--trace", WR3R_ORIGINAL_TRACE, "--ledger-repo", repo,
+             "--case", "original"])
+        assert rc == 0
+        assert "harness error" not in err
+        assert [r["classification"] for r in payload["per_expression"]] == [
+            "query_clause", "unstored", "derivation"]
+        assert payload["missing"] == [] and payload["conditions"] == []
+        derivation = payload["per_expression"][2]
+        assert derivation["stored"] is False and derivation["sources"] == []
+
+
+def test_combined_arrow_variable_call_stays_whole():
+    # A variable-bearing operator call on the `=>` LEFT side stays ONE
+    # component (skipped per-component, exempt) — the surgical FIX E
+    # decomposes only GROUND-ONLY operator calls, so the pinned wr3q
+    # unsolvable/false `=>` shapes keep their whole-call exemption.
+    unsolvable_step = (
+        '(|~ ((Inheritance $X (Concept "Australia")) (stv 1.0 0.9)) '
+        '((Inheritance (Concept "Australia") (Concept "opaque")) (stv 1.0 0.9))) '
+        '=> ((Inheritance (Concept "opaque") (Concept "Australia")) '
+        '(stv 1.0 0.44751381215469616))'
+    )
+    plan = rs._plan_step(_pipeline_step(unsolvable_step), 4, *rs._factories())
+    assert plan["kind"] == "derivation"
+    output = '(Inheritance (Concept "opaque") (Concept "Australia"))'
+    assert plan["atoms"] == [{"expr": output, "handle": rs._parse_fact(
+        output, *rs._factories()).top_handle}]
+
+
 def _run_module_tests():
     passed = failed = 0
     for name in sorted(list(globals())):
