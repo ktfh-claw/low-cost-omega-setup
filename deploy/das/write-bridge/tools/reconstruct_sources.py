@@ -551,6 +551,21 @@ def _plan_step(step: str, index: int, node_cls, link_cls) -> dict:
     if "=>" in step or _OPERATOR_HEAD_RE.match(step):
         components = (_split_derivation_atoms(step) if "=>" in step
                       else _split_operator_call(step))
+        # FIX E (wr3r-20261028): an operator-headed LEFT component of a
+        # combined `(|- <p1> <p2>) => <output>` step is ONE s-expr the
+        # per-component loop cannot parse (the operator head is not a
+        # symbol). Decompose GROUND-ONLY operator calls into their premise
+        # atoms via the existing _split_operator_call (same premise
+        # semantics as the bare-step branch); variable-bearing calls stay
+        # ONE component (their variable premises are skipped anyway).
+        expanded: list[str] = []
+        for comp in components:
+            if _OPERATOR_HEAD_RE.match(comp.strip()) and not _is_variable_bearing(
+                    re.sub(r'"[^"]*"', "", comp)):
+                expanded.extend(_split_operator_call(comp))
+            else:
+                expanded.append(comp)
+        components = expanded
         atoms: list[dict] = []
         for atom_expr in components:
             clean, _stripped = _strip_stv(atom_expr)
