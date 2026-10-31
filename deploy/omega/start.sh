@@ -2,7 +2,7 @@
 set -euo pipefail
 
 container=omega-curiosity
-image=omegaclaw:das-a44739e
+image=omegaclaw:v0.1.23-577ef63
 
 cleanup() {
   /usr/bin/docker rm -f "$container" >/dev/null 2>&1 || true
@@ -22,7 +22,6 @@ cleanup
 --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/metta-grammar:/PeTTa/repos/Omega/plugins/metta-grammar:ro \
   --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins.yaml.overlay:/PeTTa/repos/Omega/config/plugins.yaml:ro \
   --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/das-read/das_skills.py:/PeTTa/repos/Omega/src/das_skills.py:ro \
-  --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/websearch-overlay/websearch.py:/PeTTa/repos/Omega/src/websearch.py:ro \
   --volume /home/ubuntu/omega-curiosity/config-overlay.yaml:/PeTTa/repos/Omega/config/config.yaml:ro \
   --env-file /home/ubuntu/omega-curiosity/runtime.env \
   "$image" \
