@@ -3,7 +3,10 @@
 # (read-only) in the agent container to activate the plugin; the
 # overlay exists so the stock file is never edited in place.
 #
-# Base stock content (verified live on the OVH image omegaclaw:das-f38217f):
+# Base stock content (verified live on the OVH image omegaclaw:das-f38217f;
+# updated 2026-10-31 for the v0.1.23 uplift: upstream renamed the openai
+# provider plugin to omega_openai in providers/ — the old name now trips
+# the upstream module-identity check and aborts startup):
 
 # plugins.yaml lists all plugins to be loaded by the agent
 # see /docs/reference-plugin-api.md for details
@@ -44,7 +47,7 @@
   loader: python
   location: "{REPO}/providers"
 
-- name: openai
+- name: omega_openai
   loader: python
   location: "{REPO}/providers"
 
