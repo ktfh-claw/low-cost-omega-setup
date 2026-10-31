@@ -1,24 +1,12 @@
-"""v17 prompt tests: the slim transparent-provenance prompt (T020).
+"""v17 prompt tests (v2 re-pin, 2026-10-31): the minimal pseudocode prompt.
 
-v17 (issue #2, spec §2.7/§8 item 1): the agent is UNAWARE of provenance.
-The standalone source-capture step, its ARCHIVE-OK receipt, the `source …`
-record lines, and the SOURCES: answer line are gone from the template; in
-their place the agent carries exactly three obligations: pass the source
-URL in the v3 add-atom call, record `expr <expression> top=<handle>` lines
-(the handle copied VERBATIM from the write receipt — it must survive wake
-cycles), and copy handles into the new HANDLES: line (between FACTS and
-REASONING, aligned BY ORDER with the FACTS expressions, each copied from
-the write receipt's `top=` or a das-retrieve receipt's `results=` handles).
-Everything else (hashing, ledger commits, verification) is invisible
-machinery — the words themselves must not appear.
-
-These tests pin the slim invariants so the v4 design cannot silently
-regress: no removed-mechanics vocabulary survives in the template, the
-v3 call form + `top=<handle>` record rule + HANDLES line are present,
-urls.txt stays the reference vocabulary (D5), the ledger/anti-loop/STOP
-contract is intact, and every case prompt renders with the slim contract
-(T020's test hook: "dry-run of `full` renders the slim prompt with the
-HANDLES line").
+Balázs directive 2026-10-31 11:31 UTC: prompt-only restructure — minimal,
+formal, pseudocode-style, exact tool references. The agent remains
+UNAWARE of provenance (no archive/SOURCES/git/sha256/provenance
+vocabulary), the v3 add-atom form + `top=<handle>` record rule + HANDLES
+line survive, and the close-out/STOP discipline survives as bare rules.
+Lesson narratives (wr3k/wr3p/wr3q/wr3r/o) are GONE from the template by
+design — their substance is pinned here as behavior rules, not stories.
 """
 
 import os
@@ -39,104 +27,100 @@ def _template() -> str:
         return f.read()
 
 
-def _segment(t: str, start: str, end: str) -> str:
-    return t[t.index(start):t.index(end)]
-
-
 # ---------------------------------------------------------------------------
 # negative greps: removed mechanics leave no vocabulary behind
 # ---------------------------------------------------------------------------
 
 def test_template_has_no_archive_vocabulary():
-    # the standalone capture step is gone — no archive word in any case
     t = _template()
     assert "archive" not in t.lower()
 
 
 def test_template_has_no_sources_line():
-    # the SOURCES: answer line is removed with the citation-pair rules
     t = _template()
     assert "SOURCES" not in t
 
 
 def test_template_has_no_git_or_sha256_tokens():
-    # git shas and content hashes are invisible machinery — never agent work
     t = _template()
     assert "git:" not in t
     assert "sha256" not in t
 
 
 def test_template_has_no_provenance_word():
-    # the agent is unaware of provenance — the word itself must not appear
     t = _template()
     assert "provenance" not in t.lower()
 
 
+def test_template_has_no_lesson_narratives():
+    # v2 removes the wr3x story references — rules survive, stories do not
+    t = _template()
+    for token in ("wr3k lesson", "wr3p lesson", "wr3q lesson",
+                  "wr3r lesson", "wr3o lesson", "lesson"):
+        assert token not in t, token
+
+
 # ---------------------------------------------------------------------------
-# positive greps: the v17 contract is present
+# positive greps: the v2 contract is present
 # ---------------------------------------------------------------------------
 
 def test_required_format_has_handles_line_between_facts_and_reasoning():
-    # §2.7 answers-block order: QUERY / DAS_RETRIEVE_OK / FACTS / HANDLES /
-    # REASONING / FINAL ANSWER — HANDLES sits between FACTS and REASONING
-    fmt = _segment(_template(), "### REQUIRED FORMAT", "Gate rules for the block")
+    fmt = _template()[_template().index("## Answer block format"):]
     i_facts = fmt.index("FACTS:")
     i_handles = fmt.index("HANDLES:")
     i_reasoning = fmt.index("REASONING:")
     assert i_facts < i_handles < i_reasoning, \
         "HANDLES must sit between FACTS and REASONING"
-    assert ("HANDLES: <the atom handles of the FACTS expressions, in the same "
-            "order") in fmt
+    assert ("HANDLES: <the atom handles of the FACTS expressions, in the "
+            "same order") in fmt
 
 
 def test_step1_record_line_carries_top_handle():
-    # `expr <the-exact-expression> top=<handle>` replaces `expr … verified=<n>`
-    # — the handle is copied VERBATIM from the receipt and survives wake
-    # cycles as the HANDLES: line's carrier
-    seg = _segment(_template(), "1. **EXTRACT", "2. **FORMALIZE")
+    seg = _template()
+    seg = seg[seg.index("1. EXTRACT"):seg.index("2. FORMALIZE")]
     assert "expr <the-exact-expression> top=<handle>" in seg
     assert "BRIDGE-PERSIST-OK: verified=<n> top=<handle>" in seg
-    assert "copied VERBATIM from the receipt's `top=` field" in seg
-    assert "receipt itself does not survive wake cycles" in seg
-    assert "feeds the `HANDLES:` line" in seg
+    assert "handle copied VERBATIM from the receipt's `top=`" in seg
+    assert "A fact without a fresh receipt is NOT persisted" in seg
 
 
 def test_step1_v3_add_atom_form():
-    # v3 grammar: the source URL rides the add-atom call (D5 — URL refs
-    # from the urls.txt list); write success is ONLY the top=-carrying
-    # receipt
-    seg = _segment(_template(), "1. **EXTRACT", "2. **FORMALIZE")
+    seg = _template()
+    seg = seg[seg.index("1. EXTRACT"):seg.index("2. FORMALIZE")]
     assert ('(metta "(add-atom &persistent (<expression>) \\"<source-url>\\" '
             '(stv 0.9 0.8))")') in seg
     assert "`<source-url>` is this file's URL from `{{URL_LIST_PATH}}`" in seg
 
 
 def test_url_list_stays_the_reference_vocabulary():
-    # urls.txt remains the agent's source-url vocabulary (D5)
     t = _template()
     assert "read `{{URL_LIST_PATH}}` ONCE" in t
     assert t.count("{{URL_LIST_PATH}}") >= 3
 
 
 def test_ledger_stop_final_answer_retained():
-    # the surviving discipline sections are untouched by the slim
     t = _template()
-    assert "## PINNED LEDGER — required, mechanical" in t
     assert "LEDGER: step <1-5> | done: <completed items> | next: <ONE literal tool call>" in t
-    assert "## STOP rule" in t
+    assert "## STOP" in t
     assert "FINAL ANSWER ({{CASE_ID}}): <answer>" in t
 
 
 def test_placeholders_all_present():
-    # run_benchmark.py:710-717 substitutes exactly these six
     t = _template()
     for ph in ("{{RUN_ID}}", "{{CASE_ID}}", "{{QUESTION}}",
                "{{URL_LIST_PATH}}", "{{ANSWERS_PATH}}", "{{FACTS_INDEX_PATH}}"):
         assert ph in t, ph
 
 
+def test_template_is_minimal():
+    # the directive's size target: v1 was ~2600 words; v2 must stay
+    # well under half of it
+    words = len(_template().split())
+    assert words <= 1200, f"template grew to {words} words"
+
+
 # ---------------------------------------------------------------------------
-# render: every case prompt renders slim, with the HANDLES line
+# render: every case prompt renders with the v2 contract
 # ---------------------------------------------------------------------------
 
 def _render(case) -> str:
@@ -146,9 +130,16 @@ def _render(case) -> str:
     return run_benchmark._render_case_prompt(args, case)
 
 
+def _banned(rendered: str) -> None:
+    assert "SOURCES" not in rendered
+    assert "archive" not in rendered.lower()
+    assert "git:" not in rendered
+    assert "provenance" not in rendered.lower()
+    assert "sha256" not in rendered
+    assert "lesson" not in rendered
+
+
 def test_rendered_prompt_carries_v17_contract_for_every_case():
-    # T020's hook: a dry-run of `full` renders the slim prompt with the
-    # HANDLES line and the v3 add-atom form, for every case in TEST_CASES
     cases = run_benchmark._facts_mod().TEST_CASES
     assert cases
     for case in cases:
@@ -160,239 +151,101 @@ def test_rendered_prompt_carries_v17_contract_for_every_case():
         assert ('(metta "(add-atom &persistent (<expression>) \\"<source-url>\\" '
                 '(stv 0.9 0.8))")') in rendered, case["id"]
         assert "expr <the-exact-expression> top=<handle>" in rendered, case["id"]
-        assert "SOURCES" not in rendered, case["id"]
-        assert "archive" not in rendered.lower(), case["id"]
-        assert "git:" not in rendered, case["id"]
-        assert "provenance" not in rendered.lower(), case["id"]
+        _banned(rendered)
 
 
 # ---------------------------------------------------------------------------
-# wr3o lessons (2026-10-28 live run): two agent-discipline failures the
-# slim prompt must prevent at the source — R_NOT_METTA from a bracketed
-# probe annotation in REASONING (unsolvable) and the E_FACTS_NOT_IN_INDEX +
-# H_MISMATCH pair from unwrapping a recorded expression while keeping its
-# receipt handle (false case)
+# wr3o substance (re-pinned as rules): bracketed annotations in
+# REASONING are prose; recorded expressions are copied with wrappers
+# intact; handle-expression pairs travel together
 # ---------------------------------------------------------------------------
 
 def test_step4_bans_bracket_annotations_in_reasoning():
-    # unsolvable case: a `[reverse-direction probe count=0]` bracket note
-    # inside REASONING is prose under the strict gate (R_NOT_METTA)
-    seg = _segment(_template(), "4. **EXECUTE", "5. **WRITE")
-    assert "NEVER annotate anything inside REASONING" in seg
-    assert "bracketed notes" in seg
-    assert "`R_NOT_METTA`" in seg
-    # the zero-count evidence rides in the block's receipt line, not REASONING
-    assert "DAS_RETRIEVE_OK ... count=0" in seg
-    assert "never a note in REASONING" in seg
-
-
-def test_gate_rule_reasoning_brackets_are_prose():
-    # the block's REASONING gate rule carries the same ban
-    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
-    assert "Bracketed annotations are prose too" in fmt
+    seg = _template()
+    seg = seg[seg.index("4. REASON"):seg.index("5. WRITE")]
+    assert "no words, no bracketed annotations anywhere" in seg
+    assert "Only parenthesized s-expressions" in seg
+    assert "its `(stv ...)` output stays on exec lines, never on the question clause" in seg
 
 
 def test_step5_facts_wrapper_preservation():
-    # false case: unwrapping `(Concept "...")` type wrappers from a recorded
-    # expression rewrites it — the rewritten form was never recorded and the
-    # receipt handle paired with it belongs to the original form
-    seg = _segment(_template(), "5. **WRITE", "### REQUIRED FORMAT")
+    seg = _template()
+    seg = seg[seg.index("5. WRITE"):seg.index("## Answer block format")]
     assert ("type wrappers such as `(Concept \"...\")` inside a stored "
             "expression are PART of the expression") in seg
-    assert "Unwrapping, simplifying, or re-formatting a recorded expression rewrites it" in seg
-    assert "`E_FACTS_NOT_IN_INDEX`" in seg
-    assert "`H_MISMATCH`" in seg
+    assert "no paraphrase, no unwrapping" in seg
 
 
 def test_step5_handles_pair_copy_rule():
-    # the recorded `expr <expression> top=<handle>` line pairs an expression
-    # with its handle — the pair must survive to the block intact
-    seg = _segment(_template(), "5. **WRITE", "### REQUIRED FORMAT")
+    seg = _template()
+    seg = seg[seg.index("5. WRITE"):seg.index("## Answer block format")]
     assert "A handle is valid ONLY with the exact expression it was issued for" in seg
-    assert "copy the PAIR intact" in seg
-
-
-def test_gate_rules_facts_and_handles_pair_discipline():
-    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
-    # FACTS bullet: the recorded form is the claim — wrappers and all
-    assert "The recorded form is the claim — wrappers and all" in fmt
-    # HANDLES bullet: the handle travels together with its expression
-    assert "Copy each handle TOGETHER with its expression" in fmt
+    assert "copied VERBATIM from its recorded `expr <the-exact-expression> top=<handle>` pair" in seg
 
 
 # ---------------------------------------------------------------------------
-# wr3p lesson (2026-10-28 live run): unsolvable step-0 verbatim discipline.
-# The agent wrote trace step 0 as the question clause WRAPPED in a
-# hand-annotated absence truth value `(( QUERY ) (stv 0.0 0.9))`; the gate
-# matches the first trace step against the executed QUERY (grading.py
-# R_TRACE_NOT_GROUNDED fires BEFORE the unsolvable index-grounding
-# exemption), so a rewritten first step fails the whole case. The prompt
-# must make the bare-first-step discipline explicit.
+# wr3p substance (re-pinned as rules): the trace opens with the bare
+# executed question clause — no stv pair, no wrapper
 # ---------------------------------------------------------------------------
 
 def test_step4_unsolvable_trace_opens_with_bare_question_clause():
-    # step 4: the trace's FIRST step is the question clause EXACTLY as
-    # executed — identical to the QUERY: line, no stv pair, no wrapper
-    seg = _segment(_template(), "4. **EXECUTE", "5. **WRITE")
-    assert "the question clause EXACTLY as you executed it" in seg
-    assert "identical to the `QUERY:` line" in seg
-    assert "NO `(stv ...)` pair attached" in seg
-    assert "NO wrapping parentheses" in seg
-    assert "`R_TRACE_NOT_GROUNDED`" in seg
-    # the absence probe's stv output belongs in exec lines, never on step 0
-    assert "never a wrapper on the first trace step" in seg
+    seg = _template()
+    seg = seg[seg.index("4. REASON"):seg.index("5. WRITE")]
+    assert "the question clause EXACTLY as executed" in seg
+    assert "character-for-character identical to your QUERY: line" in seg
+    assert "no `(stv ...)` pair attached, no wrapping parentheses" in seg
+    assert "the bare question clause followed by the reverse-direction probe clause(s)" in seg
 
 
-def test_gate_rule_reasoning_first_step_is_bare_query():
-    # the block's REASONING gate rule carries the same bare-first-step
-    # discipline (wr3p lesson named)
-    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
-    assert "the bare clause exactly as it stands on your `QUERY:` line" in fmt
-    assert "never wrapped in an extra parenthesis layer" in fmt
-    assert "never carrying an attached `(stv ...)` pair" in fmt
-    assert "wr3p lesson" in fmt
-    assert "failed the whole case" in fmt
-
-
-def test_gate_rule_unsolvable_trace_still_opens_with_query():
-    # the unsolvable bullet: probes' stv outputs stay in exec lines
-    fmt = _segment(_template(), "### REQUIRED FORMAT", "## Write artifacts")
-    assert "The trace still opens with the bare executed question clause" in fmt
-    assert "stays in the exec lines, never on the question clause" in fmt
-
-
-def test_rendered_prompt_carries_wr3p_step0_discipline_for_every_case():
-    # the discipline renders for every case and introduces no banned
-    # vocabulary
-    cases = run_benchmark._facts_mod().TEST_CASES
-    assert cases
-    for case in cases:
-        rendered = _render(case)
-        assert "the question clause EXACTLY as you executed it" in rendered, case["id"]
-        assert "never carrying an attached `(stv ...)` pair" in rendered, case["id"]
-        assert "The trace still opens with the bare executed question clause" in rendered, case["id"]
-        assert "provenance" not in rendered.lower(), case["id"]
-        assert "archive" not in rendered.lower(), case["id"]
-        assert "SOURCES" not in rendered, case["id"]
-        assert "git:" not in rendered, case["id"]
-        assert "sha256" not in rendered, case["id"]
+def test_gate_rules_block_format_discipline():
+    fmt = _template()
+    fmt = fmt[fmt.index("## Answer block format"):]
+    # first trace step is the bare QUERY clause
+    assert "the FIRST step is the bare QUERY clause — never wrapped, never with an attached `(stv ...)`" in fmt
+    # prose/brackets/stv rules
+    assert "Prose or bracketed annotations anywhere in REASONING FAIL" in fmt
+    assert "No interpreter `(stv ...)` outputs FAIL" in fmt
+    # facts/handles pairing
+    assert "An expression not in the RECORD FAILs" in fmt
+    assert "a re-typed, re-ordered, or composed handle FAILs" in fmt
+    # unanswerable rule
+    assert "Do NOT fabricate" in fmt
 
 
 # ---------------------------------------------------------------------------
-# wr3q lesson (2026-10-28 live run, false case): the agent skipped the
-# step-5 terminal ledger pin; a later wake cycle re-answered from the stale
-# (step-4) ledger and appended a SECOND, degenerate `### CASE false` block —
-# parse_answers_v2's last-wins made THAT block the graded one
-# (Q_DEGENERATE_PATTERN + Q_NOT_IN_HISTORY + Q_REISSUE_ERROR). Iterate #4:
-# the close-out ordering and one-block idempotency become explicit prompt
-# contract — pin BEFORE append, and a cycle finding an existing block
-# pins-and-idles instead of re-answering.
+# wr3q/wr3r substance (re-pinned as rules): close-out ordering and
+# one-block idempotency; truthful terminal pin only after the append
 # ---------------------------------------------------------------------------
 
 def test_ledger_closeout_pins_intermediate_before_terminal_after():
-    # TRUTHFUL close-out pins (wr3r lesson: the pre-append TERMINAL pin is
-    # a false claim — 4+ cycles idled on `done: answer block written` while
-    # answers.md stayed empty until a stochastic rescue appended it 19 min
-    # later). The intermediate pin lands BEFORE the append (it names the
-    # append as `next:` so a waking cycle issues the append instead of
-    # re-answering — wr3q duplicate-block guard); the terminal pin lands
-    # ONLY AFTER the append succeeded.
     t = _template()
-    seg = t[t.index("## PINNED LEDGER"):t.index("1. **EXTRACT")]
     assert ("LEDGER: step 5 | done: terminal close-out composed | "
             "next: append-file {{ANSWERS_PATH}} with the answer block "
-            "once, then pin the done line") in seg
+            "once, then pin the done line") in t
     assert ("LEDGER: step 5 | done: answer block written | next: none — "
-            "case complete, idle silently") in seg
-    assert "BEFORE the append" in seg
-    assert "ONLY AFTER the append" in seg
-    assert "NEVER pin `done: answer block written` before the block exists" in seg
-    assert "wr3r lesson" in seg
+            "case complete, idle silently") in t
+    seg = t[t.index("5. WRITE"):t.index("## Answer block format")]
+    assert "NEVER pin this line before the block exists" in seg
+    assert "after the append succeeds" in seg
 
 
 def test_ledger_existing_block_pins_and_idles():
-    # one block per case: a cycle finding an existing CASE block must
-    # pin-and-idle, never re-answer or append a second block
     t = _template()
-    seg = t[t.index("## PINNED LEDGER"):t.index("1. **EXTRACT")]
-    assert "EXISTING `### CASE {{CASE_ID}}` block" in seg
-    assert "NOT answer again" in seg
-    assert "second block" in seg
-    # the pinned-but-unappended gap: copy the record, never re-run steps
-    assert "terminal ledger is pinned but" in seg
-    assert "never re-run" in seg.lower()
-
-
-def test_step5_closeout_order_binding():
-    # step 5's tail carries the binding close-out order plus the
-    # pre-append duplicate check: (1) duplicate check, (2) intermediate
-    # pin, (3) append, (4) terminal pin ONLY AFTER the append succeeded
-    seg = _segment(_template(), "5. **WRITE", "### REQUIRED FORMAT")
-    assert "Close-out order is BINDING" in seg
-    assert "four moves, in this order" in seg
-    assert ("LEDGER: step 5 | done: terminal close-out composed | "
-            "next: append-file {{ANSWERS_PATH}} with the answer block "
-            "once, then pin the done line") in seg
-    assert ("LEDGER: step 5 | done: answer block written | next: none — "
-            "case complete, idle silently") in seg
-    assert "ONLY AFTER the append" in seg
-    assert "already carries a `### CASE {{CASE_ID}}` block" in seg
+    seg = t[t.index("5. WRITE"):t.index("## Answer block format")]
+    assert "existing `### CASE {{CASE_ID}}` block" in seg
+    assert "already answered" in seg
     assert "NEVER append a second block" in seg
-    # copy rule before the write order (v12 pin stays valid)
-    assert seg.index("VERBATIM") < seg.index("append the block")
 
 
-def test_stop_rule_names_both_completion_conditions():
-    # DONE = block appended AND terminal pin pinned (truthfully — the
-    # terminal pin is issued only after the append succeeded, never
-    # before); a found-block cycle may pin the missing terminal line and
-    # NOTHING else; a duplicate block fails the run (wr3q: the duplicate
-    # was the graded block; wr3r: a pre-write terminal pin idled every
-    # following cycle)
-    stop = _template()
-    stop = stop[stop.index("## STOP rule"):]
-    assert "BOTH" in stop
-    assert "terminal ledger" in stop
-    assert "must do NOTHING" in stop
-    assert "second `### CASE {{CASE_ID}}` block" in stop
-    assert "wr3q lesson" in stop
-    assert "only AFTER the append" in stop
-    assert "never a claim before the write exists" in stop
-
-
-def test_rendered_prompt_carries_wr3q_closeout_discipline_for_every_case():
-    # the close-out discipline renders for every case and introduces no
-    # banned vocabulary
+def test_rendered_prompt_carries_closeout_discipline_for_every_case():
     cases = run_benchmark._facts_mod().TEST_CASES
     assert cases
     for case in cases:
         rendered = _render(case)
-        assert "Close-out order is BINDING" in rendered, case["id"]
         assert "done: terminal close-out composed" in rendered, case["id"]
         assert ("LEDGER: step 5 | done: answer block written | next: none — "
                 "case complete, idle silently") in rendered, case["id"]
-        assert "ONLY AFTER the append" in rendered, case["id"]
+        assert "NEVER pin this line before the block exists" in rendered, case["id"]
         assert "NEVER append a second block" in rendered, case["id"]
-        assert "EXISTING `### CASE " + case["id"] + "` block" in rendered, case["id"]
-        assert "provenance" not in rendered.lower(), case["id"]
-        assert "archive" not in rendered.lower(), case["id"]
-        assert "SOURCES" not in rendered, case["id"]
-        assert "git:" not in rendered, case["id"]
-        assert "sha256" not in rendered, case["id"]
-
-
-def test_rendered_prompt_carries_wr3o_lessons_for_every_case():
-    # the discipline additions render for every case and introduce no banned
-    # vocabulary
-    cases = run_benchmark._facts_mod().TEST_CASES
-    assert cases
-    for case in cases:
-        rendered = _render(case)
-        assert "NEVER annotate anything inside REASONING" in rendered, case["id"]
-        assert "copy the PAIR intact" in rendered, case["id"]
-        assert ("type wrappers such as `(Concept \"...\")`" in rendered), case["id"]
-        assert "provenance" not in rendered.lower(), case["id"]
-        assert "archive" not in rendered.lower(), case["id"]
-        assert "SOURCES" not in rendered, case["id"]
-        assert "git:" not in rendered, case["id"]
-        assert "sha256" not in rendered, case["id"]
+        assert "existing `### CASE " + case["id"] + "` block" in rendered, case["id"]
+        _banned(rendered)

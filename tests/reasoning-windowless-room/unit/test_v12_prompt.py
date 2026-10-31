@@ -39,49 +39,43 @@ def _segment(t: str, start: str, end: str) -> str:
 
 
 def test_facts_line_verbatim_copy_contract():
-    # the format-block FACTS line names the verbatim-copy rule and the
-    # blocking condition it prevents
+    # v2 re-pin (2026-10-31): the format-block FACTS line names the
+    # verbatim-copy rule from the RECORD
     t = _template()
-    assert ("FACTS: <the exact `expr` expressions copied VERBATIM from your "
-            "extraction record") in t
-    assert "no new or paraphrased expressions" in t
+    assert ("FACTS: <the exact expr expressions copied VERBATIM from the "
+            "RECORD, semicolon-separated>") in t
+    assert "no paraphrase, no unwrapping" in t
 
 
 def test_step5_facts_copy_before_write():
-    # step 5 carries the copy-not-compose rule BEFORE the write order,
-    # names E_FACTS_NOT_IN_INDEX and the wr3k lesson, and states the
-    # either-persist-first-or-omit resolution
+    # v2 re-pin: step 5 carries the copy-not-compose rule with the
+    # wrapper-preservation discipline, before the close-out moves
     t = _template()
-    seg = _segment(t, "5. **WRITE the answer block", "### REQUIRED FORMAT")
-    assert "copy the exact `expr` expressions this answer used, character-for-character VERBATIM" in seg
-    assert "E_FACTS_NOT_IN_INDEX" in seg
-    assert "wr3k lesson" in seg
-    assert "answer-time glosses" in seg
-    # copy rule before the write order (iterate #4 re-point: the close-out
-    # tail now renders the append as move (3) of the binding sequence)
-    assert seg.index("VERBATIM") < seg.index("append the block")
-    assert "either persist it first" in seg
+    seg = _segment(t, "5. WRITE", "## Answer block format")
+    assert ("copy the exact `expr` expressions this answer used, "
+            "character-for-character from the RECORD") in seg
+    assert "type wrappers such as `(Concept \"...\")` inside a stored expression are PART of the expression" in seg
+    assert "no paraphrase, no unwrapping" in seg
+    # copy rule before the close-out moves
+    assert seg.index("character-for-character") < seg.index("four moves in this order")
+    # the blocking condition rides the format-block rules
+    assert "An expression not in the RECORD FAILs" in t
 
 
 def test_gate_rules_facts_anti_gloss():
-    # the gate-rules FACTS bullet explains WHY unrecorded expressions fail
-    # (false claim even when the answer is correct) and where plain-language
-    # phrasing belongs (FINAL ANSWER text only)
+    # v2 re-pin: the format-block rules reject unrecorded expressions and
+    # non-verbatim handles
     t = _template()
-    seg = _segment(t, "FACTS:` line quoting", "- `REASONING:")
-    assert "VERBATIM COPY" in seg
-    assert "an expression that was never recorded is a false claim" in seg
-    assert "put the plain-language version only in the FINAL ANSWER text" in seg
+    seg = _segment(t, "## Answer block format", "## STOP")
+    assert "An expression not in the RECORD FAILs" in seg
+    assert "a re-typed, re-ordered, or composed handle FAILs" in seg
+    assert "A knowledge case with no FACTS:/HANDLES: lines FAILs" in seg
 
 
 def test_step1_answer_vocabulary():
-    # step 1 now binds BOTH the query and the FACTS line to the record's
-    # exact spellings — the gloss trap is answer-side, not query-side only
+    # v2 re-pin: step 2 binds the QUERY to the record's exact spellings;
+    # the FACTS binding rides step 5's copy rule
     t = _template()
-    seg = _segment(t, "1. **EXTRACT", "2. **FORMALIZE")
-    # v17: the binding drops its SOURCES half (the SOURCES: line is
-    # removed); the record binds the query and the FACTS line, and every
-    # recorded `expr` line carries its write's handle for the HANDLES:
-    # line
-    assert "This record is your query and answer vocabulary" in seg
-    assert "an unrecorded expression on a FACTS: line is a false claim" in seg
+    seg = _segment(t, "2. FORMALIZE", "3. RETRIEVE")
+    assert "exact predicate names and literal spellings from the RECORD" in seg
+    assert "keep stored arity/shape/direction" in seg

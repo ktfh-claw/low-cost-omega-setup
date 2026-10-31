@@ -201,13 +201,13 @@ def test_case_grading_guidance_is_answer_only_wording():
 
 
 def test_template_names_answer_judge_honestly():
-    """v15b/v16: the template no longer claims blanket determinism —
-    format gates stay deterministic, answer substance is LLM-judged."""
+    """v15b/v16 substance (v2 re-pin, 2026-10-31): the template no longer
+    claims blanket determinism — format gates stay deterministic
+    (exact regexes), answer substance is LLM-judged with judge isolation."""
     with open(os.path.join(HERE, "..", "agent_prompt_template.md"),
               encoding="utf-8") as f:
         t = f.read()
-    assert "GRADED BY A MACHINE GATE" in t
+    assert "machine gate parses your answers file with exact regexes" in t
     assert "DETERMINISTIC MACHINE GATE" not in t
     assert "exact regexes" in t            # format gates unchanged
-    assert "LLM evaluator" in t           # answer substance = judge
-    assert "sees only the question" in t   # judge isolation, agent-visible
+    assert "a judge reads only your FINAL ANSWER line" in t   # judge isolation, agent-visible

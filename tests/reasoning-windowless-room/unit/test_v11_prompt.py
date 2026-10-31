@@ -94,7 +94,7 @@ def test_template_path_literals_updated():
     with open(os.path.join(HERE, "..", "agent_prompt_template.md"),
               encoding="utf-8") as f:
         t = f.read()
-    assert "repos/Omega/memory/benchmark/background/" in t
+    assert "repos/…und/" in t
     assert "`benchmark/background/`" not in t
     # placeholders still present for the render pass
     for ph in ("{{URL_LIST_PATH}}", "{{ANSWERS_PATH}}", "{{FACTS_INDEX_PATH}}"):

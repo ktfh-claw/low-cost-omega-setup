@@ -170,14 +170,15 @@ def test_query_post_regex_requires_2xx():
 # ---------------------------------------------------------------------------
 
 def test_prompt_copies_handles_verbatim():
+    # v2 re-pin (2026-10-31): the anti-mispair rule rides the minimal
+    # step-5 rules — handles are verbatim copies of recorded pairs, and
+    # the gate rejects re-typed/re-ordered/composed handles
     here = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(here, "..", "agent_prompt_template.md")) as f:
+    with open(os.path.join(here, "..", "agent_prompt_template.md"),
+              encoding="utf-8") as f:
         t = f.read()
-    # v17: the anti-mispair rule now covers HANDLES — every handle is a
-    # character-for-character copy from a receipt the agent holds (the
-    # write receipt's `top=` or a das-retrieve receipt's `results=`
-    # handles), never re-typed, never re-ordered, never composed, and
-    # anything outside a held receipt is fabricated
-    assert "never re-type a handle from memory" in t
-    assert "never re-typed, never re-ordered, never composed" in t
-    assert "A handle that appears in no receipt you hold is fabricated" in t
+    assert "one handle per FACTS expression, same order" in t
+    assert ("each copied VERBATIM from its recorded `expr <the-exact-expression> "
+            "top=<handle>` pair") in t
+    assert "A handle is valid ONLY with the exact expression it was issued for" in t
+    assert "a re-typed, re-ordered, or composed handle FAILs" in t

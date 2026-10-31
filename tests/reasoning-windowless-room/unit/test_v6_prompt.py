@@ -1,18 +1,9 @@
-"""v6 prompt contract: campaign-style fixed pipeline, no open-ended study.
+"""v6 prompt contract (v2 re-pin, 2026-10-31): fixed pipeline, no
+open-ended study.
 
-2026-10-24 19:50 UTC directive (wr3f iteration): both next-lever
-recommendations applied — campaign-style prompt structure AND the
-reasoning-trace + answer-write steps moved to the top of the task list
-(deliverable-first framing) — plus the open-ended study/research step
-REMOVED entirely: extraction is ONE bounded pass over the background
-sources. These tests pin the v6 template invariants so the
-convergence-ordering fix cannot silently regress.
-
-v17 re-point (issue #2, spec §8 item 1): the skip rule drops its `git:`
-marker (skip = the file's clauses are already recorded as `expr` lines)
-and the answer-block contract swaps the removed SOURCES: line for the
-new HANDLES: line. All other v6 invariants survive the slim prompt
-unchanged.
+Balázs directive 2026-10-31 11:31 UTC: minimal pseudocode prompt. The
+substance of every v6 invariant survives the rewrite; the pinned
+wording is updated to the v2 template's.
 """
 import os
 import sys
@@ -30,26 +21,21 @@ def _template() -> str:
 
 def test_task_list_fixed_pipeline_order():
     t = _template()
-    steps = [
-        "1. **EXTRACT",
-        "2. **FORMALIZE",
-        "3. **RETRIEVE",
-        "4. **EXECUTE THE REASONING",
-        "5. **WRITE the answer block",
-    ]
+    steps = ["1. EXTRACT", "2. FORMALIZE", "3. RETRIEVE", "4. REASON",
+             "5. WRITE"]
     pos = [t.index(s) for s in steps]  # raises if any step is missing
-    assert pos == sorted(pos), "task-list steps out of order or missing"
+    assert pos == sorted(pos), "procedure steps out of order or missing"
 
 
 def test_deliverable_first():
+    # the reasoning trace is deliverable 1, the answer block deliverable 2,
+    # named in order inside the procedure
     t = _template()
-    assert "THE DELIVERABLE" in t
-    # the deliverable section precedes the task list
-    assert t.index("THE DELIVERABLE") < t.index("TASK LIST")
-    # the reasoning trace is deliverable #1, the answer block #2
-    assert t.index("The MeTTa reasoning trace") < t.index("The answer block")
+    assert "(deliverable 1)" in t
+    assert "(deliverable 2)" in t
+    assert t.index("(deliverable 1)") < t.index("(deliverable 2)")
     # fixed-pipeline framing is explicit
-    assert "fixed pipeline" in t
+    assert "five steps, each once, in order" in t
 
 
 def test_no_open_ended_study_step():
@@ -59,86 +45,71 @@ def test_no_open_ended_study_step():
     assert "Check what you already have." not in t
     assert "the sources you will actually use" not in t
     # explicit no-research rule present
-    assert "NO open-ended study or research step" in t
+    assert "no research, no extra study, no messages" in t
     # single-pass, no-re-read rules present
-    assert "read it ONCE" in t
-    assert "may NOT open any background file again" in t
-    assert "no summarizing, no analysis, no further study" in t
+    assert "read-file ONCE" in t
+    assert "Never open that file again" in t
 
 
 def test_record_reuse_skip_rule():
+    # already-recorded sources are skipped deterministically
     t = _template()
-    # already-recorded sources are skipped deterministically (no re-read,
-    # no re-write) — cross-case carry-over without a relevance decision
-    # (v17: "recorded" = the file's clauses sit in the record as `expr`
-    # lines — the git marker went with the capture step)
-    assert "already lists this file's clauses as `expr` lines, SKIP it" in t
+    assert "skip files already recorded in the RECORD" in t
 
 
 def test_campaign_anti_loop_rules_present():
+    # v2: the anti-loop rules ride the procedure + working-state rules
     t = _template()
-    assert "Campaign rules" in t
-    # v8: unsure-resolution now routes through the PINNED LEDGER's next:
-    # field (wr3g read-oscillation fix) instead of re-deriving the next
-    # undone step from the task list
-    assert "next undone step's literal call" in t
-    assert "never repeat a completed step" in t
-    assert 'never "study more first"' in t
+    assert "Never issue the same query more than twice" in t
+    assert "issue the `next:` call immediately" in t
+    assert "Never redo a recorded result" in t
 
 
 def test_answer_block_contract_unchanged():
+    # the block lines are pinned verbatim to the v2 template
     t = _template()
-    # v17: the removed SOURCES: line is replaced by the HANDLES: line
-    # (between FACTS and REASONING, aligned by order with the FACTS
-    # expressions) — the other block lines are pinned verbatim
     for line in (
         "QUERY: <the exact metta pattern you executed>",
         "DAS_RETRIEVE_OK untrusted=true count=<n> truncated=... results=[...]",
-        "FACTS: <the exact `expr` expressions copied VERBATIM from your extraction record that this answer used, semicolon-separated — no new or paraphrased expressions>",
-        "HANDLES: <the atom handles of the FACTS expressions, in the same order — one handle per expression, space-separated, each copied VERBATIM from a receipt you hold>",
-        "REASONING: <the MeTTa reasoning trace: question clause; fact step(s); conclusion clause — semicolon-separated s-expressions, NOT prose>",
+        "FACTS: <the exact expr expressions copied VERBATIM from the RECORD, semicolon-separated>",
+        "HANDLES: <the atom handles of the FACTS expressions, in the same order, space-separated, each copied VERBATIM from its expr … top= pair>",
+        "REASONING: <the executed MeTTa trace: question clause; fact clauses; derivation steps with interpreter (stv ...) outputs — s-expressions only, no prose>",
         "FINAL ANSWER ({{CASE_ID}}): <answer>",
     ):
         assert line in t, line[:40]
 
 
 def test_trace_deliverable_contract():
-    t = _template()
     # step-4 trace shape matches the R-gate parser contract
-    # wr3p iterate (2026-10-28): step-0 verbatim discipline — the first
-    # trace step is the question clause EXACTLY as executed, bare
-    assert "the question clause EXACTLY as you executed it" in t
-    assert "copied VERBATIM from your extraction record" in t
-    # v6 executed-trace standard (scenario A/A2 lesson, 2026-10-25):
-    # the reasoning must be EXECUTED via the metta skill — the operator
-    # contract, the exec-record discipline, and the R_NOT_EXECUTED warning
-    assert "STRICTLY 2-ARGUMENT" in t
+    t = _template()
+    assert "the question clause EXACTLY as executed" in t
+    assert "character-for-character identical to your QUERY: line" in t
+    assert "STRICTLY 2-argument" in t
     assert "feed the derived output of one call in as a premise of the next call" in t
     assert "exec <metta-call> => <interpreter-output-with-stv>" in t
-    assert "R_NOT_EXECUTED" in t
-    # trace persisted to the extraction record (working memory)
-    assert "starting with `trace:`" in t
+    # trace persisted to the record (working memory)
+    assert "starting `trace:`" in t
     # unsolvable-case trace form (shape kept, grounding exempt)
     assert "the bare question clause followed by the reverse-direction probe clause(s)" in t
 
 
 def test_step5_deliverable_first_write():
-    # scenario-A2 defect 1 (answer.md never written; the Telegram send was
-    # treated as the deliverable): step 5 must order the file write FIRST
+    # the file write is an ordered close-out move, before the terminal pin
     t = _template()
-    step5 = t.index("5. **WRITE the answer block")
-    seg = t[step5:t.index("### REQUIRED FORMAT")]
-    assert "IMMEDIATELY after appending the trace" in seg
-    assert "do not message anyone first" in seg
+    step5 = t.index("5. WRITE")
+    seg = t[step5:t.index("## Answer block format")]
+    assert "four moves in this order" in seg
+    assert "append-file the block" in seg
+    # terminal pin only after the append succeeded
+    assert "after the append succeeds" in seg
 
 
 def test_stop_rule_idle_discipline():
-    # scenario-A2 defect 2 (idle re-sends on every wake after completion):
-    # the STOP rule must forbid sends/verification/rewrites on later wakes
+    # STOP forbids sends/verification/rewrites on later wakes
     t = _template()
-    stop = t[t.index("## STOP rule"):]
-    assert "no more sends" in stop
-    assert "must do NOTHING" in stop
+    stop = t[t.index("## STOP"):]
+    assert "no sends" in stop
+    assert "does NOTHING" in stop
     assert "Idle silently" in stop
 
 
