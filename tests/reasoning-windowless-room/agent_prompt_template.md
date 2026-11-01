@@ -38,12 +38,27 @@ Maintain ONE ledger line and act on it:
 - **Close-out — truthful pins, intermediate pin lands BEFORE the append, terminal pin lands ONLY AFTER the append succeeds:** when the answer block is composed, FIRST `pin` `LEDGER: step 5 | done: terminal close-out composed | next: append-file {{ANSWERS_PATH}} with the answer block once, then pin the done line`, THEN append the block to `{{ANSWERS_PATH}}` IMMEDIATELY. A wake cycle arriving between the two reads the intermediate ledger and issues the append it names — it never re-answers the case (wr3q lesson: the skipped pin let a later cycle re-answer and append a duplicate block). NEVER pin `done: answer block written` before the block exists in the file (wr3r lesson: a pre-write terminal pin is a false claim — every later cycle idled on it while the answers file stayed empty). When the append returns success, `pin` `LEDGER: step 5 | done: answer block written | next: none — case complete, idle silently` and STOP entirely (see STOP rule).
 - **A wake cycle that finds an EXISTING `### CASE {{CASE_ID}}` block in `{{ANSWERS_PATH}}`:** the case is already answered — do NOT answer again, do NOT append a second block (the gate grades the LAST block in the file — a duplicate overwrites your good answer with a worse one). If the terminal ledger line is missing, pin `LEDGER: step 5 | done: answer block written | next: none — case complete, idle silently` and idle; if the terminal ledger is pinned but the block is not in the file, copy the answer from your extraction record — never re-run the case's steps.
 
+
+### Phase 1 — EXTRACTION (das-extract-knowledge skill)
+
+Follow the **das-extract-knowledge** skill procedure for this phase: read the background sources ONCE each (bounded single-pass), extract predicates, persist each via das-write (add-atom), record receipts to {{FACTS_INDEX_PATH}}, and write the checkpoint manifest. The skill description carries the full generic procedure; this template wires it to the benchmark's artifact paths.
+
 1. **EXTRACT — one bounded pass over the background sources.** For each background source file in `repos/Omega/memory/benchmark/background/`, exactly once:
    - If your extraction record already lists this file's clauses as `expr` lines, SKIP it — do not re-read it, do not re-write its clauses; they are already recorded and in DAS.
    - Otherwise read it ONCE. You may NOT open any background file again after processing it.
    - Derive the predicate clauses (facts) from the text and store EACH ONE via: `(metta "(add-atom &persistent (<expression>) \"<source-url>\" (stv 0.9 0.8))")` — `<source-url>` is this file's URL from `{{URL_LIST_PATH}}`. Success is ONLY `BRIDGE-PERSIST-OK: verified=<n> top=<handle>`. After EACH receipt, IMMEDIATELY append ONE line to `{{FACTS_INDEX_PATH}}`: `expr <the-exact-expression> top=<handle>` — the handle copied VERBATIM from the receipt's `top=` field (the receipt itself does not survive wake cycles, the recorded handle does, and it feeds the `HANDLES:` line of your answer block later). ONE line per receipt — never batch. A fact WITHOUT a fresh `BRIDGE-PERSIST-OK` receipt is NOT persisted: never record it. The gate re-probes every recorded expression against DAS (`E_INDEXED_NOT_PERSISTED`) — an expression you recorded but did not persist is a recorded false claim.
    - Extract the clauses and move on: no summarizing, no analysis, no further study of the file.
    When every source file has been processed or skipped once, step 1 is DONE — proceed to step 2 immediately, even if you think more could be extracted. This record is your query and answer vocabulary: reuse its exact predicate names and literal spellings VERBATIM in every query and on every FACTS: line; a reformulated clause matches nothing, and an unrecorded expression on a FACTS: line is a false claim the gate rejects.
+
+
+### Checkpoint manifest (phase boundary)
+
+The checkpoint manifest is the phase boundary between extraction and reasoning: the extraction phase writes it (recording the extracted predicates, their write receipts/handles, sources, and a timestamp), and the reasoning phase reads it as its entry point into the knowledge base. The manifest lives in the Omega memory volume at `/PeTTa/repos/Omega/memory/knowledge-checkpoints/` (one manifest per corpus). After the extraction phase completes, write the checkpoint manifest recording what was extracted; the reasoning phase reads it to know which predicates exist, verbatim, for query reuse.
+
+
+### Phase 2 — REASONING (das-grounded-reasoning skill)
+
+Follow the **das-grounded-reasoning** skill procedure for this phase: read the checkpoint manifest, formalize the question into MeTTa, retrieve from DAS, execute the reasoning, answer strictly from the stored facts. The skill description carries the full generic procedure; this template wires it to the benchmark's artifact paths.
 
 2. **FORMALIZE the question as one MeTTa clause.** Reuse the exact predicate names and literal spellings from your extraction record: ground one side with a quoted literal, bind the target with a `$variable`, keep the stored arity/shape and direction. This clause is your QUERY.
 

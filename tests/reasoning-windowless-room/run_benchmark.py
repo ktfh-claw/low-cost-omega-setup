@@ -714,6 +714,38 @@ def preflight(args) -> int:
         except Exception as e:
             checks["metta_plugin_mounted"] = f"error: {e}"
 
+        # v-split (2026-11-01, skill-split directive): the two new plugin
+        # skills (das-extract-knowledge + das-grounded-reasoning) must be
+        # mounted in the running agent container AND their skill
+        # descriptions must carry the required contract markers — the
+        # same check pattern as metta_plugin_mounted (live container file
+        # exists). The repo artifact check (grep for the description
+        # anchors) guards the mounted copy.
+        try:
+            r = _run(["docker", "exec", CONTAINER_AGENT, "test", "-f",
+                      "/PeTTa/repos/Omega/plugins/das-extract-knowledge/das-extract-knowledge.metta"])
+            checks["das_extract_knowledge_plugin_mounted"] = "ok" if r.returncode == 0 else "missing"
+        except Exception as e:
+            checks["das_extract_knowledge_plugin_mounted"] = f"error: {e}"
+        try:
+            plugin_path = "/home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-extract-knowledge/das-extract-knowledge.metta"
+            r = _run(["grep", "-c", "das-extract-knowledge", plugin_path])
+            checks["das_extract_knowledge_skill_description"] = "ok" if r.returncode == 0 and r.stdout.strip() != "0" else "MISSING"
+        except Exception as e:
+            checks["das_extract_knowledge_skill_description"] = f"error: {e}"
+        try:
+            r = _run(["docker", "exec", CONTAINER_AGENT, "test", "-f",
+                      "/PeTTa/repos/Omega/plugins/das-grounded-reasoning/das-grounded-reasoning.metta"])
+            checks["das_grounded_reasoning_plugin_mounted"] = "ok" if r.returncode == 0 else "missing"
+        except Exception as e:
+            checks["das_grounded_reasoning_plugin_mounted"] = f"error: {e}"
+        try:
+            plugin_path = "/home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-grounded-reasoning/das-grounded-reasoning.metta"
+            r = _run(["grep", "-c", "das-grounded-reasoning", plugin_path])
+            checks["das_grounded_reasoning_skill_description"] = "ok" if r.returncode == 0 and r.stdout.strip() != "0" else "MISSING"
+        except Exception as e:
+            checks["das_grounded_reasoning_skill_description"] = f"error: {e}"
+
         # v3: Omega's native embedding memory (remember/query skills) needs
         # the chroma_db target dir to exist in the volume; the image's
         # /PeTTa/chroma_db symlink dangles otherwise and EVERY boot logs
@@ -754,6 +786,10 @@ def preflight(args) -> int:
         checks["das_write_grammar_v3"] = "dry-run"
         checks["metta_skill_upgraded"] = "dry-run"
         checks["metta_plugin_mounted"] = "dry-run"
+        checks["das_extract_knowledge_plugin_mounted"] = "dry-run"
+        checks["das_extract_knowledge_skill_description"] = "dry-run"
+        checks["das_grounded_reasoning_plugin_mounted"] = "dry-run"
+        checks["das_grounded_reasoning_skill_description"] = "dry-run"
         checks["canary_fetch_ai"] = "dry-run"
         checks["judge_smoke"] = "dry-run"
 
