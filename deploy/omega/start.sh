@@ -19,7 +19,9 @@ cleanup
   --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-write:/PeTTa/repos/Omega/plugins/das-write:ro \
   --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-read:/PeTTa/repos/Omega/plugins/das-read:ro \
   --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/pin:/PeTTa/repos/Omega/plugins/pin:ro \
---volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/metta-grammar:/PeTTa/repos/Omega/plugins/metta-grammar:ro \
+  --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/metta-grammar:/PeTTa/repos/Omega/plugins/metta-grammar:ro \
+  --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-extract-knowledge:/PeTTa/repos/Omega/plugins/das-extract-knowledge:ro \
+  --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins/das-grounded-reasoning:/PeTTa/repos/Omega/plugins/das-grounded-reasoning:ro \
   --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/plugins.yaml.overlay:/PeTTa/repos/Omega/config/plugins.yaml:ro \
   --volume /home/ubuntu/low-cost-omega-setup/deploy/omega/das-read/das_skills.py:/PeTTa/repos/Omega/src/das_skills.py:ro \
   --volume /home/ubuntu/omega-curiosity/config-overlay.yaml:/PeTTa/repos/Omega/config/config.yaml:ro \
