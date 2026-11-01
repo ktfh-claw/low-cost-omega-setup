@@ -102,3 +102,27 @@
 - name: metta-grammar
   loader: metta
   location: "{REPO}/plugins/metta-grammar"
+
+# Appended: the das-extract-knowledge plugin (2026-11-01, skill-split
+# directive) — the extraction half of the skill split: registers a NEW
+# skill carrying the generic knowledge-extraction procedure (read corpus
+# once, extract predicates, persist via das-write/add-atom, record
+# receipts, write checkpoint manifest). The skill description is the
+# surface the LLM sees; the handler clause binds to the Python module
+# that implements the checkpoint manifest writer (R3).
+
+- name: das-extract-knowledge
+  loader: metta
+  location: "{REPO}/plugins/das-extract-knowledge"
+
+# Appended: the das-grounded-reasoning plugin (2026-11-01, skill-split
+# directive) — the reasoning half of the skill split: registers a NEW
+# skill carrying the generic grounded-reasoning procedure (read
+# checkpoint manifest, formalize question into MeTTa, retrieve from
+# DAS, answer strictly from stored facts). The handler clause binds to
+# the Python module that implements the checkpoint manifest reader
+# (R3).
+
+- name: das-grounded-reasoning
+  loader: metta
+  location: "{REPO}/plugins/das-grounded-reasoning"
