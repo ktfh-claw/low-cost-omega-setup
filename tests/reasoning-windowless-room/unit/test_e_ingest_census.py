@@ -151,7 +151,10 @@ def test_grade_case_persists_census_before_reconstruction_failure():
             run_benchmark._read_facts_index = lambda args: ""
             expected = {"count": 1, "matched": [V4_RECEIPT],
                         "window": ["setup-time", "grade-time"]}
-            run_benchmark._census_persist_receipts = lambda since, until: expected
+            # v2 two-phase: grade_case may pass extra_logs= (phase-1
+            # docker-log snapshot text; empty when no snapshot exists)
+            run_benchmark._census_persist_receipts = (
+                lambda since, until, extra_logs="": expected)
             run_benchmark._run_reconstruction = lambda *a: (_ for _ in ()).throw(
                 RuntimeError("forced reconstruction failure"))
             run_benchmark._now_iso = lambda: "grade-time"
