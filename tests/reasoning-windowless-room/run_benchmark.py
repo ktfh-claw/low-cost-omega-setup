@@ -1397,6 +1397,19 @@ def setup_case(args, phase: str = None) -> int:
         print(f"[setup-case] history trimmed to the per-case window marker "
               f"(case {args.case}; prior content archived in {snap.name})")
 
+    stale_manifests: list[str] = []
+    if phase == "extraction":
+        # v2 phase-1 hygiene: a stale manifest from a previous/aborted run
+        # would satisfy the extraction prompt's STOP rule on the first wake
+        # cycle ("manifest already written -> do NOTHING") and the phase-1
+        # boundary poll would never fire. Archive any pre-existing manifests
+        # BEFORE the prompt goes in, so the namespace starts empty.
+        try:
+            stale_manifests = _sweep_stale_manifests(args)
+        except RuntimeError as e:
+            print(f"[setup-case] ERROR: stale-manifest sweep failed: {e}")
+            return GATE_ERROR
+
     if phase == "extraction":
         rendered = _render_extraction_prompt(args, case)
     elif phase == "reasoning":
@@ -1419,6 +1432,7 @@ def setup_case(args, phase: str = None) -> int:
         "case_id": args.case, "prompt_installed": True,
         "window_start_snapshot": str(snap), "restarted_at": _now_iso(),
         "history_trimmed": trimmed,
+        "stale_manifests_archived": stale_manifests,
     }
     if phase in ("extraction", "reasoning"):
         # phase-specific records: setup-extraction-case-<case>.json (the
@@ -1484,6 +1498,46 @@ def _manifest_census(args) -> list[dict]:
             continue
         out.append({"name": parts[1], "mtime": mtime})
     return out
+
+
+def _sweep_stale_manifests(args) -> list[str]:
+    """v2 phase-1 hygiene: archive pre-existing checkpoint manifests out
+    of knowledge-checkpoints/ before a case's EXTRACTION phase installs
+    its prompt.
+
+    A stale manifest (left over from a previous/aborted run) makes the
+    extraction agent's STOP rule fire on its FIRST wake cycle (the
+    extraction prompt says a wake cycle that finds the manifest already
+    written must do NOTHING) — the phase-1 boundary poll then never sees
+    a fresh manifest and the case degrades to grade-as-is with phase 2
+    skipped. The sweep moves every *.md in the checkpoint dir into an
+    in-volume archive subdir (kept for provenance, never deleted) so
+    each phase 1 starts from an empty boundary namespace. Same hygiene
+    class as cleanup-das: infra state hygiene, NOT a gate change.
+
+    Returns the sorted list of archived manifest names (empty when the
+    dir was already clean). Raises RuntimeError on any archive failure —
+    a contaminated boundary namespace must fail the setup loudly, not
+    degrade silently.
+    """
+    ckpt = _checkpoint_dir(args)
+    names = sorted(m["name"] for m in _manifest_census(args))
+    if not names:
+        return []
+    archive = ckpt / f".archive-pre-{args.run_id}"
+    r = _sudo_run(["mkdir", "-p", str(archive)])
+    if r.returncode != 0:
+        raise RuntimeError(f"archive mkdir failed: {archive}")
+    for n in names:
+        r = _sudo_run(["mv", str(ckpt / n), str(archive / n)])
+        if r.returncode != 0:
+            raise RuntimeError(f"manifest archive mv failed: {n}")
+    left = sorted(m["name"] for m in _manifest_census(args))
+    if left:
+        raise RuntimeError(f"manifest sweep incomplete; still present: {left}")
+    print(f"[setup-case] archived {len(names)} stale checkpoint manifest(s) "
+          f"to {archive.name}/ (phase-1 boundary namespace cleared)")
+    return names
 
 
 def _poll_checkpoint_manifest(args, since_iso: str,
