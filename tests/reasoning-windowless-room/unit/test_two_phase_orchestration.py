@@ -38,6 +38,7 @@ def _args(**kw):
     return type("Args", (), {"run_id": "t-run", "case": "original",
                              "timeout_minutes": 75,
                              "memory_volume": "/tmp/t-run-memvol",
+                             "dry_run": False,
                              **kw})()
 
 
@@ -169,6 +170,142 @@ def test_poll_manifest_appearing_mid_poll():
         assert state["cycle"] == 3
     finally:
         rb._manifest_census = saved
+
+
+# ---------------------------------------------------------------------------
+# phase-1 hygiene: stale-manifest sweep (setup_case phase='extraction')
+# ---------------------------------------------------------------------------
+
+class _FakeCompleted:
+    def __init__(self, rc=0, stdout=""):
+        self.returncode = rc
+        self.stdout = stdout
+
+
+def test_sweep_stale_manifests_archives_into_run_archive():
+    """Stale manifests (previous/aborted runs) are mv'd into the run's
+    in-volume archive dir and the boundary namespace is verified empty
+    afterwards (a leftover would satisfy the extraction STOP rule on
+    the first wake cycle and deadlock the manifest poll)."""
+    calls = []
+    state = {"census": 0}
+
+    def fake_census(args):
+        state["census"] += 1
+        if state["census"] == 1:
+            return [{"name": "windowless-room-original.md", "mtime": 1.0},
+                    {"name": "corpus.md", "mtime": 2.0}]
+        return []
+
+    def fake_sudo(cmd, timeout=None, **kw):
+        calls.append(cmd)
+        return _FakeCompleted()
+
+    saved = (rb._manifest_census, rb._sudo_run)
+    rb._manifest_census = fake_census
+    rb._sudo_run = fake_sudo
+    try:
+        out = rb._sweep_stale_manifests(_args())
+        assert out == ["corpus.md", "windowless-room-original.md"]
+        mkdirs = [c for c in calls if c[0] == "mkdir"]
+        mvs = [c for c in calls if c[0] == "mv"]
+        assert len(mkdirs) == 1 and ".archive-pre-t-run" in mkdirs[0][-1]
+        assert len(mvs) == 2
+        assert all(".archive-pre-t-run" in c[-1] for c in mvs)
+        # post-mv verification census ran (namespace confirmed empty)
+        assert state["census"] == 2
+    finally:
+        rb._manifest_census, rb._sudo_run = saved
+
+
+def test_sweep_clean_namespace_is_noop():
+    """No stale manifests -> no archive dir, no sudo calls at all."""
+    calls = []
+    saved = (rb._manifest_census, rb._sudo_run)
+    rb._manifest_census = lambda args: []
+    rb._sudo_run = lambda cmd, timeout=None, **kw: calls.append(cmd) or _FakeCompleted()
+    try:
+        assert rb._sweep_stale_manifests(_args()) == []
+        assert calls == []
+    finally:
+        rb._manifest_census, rb._sudo_run = saved
+
+
+def test_sweep_failure_raises_runtime_error():
+    """Any archive failure must raise (setup fails loudly), never
+    degrade silently into a contaminated boundary namespace."""
+    saved = (rb._manifest_census, rb._sudo_run)
+    rb._manifest_census = lambda args: [{"name": "stale.md", "mtime": 1.0}]
+    rb._sudo_run = lambda cmd, timeout=None, **kw: _FakeCompleted(rc=1)
+    try:
+        try:
+            rb._sweep_stale_manifests(_args())
+            raise AssertionError("expected RuntimeError")
+        except RuntimeError:
+            pass
+    finally:
+        rb._manifest_census, rb._sudo_run = saved
+
+
+def test_setup_case_extraction_sweeps_and_records():
+    """Wiring: setup_case(phase='extraction') runs the sweep BEFORE the
+    prompt install and records the archived names in the phase-1 setup
+    JSON; a sweep failure aborts the setup (GATE_ERROR, no restart)."""
+    written = {}
+    sweeps = []
+    restarts = []
+
+    def fake_sweep(args):
+        sweeps.append(args.run_id)
+        if len(sweeps) == 1:
+            return ["stale-a.md", "stale-b.md"]
+        raise RuntimeError("archive mkdir failed")
+
+    with tempfile.TemporaryDirectory() as td:
+        vol = Path(td) / "vol"
+        paths = {
+            "vol": vol, "bench": vol / "bench",
+            "answers": vol / "bench/answers.md",
+            "facts_index": vol / "bench/facts-index.md",
+            "urls": vol / "bench/urls.md",
+            "prompt": vol / "prompt.txt", "state": vol / "omega_state.md",
+            "history": vol / "history.metta",
+        }
+        originals = {
+            name: getattr(rb, name)
+            for name in ("RESULTS_DIR", "_bench_paths",
+                         "_prepare_benchmark_dir", "_sudo_run", "_sudo_write",
+                         "_sweep_stale_manifests", "_render_extraction_prompt",
+                         "_agent_restart", "_write_json")
+        }
+        try:
+            rb.RESULTS_DIR = Path(td) / "results"
+            rb._bench_paths = lambda args: paths
+            rb._prepare_benchmark_dir = lambda args: None
+            rb._sudo_run = lambda cmd, timeout=None, **kw: _FakeCompleted()
+            rb._sudo_write = lambda p, s: True
+            rb._sweep_stale_manifests = fake_sweep
+            rb._render_extraction_prompt = lambda args, case: "EXT PROMPT"
+            rb._agent_restart = lambda: restarts.append(1) or True
+
+            def write_json(path, data):
+                written[str(path)] = data
+
+            rb._write_json = write_json
+            rc = rb.setup_case(_args(), phase="extraction")
+            assert rc == 0
+            assert sweeps == ["t-run"]
+            assert restarts == [1]
+            rec = next(v for k, v in written.items()
+                       if k.endswith("setup-extraction-case-original.json"))
+            assert rec["stale_manifests_archived"] == ["stale-a.md", "stale-b.md"]
+            # sweep failure aborts before prompt install / restart
+            rc2 = rb.setup_case(_args(), phase="extraction")
+            assert rc2 == rb.GATE_ERROR
+            assert len(restarts) == 1
+        finally:
+            for name, value in originals.items():
+                setattr(rb, name, value)
 
 
 # ---------------------------------------------------------------------------
