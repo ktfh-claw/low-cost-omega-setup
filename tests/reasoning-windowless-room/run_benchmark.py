@@ -651,6 +651,19 @@ def _das_write_grammar_v3() -> str:
         return f"error: {e}"
 
 
+def _standby_prompt_clean(args) -> str:
+    """v5 residue guard (sks2-smoke4 lesson): the live prompt must be
+    STANDBY at preflight. A SIGKILLed run leaves the benchmark prompt
+    installed; the next run's first setup-case would back THAT up and
+    the teardown contamination guard would abort only after the whole
+    run window burned. Same "BENCHMARK MODE" marker teardown refuses
+    to restore. Returns "ok" (standby) or "CONTAMINATED" (residue)."""
+    live = _sudo_read(Path(args.memory_volume) / "prompt.txt")
+    if live is None:
+        return "error: prompt.txt unreadable"
+    return "ok" if "BENCHMARK MODE" not in live else "CONTAMINATED"
+
+
 def preflight(args) -> int:
     """Preflight phase: verify environment is ready for the benchmark."""
     _resolve_endpoints(args)
@@ -706,6 +719,16 @@ def preflight(args) -> int:
         # v3: the per-run prompt backup must not pre-exist (fresh run-id rule)
         bp = Path(args.memory_volume) / f"prompt.txt.bak-pre-benchmark-{args.run_id}"
         checks["prompt_backup_fresh"] = "ok" if not _sudo_run(["test", "-f", str(bp)]).returncode == 0 else "EXISTS"
+
+        # v5 (sks2-smoke4 lesson, 2026-11-02): killed-run residue guard.
+        # A SIGKILLed run leaves the benchmark prompt installed; the next
+        # run would back THAT up at its first setup-case and the teardown
+        # contamination guard would abort only AFTER the whole run window
+        # burned (sks2-smoke4: 3 graded cases lost to a teardown abort).
+        # Fail loudly at preflight instead: the live prompt must be standby
+        # (same BENCHMARK MODE marker the teardown guard refuses to
+        # restore). Infra check, not a gate change.
+        checks["standby_prompt_clean"] = _standby_prompt_clean(args)
 
         # v3: skill-description upgrade deployed? (das-retrieve description
         # in the mounted plugin must carry the WHY/WHEN/HOW contract)
@@ -812,6 +835,7 @@ def preflight(args) -> int:
         checks["ledger_repo_format"] = "dry-run"
         checks["memory_volume"] = "dry-run"
         checks["prompt_backup_fresh"] = "dry-run"
+        checks["standby_prompt_clean"] = "dry-run"
         checks["skill_description_upgraded"] = "dry-run"
         checks["das_write_grammar_v3"] = "dry-run"
         checks["metta_skill_upgraded"] = "dry-run"
