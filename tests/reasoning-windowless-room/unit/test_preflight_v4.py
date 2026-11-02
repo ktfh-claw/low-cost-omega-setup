@@ -306,6 +306,53 @@ def test_das_write_grammar_v3_marker_in_repo_artifact():
 
 
 # ---------------------------------------------------------------------------
+# (d) standby_prompt_clean: killed-run residue guard (sks2-smoke4 lesson)
+# ---------------------------------------------------------------------------
+
+def test_standby_prompt_clean_ok_on_standby_prompt():
+    import run_benchmark as rb
+    args = SimpleNamespace(memory_volume="/fake/vol")
+    with ModPatch(_sudo_read=lambda path, timeout=60.0: "You are Omega... (standby)"):
+        value = rb._standby_prompt_clean(args)
+    assert value == "ok"
+    assert _preflight_passes(value)
+
+
+def test_standby_prompt_clean_contaminated_on_benchmark_prompt():
+    import run_benchmark as rb
+    args = SimpleNamespace(memory_volume="/fake/vol")
+    contaminated = "BENCHMARK MODE — case windowless-room original..."
+    with ModPatch(_sudo_read=lambda path, timeout=60.0: contaminated):
+        value = rb._standby_prompt_clean(args)
+    assert value == "CONTAMINATED"
+    # the CONTAMINATED value must actually fail preflight (ok_values)
+    assert not _preflight_passes(value)
+
+
+def test_standby_prompt_clean_unreadable_prompt_is_error():
+    import run_benchmark as rb
+    args = SimpleNamespace(memory_volume="/fake/vol")
+    with ModPatch(_sudo_read=lambda path, timeout=60.0: None):
+        value = rb._standby_prompt_clean(args)
+    assert value.startswith("error:")
+    assert not _preflight_passes(value)
+
+
+def test_standby_prompt_clean_reads_the_live_prompt_path():
+    seen = []
+
+    def sudo_read(path, timeout=60.0):
+        seen.append(str(path))
+        return "standby"
+
+    import run_benchmark as rb
+    args = SimpleNamespace(memory_volume="/fake/vol")
+    with ModPatch(_sudo_read=sudo_read):
+        rb._standby_prompt_clean(args)
+    assert seen == ["/fake/vol/prompt.txt"], seen
+
+
+# ---------------------------------------------------------------------------
 # dry-run integration + the retired-key contract
 # ---------------------------------------------------------------------------
 
@@ -338,6 +385,7 @@ def test_preflight_dry_run_v4_check_names():
     assert "provenance_repo" not in checks
     # unchanged checks keep their dry-run entries
     for name in ("read_proxy_query", "memory_volume", "prompt_backup_fresh",
+                 "standby_prompt_clean",
                  "skill_description_upgraded", "metta_skill_upgraded",
                  "metta_plugin_mounted", "canary_fetch_ai", "judge_smoke"):
         assert checks[name] == "dry-run", name
