@@ -464,6 +464,28 @@ def test_phase_templates_word_count_under_half():
     assert rea < fat // 2, f"reasoning template too fat: {rea} >= {fat//2}"
 
 
+def test_phase_templates_carry_source_url_wiring():
+    """Regression (sks2-smoke2, 2026-11-02): the v2 extraction prompt must
+    wire the add-atom source ref to the urls.txt http(s) URLs — the write
+    bridge rejects container path refs (dasWriteSourceRoots unset), and
+    without the wiring every persist fails and the case never reaches the
+    checkpoint-manifest boundary. The reasoning prompt's re-persist path
+    must reuse the same source refs."""
+    args = _args()
+    case = rb._case_by_id("original")
+    ext = rb._render_extraction_prompt(args, case)
+    rea = rb._render_reasoning_prompt(args, case)
+    for text in (ext, rea):
+        assert "{{URL_LIST_PATH}}" not in text, "template not fully substituted"
+    # extraction: add-atom source ref = urls.txt URL, http(s)-only, receipt-gated
+    assert rb.URLS_PROMPT_REL in ext
+    assert "http(s) URL refs ONLY" in ext
+    assert "BRIDGE-PERSIST-OK" in ext
+    assert "NOT persisted" in ext
+    # reasoning: re-persist path reuses the urls.txt source ref
+    assert rb.URLS_PROMPT_REL in rea
+
+
 # ---------------------------------------------------------------------------
 # full_two_phase orchestration: two prompts, two restarts, snapshot
 # before restart #2, grade-as-is on manifest timeout

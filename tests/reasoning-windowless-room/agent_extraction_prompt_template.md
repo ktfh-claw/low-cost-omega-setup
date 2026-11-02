@@ -21,6 +21,8 @@ This question is CONTEXT: the knowledge base you build in this phase is what a L
 
 Follow the **das-extract-knowledge** skill procedure for this phase: read the background sources ONCE each (bounded single-pass), extract predicates, persist each via das-write (add-atom), record receipts to {{FACTS_INDEX_PATH}}, and write the checkpoint manifest. The skill description carries the full generic procedure; this template wires it to the benchmark's artifact paths.
 
+**Persist wiring (binding):** persist each fact via `(metta "(add-atom &persistent (<expression>) \"<source-url>\" (stv 0.9 0.8))")`, where `<source-url>` is that source file's URL from `{{URL_LIST_PATH}}` — the write bridge accepts http(s) URL refs ONLY (container path refs are rejected). Success is ONLY `BRIDGE-PERSIST-OK: verified=<n> top=<handle>`: a fact without a fresh receipt is NOT persisted — never record it, never pin or claim progress beyond your receipts, and never write the checkpoint manifest or claim STOP unless the receipts and the manifest write actually succeeded.
+
 ### Checkpoint manifest (phase boundary)
 
 The checkpoint manifest is the phase boundary between extraction and reasoning: the extraction phase writes it (recording the extracted predicates, their write receipts/handles, sources, and a timestamp), and the reasoning phase reads it as its entry point into the knowledge base. The manifest lives in the Omega memory volume at `/PeTTa/repos/Omega/memory/knowledge-checkpoints/` (one manifest per corpus). After the extraction phase completes, write the checkpoint manifest recording what was extracted; the reasoning phase reads it to know which predicates exist, verbatim, for query reuse.
