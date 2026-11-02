@@ -536,11 +536,12 @@ def _run_full_two_phase(root, poll_found, manifest_names=("corpus.md",),
             rb.setup_extraction_phase = setup_extraction
             rb.setup_reasoning_phase = setup_reasoning
             rb._poll_checkpoint_manifest = (
-                lambda args, since, timeout_s=None:
+                lambda args, since, timeout_s=None, stall_minutes=0.0:
                 {"found": poll_found,
                  "manifests": list(manifest_names) if poll_found else [],
                  "elapsed_s": 42, "timeout_s": timeout_s or 0,
-                 "poll_interval_s": 30.0, "since_iso": since})
+                 "poll_interval_s": 30.0, "since_iso": since,
+                 "stall_aborted": False})
             rb._snapshot_phase1_logs = (
                 lambda args, since:
                 {"path": str(Path(td) / "t-run/windows/original/"
@@ -655,3 +656,53 @@ def test_full_two_phase_timeout_still_snapshots_phase1_logs():
     assert len(snapped) == 1, "phase-1 snapshot must run once"
     assert grade["per_case"]["original"]["two_phase"]["phase1_snapshot"] \
         == "x"
+
+
+def test_poll_stall_aborts_wait_without_forward_signal():
+    """Phase-1 wait stall watchdog (Delta 3 semantics for extraction):
+    no manifest, no facts-index change, no persist receipt for
+    stall_minutes -> abort the wait early (found=False,
+    stall_aborted=True) instead of burning the case window. The caller
+    grades the case as-is — identical to a timeout, no boundary
+    invented."""
+    saved_census = rb._manifest_census
+    saved_read = rb._sudo_read
+    saved_logs = rb._docker_logs_since
+    rb._manifest_census = lambda args: []
+    rb._sudo_read = lambda p: ""
+    rb._docker_logs_since = lambda c, a, b: ""
+    try:
+        out = rb._poll_checkpoint_manifest(
+            _args(), "2026-11-02T10:00:00Z", timeout_s=300,
+            interval_s=0.005, _sleep=lambda s: None, stall_minutes=0.002)
+        assert out["found"] is False
+        assert out["stall_aborted"] is True
+        assert out["elapsed_s"] < 60  # aborted early, not the 300s bound
+    finally:
+        rb._manifest_census = saved_census
+        rb._sudo_read = saved_read
+        rb._docker_logs_since = saved_logs
+
+
+def test_poll_stall_does_not_fire_while_receipts_flow():
+    """A healthy extraction keeps the wait alive: fresh persist
+    receipts refresh the stall clock, so the poll runs to its timeout
+    (found=False, stall_aborted=False), never aborting a live run."""
+    receipt = ("(COMMAND_RETURN: BRIDGE-PERSIST-OK: verified=1 "
+               "top=" + "a" * 32 + ")")
+    saved_census = rb._manifest_census
+    saved_read = rb._sudo_read
+    saved_logs = rb._docker_logs_since
+    rb._manifest_census = lambda args: []
+    rb._sudo_read = lambda p: ""
+    rb._docker_logs_since = lambda c, a, b: receipt
+    try:
+        out = rb._poll_checkpoint_manifest(
+            _args(), "2026-11-02T10:00:00Z", timeout_s=0.3,
+            interval_s=0.01, _sleep=lambda s: None, stall_minutes=0.002)
+        assert out["found"] is False
+        assert out["stall_aborted"] is False
+    finally:
+        rb._manifest_census = saved_census
+        rb._sudo_read = saved_read
+        rb._docker_logs_since = saved_logs

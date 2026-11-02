@@ -12,10 +12,10 @@ This question is CONTEXT: the knowledge base you build in this phase is what a L
 
 ## TASK LIST — fixed pipeline, each step exactly once, no other work
 
-**Working memory across wake cycles:** tool results do NOT survive from one cycle to the next. Two channels carry state forward:
+**Working memory across wake cycles (binding):** tool results do NOT survive a wake cycle; only two channels carry state forward, and you must drive them actively:
 
-- Your extraction record `{{FACTS_INDEX_PATH}}` (files) — append every expression, query, and `exec` line to it IMMEDIATELY as you produce it, one append per tool result; every recorded `expr` line carries its write's handle (`top=<handle>`). If a result is already recorded, do NOT redo it — reuse this recorded url/handle/expression.
-- Your PINNED LEDGER (`pin` tool) — pinned text re-appears in EVERY following prompt of this run. It is the ONLY tool result that survives a wake cycle.
+- Your extraction record `{{FACTS_INDEX_PATH}}` — after EVERY `BRIDGE-PERSIST-OK` receipt, immediately `append-file` ONE line `expr <the-exact-expression> top=<handle>` (handle copied verbatim from the receipt). If a result is already recorded, do NOT redo it — reuse the recorded url/handle/expression.
+- Your PINNED LEDGER (`pin` tool) — at the START of every wake cycle, make your FIRST tool call a `pin` of a short ledger: `done:` (sources read; facts persisted per source, with receipt counts) and `next:` (one concrete action — the literal next `add-atom` call, or the manifest write). Work only from your ledger + record; never re-read an already-processed source.
 
 ### Phase 1 — EXTRACTION (das-extract-knowledge skill)
 
