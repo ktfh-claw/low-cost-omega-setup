@@ -1543,7 +1543,8 @@ def _sweep_stale_manifests(args) -> list[str]:
 def _poll_checkpoint_manifest(args, since_iso: str,
                               timeout_s: float | None = None,
                               interval_s: float = MANIFEST_POLL_INTERVAL_S,
-                              _sleep=time.sleep) -> dict:
+                              _sleep=time.sleep,
+                              stall_minutes: float = 0.0) -> dict:
     """Poll the memory volume knowledge-checkpoints/ dir for the phase-1
     completion signal: a checkpoint manifest created or modified since
     ``since_iso`` (the phase-1 restart). A manifest only counts when its
@@ -1566,6 +1567,18 @@ def _poll_checkpoint_manifest(args, since_iso: str,
     since_epoch = since_dt.timestamp()
     start = time.time()
     found: list[str] = []
+    # Delta 3 semantics extended to the phase-1 wait (v2): while no
+    # manifest exists, watch the SAME forward signals as the phase-2
+    # watchdog (facts-index content change, fresh persist receipt) and
+    # abort the wait early when the extraction phase stalls — a stalled
+    # extraction would otherwise burn the whole case window polling a
+    # boundary that will never appear. Abort grades the case as-is
+    # (identical to a timeout); the poll NEVER invents a boundary.
+    stall_s = float(stall_minutes or 0) * 60
+    paths = _bench_paths(args) if stall_s > 0 else None
+    facts_state = (_sudo_read(paths["facts_index"]) or "") if paths else None
+    last_signal = time.time()
+    stall_aborted = False
     while time.time() - start < timeout_s:
         for m in _manifest_census(args):
             if m["mtime"] >= since_epoch and m["name"] not in found:
@@ -1576,15 +1589,39 @@ def _poll_checkpoint_manifest(args, since_iso: str,
                   f"{sorted(found)} after {elapsed}s")
             return {"found": True, "manifests": sorted(found),
                     "elapsed_s": elapsed, "timeout_s": timeout_s,
-                    "poll_interval_s": interval_s, "since_iso": since_iso}
+                    "poll_interval_s": interval_s, "since_iso": since_iso,
+                    "stall_aborted": False}
+        if stall_s > 0:
+            facts_now = _sudo_read(paths["facts_index"]) or ""
+            if facts_now != facts_state:
+                facts_state = facts_now
+                last_signal = time.time()
+            else:
+                try:
+                    recent = _docker_logs_since(
+                        CONTAINER_AGENT,
+                        _now_iso_minus_seconds(max(120.0, interval_s * 4)),
+                        _now_iso())
+                    if PERSIST_RECEIPT_RE.search(recent):
+                        last_signal = time.time()
+                except Exception:
+                    pass  # docker-log errors are not gate evidence
+            if time.time() - last_signal >= stall_s:
+                stall_aborted = True
+                break
         _sleep(interval_s)
     elapsed = int(time.time() - start)
-    print(f"[wait-manifest] TIMEOUT: no checkpoint manifest since "
-          f"{since_iso} after {elapsed}s — grading the case as-is "
-          "(no boundary invented)")
+    if stall_aborted:
+        print(f"[wait-manifest] STALL: no forward signal (facts-index "
+              f"change or persist receipt) for {stall_minutes}m after "
+              f"{elapsed}s — grading the case as-is (no boundary invented)")
+    else:
+        print(f"[wait-manifest] TIMEOUT: no checkpoint manifest since "
+              f"{since_iso} after {elapsed}s — grading the case as-is "
+              "(no boundary invented)")
     return {"found": False, "manifests": [], "elapsed_s": elapsed,
             "timeout_s": timeout_s, "poll_interval_s": interval_s,
-            "since_iso": since_iso}
+            "since_iso": since_iso, "stall_aborted": stall_aborted}
 
 
 def _snapshot_phase1_logs(args, since_iso: str) -> dict:
@@ -1641,7 +1678,9 @@ def wait_manifest(args) -> int:
         return 0
     timeout_s = float(getattr(args, "phase_timeout_minutes", 0) or 0) * 60 \
         or None
-    out = _poll_checkpoint_manifest(args, since_iso, timeout_s=timeout_s)
+    out = _poll_checkpoint_manifest(
+        args, since_iso, timeout_s=timeout_s,
+        stall_minutes=float(getattr(args, "stall_minutes", 0) or 0))
     _write_json(rd / f"wait-manifest-{args.case}.json", out)
     return 0 if out["found"] else 1
 
@@ -2349,7 +2388,8 @@ def full_two_phase(args) -> int:
             phase_timeout_s = float(
                 getattr(args, "phase_timeout_minutes", 0) or 0) * 60 or None
             poll = _poll_checkpoint_manifest(
-                args, since_iso, timeout_s=phase_timeout_s)
+                args, since_iso, timeout_s=phase_timeout_s,
+                stall_minutes=float(getattr(args, "stall_minutes", 0) or 0))
             _write_json(RESULTS_DIR / args.run_id
                         / f"wait-manifest-{case_id}.json", poll)
 
