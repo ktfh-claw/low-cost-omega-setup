@@ -313,21 +313,34 @@ DEFAULT_STALL_MINUTES = 15
 LEDGER_PIN_RE = re.compile(r'COMMAND_RETURN: \(\(pin "(LEDGER: [^"]*)"')
 
 
-def _census_ledger_pins(since_iso: str, until_iso: str) -> dict:
+def _census_ledger_pins(since_iso: str, until_iso: str,
+                        extra_logs: str = "") -> dict:
     """Collect the LEDGER lines the agent actually PINNED (emission lane,
     COMMAND_RETURN only), in order, bounded by [since, until].
+
+    extra_logs (v2 two-phase): phase-1 container log text snapshotted
+    BEFORE the phase-2 restart (the container is rm'd at the restart, so
+    its live logs cover only the phase-2 window) — scanned with the same
+    emission-lane rules and PREPENDED to the live window's pins.
 
     Docker/log errors are NOT gate evidence: empty pins + ``error``
     recorded (classify_adherence then sees no pinned claim —
     conservative, same failure mode as the persist-receipt census)."""
     out: dict = {"pins": [], "window": [since_iso, until_iso]}
+    logs = extra_logs
     try:
-        logs = _docker_logs_since(CONTAINER_AGENT, since_iso, until_iso)
+        logs += _docker_logs_since(CONTAINER_AGENT, since_iso, until_iso)
     except Exception as e:  # docker down / container gone: not gate evidence
         out["error"] = str(e)[:200]
-        return out
+    if extra_logs:
+        out["extra_source"] = "phase1-docker.log"
+    # v2 two-phase: order-preserving de-dupe of RAW log lines — identical
+    # full lines (timestamp included) only occur when the phase-1 snapshot
+    # window overlaps the live window (phase 2 skipped, graded as-is);
+    # genuine re-emissions carry different timestamps and survive.
+    lines = list(dict.fromkeys(logs.splitlines()))
     pins: list[str] = []
-    for ln in logs.splitlines():
+    for ln in lines:
         if "LLMRequest[" in ln:
             continue  # prompt echo, not an emission
         m = LEDGER_PIN_RE.search(ln)
@@ -417,10 +430,17 @@ class StallWatchdog:
         return (now - self.last_progress) >= self.stall_seconds
 
 
-def _census_persist_receipts(since_iso: str, until_iso: str) -> dict:
+def _census_persist_receipts(since_iso: str, until_iso: str,
+                             extra_logs: str = "") -> dict:
     """Count STRICT v4 persist receipts in the AGENT container's docker
     logs bounded by [since, until] (v17 harness iteration 2,
     wr3o-20261028).
+
+    extra_logs (v2 two-phase): phase-1 container log text snapshotted
+    BEFORE the phase-2 restart (the container is rm'd at the restart, so
+    its live logs cover only the phase-2 window) — scanned with the same
+    STRICT regex + LLMRequest-echo exclusion and MERGED into the live
+    window's matched set, so the census covers the FULL case window.
 
     E_NO_INGEST census surface (spec §8 item 2 DEVIATION — recorded in
     GATES-REFERENCE §5): under v17 transparency the agent no longer
@@ -436,7 +456,9 @@ def _census_persist_receipts(since_iso: str, until_iso: str) -> dict:
     are per-instance: the census is valid LIVE (grade right after the
     case) but a retroactive re-grade of a dead container's window reads
     ZERO — grade-time MUST persist the matched lines into the run dir
-    (persist-receipts-<case>.json) as the durable evidence.
+    (persist-receipts-<case>.json) as the durable evidence. The v2
+    phase-1 snapshot (phase1-docker.log) is exactly this durability for
+    the phase-1 half of the case window.
 
     REQUEST-ECHO EXCLUSION (wr3q-20261028, defect ledger item 3): the
     agent PINS receipts, so receipt text re-appears inside the system
@@ -450,14 +472,22 @@ def _census_persist_receipts(since_iso: str, until_iso: str) -> dict:
     (the gate then sees a zero census — conservative, same failure mode
     as the lossy window it replaces)."""
     out = {"count": 0, "matched": [], "window": [since_iso, until_iso]}
+    logs = extra_logs
+    if extra_logs:
+        out["extra_source"] = "phase1-docker.log"
     try:
-        logs = _docker_logs_since(CONTAINER_AGENT, since_iso, until_iso)
+        logs += _docker_logs_since(CONTAINER_AGENT, since_iso, until_iso)
     except Exception as e:  # docker down / container gone: not gate evidence
         out["error"] = str(e)[:200]
-        return out
-    out["matched"] = [ln.strip() for ln in logs.splitlines()
-                      if PERSIST_RECEIPT_RE.search(ln)
-                      and "LLMRequest[" not in ln]
+    # v2 two-phase: order-preserving de-dupe of raw log lines (timestamp
+    # included) — identical full lines only occur when the phase-1 snapshot
+    # window overlaps the live container window (phase 2 SKIPPED after a
+    # manifest-poll timeout, graded as-is); genuine re-emissions carry
+    # different timestamps and survive. Same line = same receipt.
+    out["matched"] = list(dict.fromkeys(
+        ln.strip() for ln in logs.splitlines()
+        if PERSIST_RECEIPT_RE.search(ln)
+        and "LLMRequest[" not in ln))
     out["count"] = len(out["matched"])
     return out
 
@@ -1229,6 +1259,30 @@ def _render_case_prompt(args, case: dict) -> str:
             .replace("{{FACTS_INDEX_PATH}}", FACTS_INDEX_PROMPT_REL))
 
 
+def _render_extraction_prompt(args, case: dict) -> str:
+    """Render agent_extraction_prompt_template.md for ONE case (v2 two-phase)."""
+    template = (HERE / "agent_extraction_prompt_template.md").read_text(encoding="utf-8")
+    return (template
+            .replace("{{RUN_ID}}", args.run_id)
+            .replace("{{CASE_ID}}", case["id"])
+            .replace("{{QUESTION}}", case["question"])
+            .replace("{{URL_LIST_PATH}}", URLS_PROMPT_REL)
+            .replace("{{ANSWERS_PATH}}", ANSWERS_PROMPT_REL)
+            .replace("{{FACTS_INDEX_PATH}}", FACTS_INDEX_PROMPT_REL))
+
+
+def _render_reasoning_prompt(args, case: dict) -> str:
+    """Render agent_reasoning_prompt_template.md for ONE case (v2 two-phase)."""
+    template = (HERE / "agent_reasoning_prompt_template.md").read_text(encoding="utf-8")
+    return (template
+            .replace("{{RUN_ID}}", args.run_id)
+            .replace("{{CASE_ID}}", case["id"])
+            .replace("{{QUESTION}}", case["question"])
+            .replace("{{URL_LIST_PATH}}", URLS_PROMPT_REL)
+            .replace("{{ANSWERS_PATH}}", ANSWERS_PROMPT_REL)
+            .replace("{{FACTS_INDEX_PATH}}", FACTS_INDEX_PROMPT_REL))
+
+
 def _agent_restart() -> bool:
     r = _sudo_run(["systemctl", "restart", "omega-curiosity.service"], timeout=180.0)
     return r.returncode == 0
@@ -1249,8 +1303,13 @@ def _prepare_benchmark_dir(args) -> None:
 # sequential per-case phases (v3 default)
 # ---------------------------------------------------------------------------
 
-def setup_case(args) -> int:
-    """Install ONE case's standalone question prompt; restart the agent."""
+def setup_case(args, phase: str = None) -> int:
+    """Install ONE case's standalone question prompt; restart the agent.
+
+    When ``phase`` is given ("extraction" or "reasoning"), render the
+    v2 two-phase phase-specific template for that phase; otherwise render
+    the single (fat) template (v1 compatibility).
+    """
     case = _case_by_id(args.case)
     if case is None:
         print(f"[setup-case] ERROR: unknown case id {args.case}")
@@ -1299,7 +1358,7 @@ def setup_case(args) -> int:
         # benchmark dir must be writable by the agent (nobody:nogroup)
         _sudo_run(["chown", "-R", "65534:65534", str(paths["bench"])])
 
-    if first:
+    if first and (not phase or phase == "extraction"):
         # fresh answers.md + facts-index.md at run start (a run that
         # INCLUDES `original` starts from scratch: cleanup-das enforces a
         # clean store, so extraction must begin anew)
@@ -1309,9 +1368,19 @@ def setup_case(args) -> int:
                     f"# Extraction record — {args.run_id}\n"
                     "# One persisted predicate expression per line (append after each add-atom).\n")
 
-    # per-case history snapshot (defines this case's window start)
+    # per-case history snapshot (defines this case's window start). v2
+    # two-phase: each phase also archives a PHASE-SPECIFIC snapshot
+    # (history.pre-extraction-… / history.pre-reasoning-…) so no phase's
+    # window evidence is lost; the plain pre-case anchor is written by
+    # phase 1 (case window start) and RE-anchored by phase 2 (the grade
+    # window becomes the REASONING window — the QUERY and answer live in
+    # phase 2's episodes).
     snap = paths["vol"] / f"history.pre-case-{args.run_id}-{args.case}.metta"
-    _sudo_run(["cp", str(paths["history"]), str(snap)])
+    snap_names = [snap.name]
+    if phase in ("extraction", "reasoning"):
+        snap_names.append(f"history.pre-{phase}-{args.run_id}-{args.case}.metta")
+    for name in snap_names:
+        _sudo_run(["cp", str(paths["history"]), str(paths["vol"] / name)])
 
     # v4 (lever 3): per-case history trim. The snapshot above archives the
     # prior content; resetting history.metta to the comment-only marker means
@@ -1328,7 +1397,12 @@ def setup_case(args) -> int:
         print(f"[setup-case] history trimmed to the per-case window marker "
               f"(case {args.case}; prior content archived in {snap.name})")
 
-    rendered = _render_case_prompt(args, case)
+    if phase == "extraction":
+        rendered = _render_extraction_prompt(args, case)
+    elif phase == "reasoning":
+        rendered = _render_reasoning_prompt(args, case)
+    else:
+        rendered = _render_case_prompt(args, case)
     if not _sudo_write(paths["prompt"], rendered):
         print(f"[setup-case] ERROR: could not write prompt for case {args.case}")
         return GATE_ERROR
@@ -1341,12 +1415,196 @@ def setup_case(args) -> int:
         print(f"[setup-case] ERROR: agent restart failed (case {args.case})")
         return GATE_ERROR
 
-    _write_json(RESULTS_DIR / args.run_id / f"setup-case-{args.case}.json", {
+    setup_record = {
         "case_id": args.case, "prompt_installed": True,
         "window_start_snapshot": str(snap), "restarted_at": _now_iso(),
         "history_trimmed": trimmed,
-    })
+    }
+    if phase in ("extraction", "reasoning"):
+        # phase-specific records: setup-extraction-case-<case>.json (the
+        # CASE window start + phase-1 log-snapshot / manifest-poll anchor)
+        # and setup-reasoning-case-<case>.json (the live census window
+        # start). The plain setup-case-<case>.json keeps the PHASE-1
+        # restart (the case window start grade_case anchors on) — phase 2
+        # must NOT overwrite it.
+        setup_record["phase"] = phase
+        _write_json(RESULTS_DIR / args.run_id
+                    / f"setup-{phase}-case-{args.case}.json", setup_record)
+        if phase == "extraction":
+            _write_json(RESULTS_DIR / args.run_id
+                        / f"setup-case-{args.case}.json", setup_record)
+    else:
+        _write_json(RESULTS_DIR / args.run_id
+                    / f"setup-case-{args.case}.json", setup_record)
     print(f"[setup-case] case {args.case} prompt installed; agent restarted")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# v2 two-phase orchestration (skill-split directive 2026-11-02 08:25 UTC):
+# per-case EXTRACTION phase + REASONING phase as TWO separate agent
+# requests. Phase 1 completes when the checkpoint manifest appears in the
+# memory volume knowledge-checkpoints/ dir (poll ~30s, bounded by the
+# phase timeout; default: the case window). Before the phase-2 restart the
+# phase-1 container docker logs are snapshotted into the run results dir —
+# the systemd unit's start.sh ``rm -f``'s the container on restart, so the
+# phase-1 logs die with it; the E-gate/L1 census lanes read phase-1
+# evidence from this snapshot. On timeout WITHOUT a manifest the case is
+# graded as-is (phase 2 is skipped — the boundary was never reached; the
+# harness never invents one).
+# ---------------------------------------------------------------------------
+
+CHECKPOINT_DIR_REL = "knowledge-checkpoints"
+MANIFEST_POLL_INTERVAL_S = 30.0
+
+PHASE1_LOG_BASENAME = "phase1-docker.log"
+
+
+def _checkpoint_dir(args) -> Path:
+    """The knowledge-checkpoints dir inside the Omega memory volume."""
+    return Path(args.memory_volume) / CHECKPOINT_DIR_REL
+
+
+def _manifest_census(args) -> list[dict]:
+    """Census of knowledge-checkpoints/: [{name, mtime_epoch}] for .md
+    manifests (read-only; sudo — the volume is root-owned)."""
+    ckpt = _checkpoint_dir(args)
+    r = _sudo_run(["find", str(ckpt), "-maxdepth", "1", "-name", "*.md",
+                   "-printf", "%T@ %f\\n"], timeout=30.0)
+    if r.returncode != 0:
+        return []
+    out: list[dict] = []
+    for ln in (r.stdout or "").splitlines():
+        parts = ln.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        try:
+            mtime = float(parts[0])
+        except ValueError:
+            continue
+        out.append({"name": parts[1], "mtime": mtime})
+    return out
+
+
+def _poll_checkpoint_manifest(args, since_iso: str,
+                              timeout_s: float | None = None,
+                              interval_s: float = MANIFEST_POLL_INTERVAL_S,
+                              _sleep=time.sleep) -> dict:
+    """Poll the memory volume knowledge-checkpoints/ dir for the phase-1
+    completion signal: a checkpoint manifest created or modified since
+    ``since_iso`` (the phase-1 restart). A manifest only counts when its
+    mtime is >= since_iso — a stale manifest from a previous run is NOT
+    this case's boundary (the extraction skill appends to the manifest,
+    so an append updates the mtime and counts; a brand-new file counts
+    too). Bounded interval, bounded by the phase timeout (default: the
+    case window). On timeout WITHOUT a manifest the caller grades the
+    case as-is — this poll NEVER invents a boundary.
+
+    Returns {"found": bool, "manifests": [names], "elapsed_s": int,
+    "timeout_s": float, "poll_interval_s": float, "since_iso": str}.
+    """
+    if timeout_s is None:
+        timeout_s = float(getattr(args, "timeout_minutes", 75) * 60)
+    if timeout_s <= 0:
+        timeout_s = 1.0
+    since_dt = datetime.strptime(since_iso, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=timezone.utc)
+    since_epoch = since_dt.timestamp()
+    start = time.time()
+    found: list[str] = []
+    while time.time() - start < timeout_s:
+        for m in _manifest_census(args):
+            if m["mtime"] >= since_epoch and m["name"] not in found:
+                found.append(m["name"])
+        if found:
+            elapsed = int(time.time() - start)
+            print(f"[wait-manifest] phase-1 boundary reached: manifest(s) "
+                  f"{sorted(found)} after {elapsed}s")
+            return {"found": True, "manifests": sorted(found),
+                    "elapsed_s": elapsed, "timeout_s": timeout_s,
+                    "poll_interval_s": interval_s, "since_iso": since_iso}
+        _sleep(interval_s)
+    elapsed = int(time.time() - start)
+    print(f"[wait-manifest] TIMEOUT: no checkpoint manifest since "
+          f"{since_iso} after {elapsed}s — grading the case as-is "
+          "(no boundary invented)")
+    return {"found": False, "manifests": [], "elapsed_s": elapsed,
+            "timeout_s": timeout_s, "poll_interval_s": interval_s,
+            "since_iso": since_iso}
+
+
+def _snapshot_phase1_logs(args, since_iso: str) -> dict:
+    """Snapshot the phase-1 container docker logs (since case start ISO)
+    into results/<run-id>/windows/<case>/phase1-docker.log — BEFORE the
+    phase-2 restart (the systemd unit's start.sh ``rm -f``'s the
+    container on restart; the logs die with it). The E-gate / L1 census
+    lanes read phase-1 evidence from this snapshot.
+
+    Returns {"path": str, "bytes": int} or {"path": str, "error": str}
+    (a docker failure is recorded, never raised — but the snapshot MUST
+    be attempted before any restart destroys the container).
+    """
+    rd = RESULTS_DIR / args.run_id / "windows" / args.case
+    rd.mkdir(parents=True, exist_ok=True)
+    out_path = rd / PHASE1_LOG_BASENAME
+    try:
+        logs = _docker_logs_since(CONTAINER_AGENT, since_iso, _now_iso())
+        out_path.write_text(logs, encoding="utf-8")
+        print(f"[snapshot-phase1] {out_path} ({len(logs)} bytes, "
+              f"since {since_iso})")
+        return {"path": str(out_path), "bytes": len(logs)}
+    except Exception as e:
+        out_path.write_text("", encoding="utf-8")
+        print(f"[snapshot-phase1] ERROR: {e} (empty snapshot recorded at "
+              f"{out_path})")
+        return {"path": str(out_path), "error": str(e)[:200]}
+
+
+def setup_extraction_phase(args) -> int:
+    """v2 phase 1 (EXTRACTION): install the extraction prompt; restart."""
+    return setup_case(args, phase="extraction")
+
+
+def setup_reasoning_phase(args) -> int:
+    """v2 phase 2 (REASONING): install the reasoning prompt; restart the
+    agent with fresh/trimmed history (no inherited phase-1 wake-cycle
+    context — the agent relies only on the checkpoint manifest, the DAS
+    KB, and the on-disk facts-index)."""
+    return setup_case(args, phase="reasoning")
+
+
+def wait_manifest(args) -> int:
+    """v2 phase-1 completion: poll for the checkpoint manifest (the phase
+    boundary). Exit 0 = boundary reached; 1 = timeout without a manifest
+    (the caller grades the case as-is)."""
+    rd = RESULTS_DIR / args.run_id
+    setup_json = _load_json(rd / f"setup-extraction-case-{args.case}.json") \
+        or _load_json(rd / f"setup-case-{args.case}.json") or {}
+    since_iso = setup_json.get("restarted_at") or _now_iso()
+    if args.dry_run:
+        print(f"[wait-manifest] [dry-run] would poll "
+              f"{_checkpoint_dir(args)} for a manifest since {since_iso}")
+        return 0
+    timeout_s = float(getattr(args, "phase_timeout_minutes", 0) or 0) * 60 \
+        or None
+    out = _poll_checkpoint_manifest(args, since_iso, timeout_s=timeout_s)
+    _write_json(rd / f"wait-manifest-{args.case}.json", out)
+    return 0 if out["found"] else 1
+
+
+def snapshot_phase1_logs(args) -> int:
+    """v2: snapshot the phase-1 container logs before the phase-2 restart."""
+    if args.dry_run:
+        print(f"[snapshot-phase1] [dry-run] would snapshot "
+              f"{CONTAINER_AGENT} docker logs into results/{args.run_id}/"
+              f"windows/{args.case}/{PHASE1_LOG_BASENAME}")
+        return 0
+    rd = RESULTS_DIR / args.run_id
+    setup_json = _load_json(rd / f"setup-extraction-case-{args.case}.json") \
+        or _load_json(rd / f"setup-case-{args.case}.json") or {}
+    since_iso = setup_json.get("restarted_at") or _now_iso()
+    out = _snapshot_phase1_logs(args, since_iso)
+    _write_json(rd / f"snapshot-phase1-{args.case}.json", out)
     return 0
 
 
@@ -1636,9 +1894,29 @@ def grade_case(args) -> int:
     # this durable, live-only evidence BEFORE the reconstruction lane.  A
     # reconstruction harness failure must not discard the agent container's
     # per-instance logs; after a restart they cannot be recovered.
+    # v2 two-phase wiring: the CASE window starts at the PHASE-1 restart
+    # (setup-case JSON keeps it); the live container only carries the
+    # PHASE-2 logs (the phase-1 container was rm'd at the phase-2
+    # restart), so phase-1 evidence is read from the phase1-docker.log
+    # snapshot (results/<run-id>/windows/<case>/) and merged into the
+    # census. The Q-gate attestation lane reads the PERSISTENT read-proxy
+    # / query-engine logs, which survive agent restarts, so it keeps the
+    # full case window [phase-1 restart, now].
     setup_json = _load_json(rd / f"setup-case-{args.case}.json") or {}
     since_iso = setup_json.get("restarted_at") or _now_iso()
-    receipt_census = _census_persist_receipts(since_iso, _now_iso())
+    phase1_log_path = rd / "windows" / args.case / PHASE1_LOG_BASENAME
+    phase1_logs = ""
+    if phase1_log_path.is_file():
+        try:
+            phase1_logs = phase1_log_path.read_text(encoding="utf-8",
+                                                    errors="replace")
+        except OSError:
+            phase1_logs = ""
+    reasoning_json = _load_json(
+        rd / f"setup-reasoning-case-{args.case}.json") or {}
+    live_since_iso = reasoning_json.get("restarted_at") or since_iso
+    receipt_census = _census_persist_receipts(live_since_iso, _now_iso(),
+                                               extra_logs=phase1_logs)
     _write_json(rd / f"persist-receipts-{args.case}.json", receipt_census)
     window_receipt_count = len(persist_receipts)
     if receipt_census.get("count", 0) > 0:
@@ -1649,7 +1927,10 @@ def grade_case(args) -> int:
     # answers.md block state, from the docker-log pin emission lane. The
     # census is persisted BEFORE the reconstruction lane (same ordering
     # discipline as the persist-receipt census: live-only evidence first).
-    ledger_pin_census = _census_ledger_pins(since_iso, _now_iso())
+    # v2: phase-1 pins come from the phase1-docker.log snapshot (same
+    # merge as the persist-receipt census).
+    ledger_pin_census = _census_ledger_pins(live_since_iso, _now_iso(),
+                                            extra_logs=phase1_logs)
     _write_json(rd / f"ledger-pins-{args.case}.json", ledger_pin_census)
     adherence = _adherence_lane(args.case, ledger_pin_census, answers)
 
@@ -1804,7 +2085,7 @@ def teardown(args) -> int:
         # EACCES (live wr3-20261023), so list via sudo instead.
         if not getattr(args, "keep_snapshots", False):
             r = _sudo_run(["sh", "-c",
-                           rf"ls -1 '{paths['vol']}' | grep -E '^history\.(pre|post)-case-{re.escape(args.run_id)}-'"],
+                           rf"ls -1 '{paths['vol']}' | grep -E '^history\.(pre|post)-(case|extraction|reasoning)-{re.escape(args.run_id)}-'"],
                           timeout=30.0)
             for name in (r.stdout or "").split():
                 _sudo_run(["rm", "-f", str(paths["vol"] / name)])
@@ -1826,7 +2107,9 @@ def teardown(args) -> int:
 
 def _copy_window_artifacts(args, case_id: str) -> None:
     """Copy the per-case volume snapshots into results/ before teardown
-    removes them (grade_case reads them live; report reads the copies)."""
+    removes them (grade_case reads them live; report reads the copies).
+    v2 two-phase: also copies the phase-specific pre-extraction /
+    pre-reasoning snapshots (phase window evidence)."""
     paths = _bench_paths(args)
     rd = RESULTS_DIR / args.run_id / "windows" / case_id
     rd.mkdir(parents=True, exist_ok=True)
@@ -1834,6 +2117,10 @@ def _copy_window_artifacts(args, case_id: str) -> None:
         src = paths["vol"] / f"history.{kind}-case-{args.run_id}-{case_id}.metta"
         if _sudo_run(["test", "-f", str(src)]).returncode == 0:
             _sudo_run(["cp", str(src), str(rd / f"{kind}.metta")])
+    for phase in ("extraction", "reasoning"):
+        src = paths["vol"] / f"history.pre-{phase}-{args.run_id}-{case_id}.metta"
+        if _sudo_run(["test", "-f", str(src)]).returncode == 0:
+            _sudo_run(["cp", str(src), str(rd / f"pre-{phase}.metta")])
 
 
 def full_sequential(args) -> int:
@@ -1936,6 +2223,164 @@ def full_sequential(args) -> int:
         print("\n[full] HARNESS ERROR — see logs above")
         return GATE_ERROR
     print(f"\n[full] GATE SIGNAL: {'PASS (0)' if gate_exit == GATE_PASS else 'FAIL (2)'}")
+    return gate_exit
+
+
+def full_two_phase(args) -> int:
+    """v2 (skill-split two-phase, directive 2026-11-02 08:25 UTC):
+    preflight -> cleanup-das -> per case (EXTRACTION phase: prompt +
+    restart + checkpoint-manifest poll -> phase-1 docker-log SNAPSHOT ->
+    REASONING phase: prompt + fresh restart -> answer -> grade,
+    independent) -> report -> teardown (always).
+
+    Per case this drives TWO separate agent requests: the phase-1
+    boundary is the checkpoint manifest appearing in the memory volume
+    knowledge-checkpoints/ dir (poll ~30s, bounded by --phase-timeout
+    minutes, default the case window). The phase-1 container logs are
+    snapshotted into results/<run-id>/windows/<case>/phase1-docker.log
+    BEFORE the phase-2 restart (the systemd unit rm -f's the container
+    on restart — the logs die with it). On manifest-poll timeout WITHOUT
+    a manifest the case is graded as-is (phase 2 is skipped — the
+    boundary was never reached and is never invented).
+
+    --cases limits the sequence to a subset (iteration mode).
+    """
+    facts_mod = _facts_mod()
+    all_ids = [c["id"] for c in facts_mod.TEST_CASES]
+    if getattr(args, "cases", ""):
+        wanted = [c.strip() for c in args.cases.split(",") if c.strip()]
+        unknown = [c for c in wanted if c not in all_ids]
+        if unknown:
+            print(f"[full-two-phase] ERROR: unknown case ids in --cases: "
+                  f"{unknown} (valid: {all_ids})")
+            return GATE_ERROR
+        case_ids = [c for c in all_ids if c in set(wanted)]
+        print(f"[full-two-phase] --cases filter active: running {case_ids}")
+    else:
+        case_ids = list(all_ids)
+    gate_exit = GATE_PASS
+    harness_error = False
+
+    phases = [("preflight", preflight), ("cleanup-das", cleanup_das)]
+    for name, fn in phases:
+        print(f"\n[full-two-phase] === {name} ===")
+        out = RESULTS_DIR / args.run_id / f"{name}.json"
+        if out.exists() and not args.force:
+            print(f"[full-two-phase] {name}.json exists — skipping (--force re-runs)")
+            continue
+        rc = fn(args)
+        if rc != 0:
+            print(f"[full-two-phase] {name} FAILED (exit {rc})")
+            harness_error = True
+            break
+
+    per_case = {}
+    if not harness_error:
+        for case_id in case_ids:
+            print(f"\n[full-two-phase] === CASE {case_id} ===")
+            args.case = case_id  # per-case phases read args.case
+
+            # --- phase 1: EXTRACTION (prompt + restart #1) ---
+            rc = setup_extraction_phase(args)
+            if rc != 0:
+                harness_error = True
+                per_case[case_id] = {"verdict": "ERROR", "phase": "setup-extraction"}
+                continue
+
+            # --- phase boundary: manifest poll (bounded by phase timeout) ---
+            setup_json = (_load_json(
+                RESULTS_DIR / args.run_id
+                / f"setup-extraction-case-{case_id}.json") or {})
+            since_iso = setup_json.get("restarted_at") or _now_iso()
+            phase_timeout_s = float(
+                getattr(args, "phase_timeout_minutes", 0) or 0) * 60 or None
+            poll = _poll_checkpoint_manifest(
+                args, since_iso, timeout_s=phase_timeout_s)
+            _write_json(RESULTS_DIR / args.run_id
+                        / f"wait-manifest-{case_id}.json", poll)
+
+            # --- CRITICAL: snapshot phase-1 docker logs BEFORE the
+            # phase-2 restart (the container is rm'd at the restart;
+            # its logs die with it) ---
+            snap = _snapshot_phase1_logs(args, since_iso)
+            _write_json(RESULTS_DIR / args.run_id
+                        / f"snapshot-phase1-{case_id}.json", snap)
+
+            if not poll["found"]:
+                # timeout WITHOUT a manifest: grade the case AS-IS —
+                # phase 2 is skipped (the boundary was never reached;
+                # the harness never invents one). The case fails
+                # truthfully on the current state.
+                print(f"[full-two-phase] case {case_id}: no checkpoint "
+                      "manifest — grading as-is (phase 2 skipped)")
+            else:
+                # --- phase 2: REASONING (prompt + restart #2, fresh
+                # trimmed history — no inherited phase-1 context) ---
+                rc = setup_reasoning_phase(args)
+                if rc != 0:
+                    harness_error = True
+                    per_case[case_id] = {"verdict": "ERROR",
+                                         "phase": "setup-reasoning"}
+                    continue
+                rc = agent_case(args)
+                if rc != 0:
+                    # timeout is a case failure, not a harness error
+                    print(f"[full-two-phase] case {case_id}: agent timeout "
+                          "— grading anyway")
+
+            rc = grade_case(args)
+            _copy_window_artifacts(args, case_id)
+            g = _load_json(RESULTS_DIR / args.run_id
+                           / f"grade-case-{case_id}.json") or {}
+            per_case[case_id] = {
+                "verdict": g.get("verdict", "FAIL"),
+                "conditions": g.get("conditions", []),
+                "mechanism_verdict": g.get("mechanism_verdict",
+                                            g.get("verdict", "FAIL")),
+                "adherence_conditions": g.get("adherence_conditions", []),
+                "adherence_evidence": g.get("adherence_evidence", {}),
+                "two_phase": {
+                    "manifest_found": poll["found"],
+                    "manifests": poll.get("manifests", []),
+                    "manifest_poll_elapsed_s": poll.get("elapsed_s"),
+                    "phase1_snapshot": snap.get("path"),
+                },
+            }
+            if rc == GATE_ERROR:
+                harness_error = True
+            elif rc == GATE_FAIL:
+                gate_exit = GATE_FAIL
+            # every case graded independently; continue to the next regardless
+
+    cases_passed = sum(1 for v in per_case.values() if v.get("verdict") == "PASS")
+    adherence_clean = sum(1 for v in per_case.values()
+                          if not v.get("adherence_conditions"))
+    summary = {
+        "run_id": args.run_id,
+        "mode": "sequential-two-phase",
+        "gate_verdict": "PASS" if (cases_passed == len(case_ids) and not harness_error) else "FAIL",
+        "cases_passed": cases_passed,
+        "cases_total": len(case_ids),
+        "adherence_clean_cases": adherence_clean,
+        "per_case": per_case,
+        "timestamp": _now_iso(),
+    }
+    _write_json(RESULTS_DIR / args.run_id / "grade.json", summary)
+
+    if not args.skip_report:
+        print("\n[full-two-phase] === report ===")
+        report(args)
+
+    print("\n[full-two-phase] === teardown ===")
+    td_rc = teardown(args)
+    if td_rc != 0:
+        harness_error = True
+
+    if harness_error:
+        print("\n[full-two-phase] HARNESS ERROR — see logs above")
+        return GATE_ERROR
+    print(f"\n[full-two-phase] GATE SIGNAL: "
+          f"{'PASS (0)' if gate_exit == GATE_PASS else 'FAIL (2)'}")
     return gate_exit
 
 
@@ -2323,6 +2768,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_case_args(add_common(subparsers.add_parser("setup-case")))
     add_case_args(add_common(subparsers.add_parser("agent-case")))
+
+    # v2 two-phase (skill-split directive 2026-11-02): per-case phase
+    # subcommands. setup-extraction-case / setup-reasoning-case install
+    # the phase-specific prompt + restart; wait-manifest polls the
+    # knowledge-checkpoints/ dir for the phase-1 boundary; snapshot-
+    # phase1-logs snapshots the phase-1 container logs BEFORE the
+    # phase-2 restart.
+    def add_phase_timeout(p):
+        p.add_argument("--phase-timeout-minutes", type=int, default=0,
+                       help="manifest-poll timeout in minutes (default 0 "
+                            "= the case window, --timeout-minutes)")
+        return p
+
+    add_case_args(add_phase_timeout(
+        add_common(subparsers.add_parser("setup-extraction-case"))))
+    add_case_args(add_phase_timeout(
+        add_common(subparsers.add_parser("wait-manifest"))))
+    add_case_args(add_phase_timeout(
+        add_common(subparsers.add_parser("snapshot-phase1-logs"))))
+    add_case_args(add_phase_timeout(
+        add_common(subparsers.add_parser("setup-reasoning-case"))))
+
     gp = add_common(subparsers.add_parser("grade-case"))
     add_case_args(gp)
     gp.add_argument("--facts-index-override", default="")
@@ -2341,6 +2808,11 @@ def build_parser() -> argparse.ArgumentParser:
     fp = add_common(subparsers.add_parser("full"))
     fp.add_argument("--batch", action="store_true",
                     help="v2 all-at-once flow (single prompt with all 7 questions)")
+    fp.add_argument("--two-phase", action="store_true",
+                    help="skill-split v2 flow: per case, an EXTRACTION agent "
+                         "request followed by a REASONING agent request "
+                         "(checkpoint-manifest poll boundary, phase-1 "
+                         "docker-log snapshot before the phase-2 restart)")
     fp.add_argument("--cases", default="",
                     help="comma-separated subset of case ids to run (iteration mode; "
                          "default: all cases sequentially)")
@@ -2348,6 +2820,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="run cleanup-das before the sequential run (default)")
     fp.add_argument("--no-cleanup", dest="cleanup_first", action="store_false")
     fp.add_argument("--timeout-minutes", type=int, default=75)
+    fp.add_argument("--phase-timeout-minutes", type=int, default=0,
+                    help="two-phase manifest-poll timeout in minutes "
+                         "(default 0 = the case window, --timeout-minutes)")
     # L1 delta 3 (Balázs directive 22:54 UTC): stall watchdog — abort
     # a case early when no forward signal (answers.md/facts-index.md
     # change or a fresh persist receipt) arrives for this many minutes;
@@ -2385,6 +2860,11 @@ def main() -> int:
         "setup-case": setup_case, "agent-case": agent_case,
         "grade-case": grade_case, "grade": grade, "report": report,
         "teardown": teardown, "setup": setup, "agent": agent,
+        # v2 two-phase (skill-split): per-case phase subcommands
+        "setup-extraction-case": setup_extraction_phase,
+        "wait-manifest": wait_manifest,
+        "snapshot-phase1-logs": snapshot_phase1_logs,
+        "setup-reasoning-case": setup_reasoning_phase,
     }
 
     if args.phase == "full":
@@ -2396,9 +2876,12 @@ def main() -> int:
                 parents=True, exist_ok=True)
             (RESULTS_DIR / args.run_id / "cleanup-das.json").write_text(
                 json.dumps({"skipped": True}))
+        if getattr(args, "two_phase", False):
+            return full_two_phase(args)
         return full_sequential(args)
 
-    return dispatch[args.phase](args)
+    fn = dispatch[args.phase]
+    return fn(args)
 
 
 if __name__ == "__main__":
